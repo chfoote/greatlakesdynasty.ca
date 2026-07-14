@@ -665,8 +665,8 @@ export default function Home() {
   return (
     <>
       <PageMeta
-        title="Off-Speed Fantasy Baseball"
-        description="Live MLB scores for Off-Speed Fantasy Baseball"
+        title="Great Lakes Dynasty Hockey League"
+        description="Great Lakes Dynasty Hockey League"
       />
 
       <div className="space-y-6">

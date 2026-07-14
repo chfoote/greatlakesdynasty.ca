@@ -142,7 +142,7 @@ export default function PitcherStats() {
 
   return (
     <div>
-      <PageMeta title="Off-Speed | Pitcher Stats" description="Pitcher statistics for Off-Speed" />
+      <PageMeta title="Great Lakes Dynasty Hockey League" description="Great Lakes Dynasty Hockey League" />
       <PageBreadcrumb pageTitle="Pitcher Stats" />
       <div className="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:px-10 xl:py-12">
         <div className="mb-6">

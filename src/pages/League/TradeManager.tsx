@@ -1237,8 +1237,8 @@ export default function TradeManager() {
   return (
     <>
       <PageMeta
-        title="Off-Speed | Trade Manager"
-        description="Preview fantasy baseball trades for Off-Speed"
+        title="Great Lakes Dynasty Hockey League"
+        description="Manage GLDHL fantasy hockey trades"
       />
       <PageBreadcrumb pageTitle="Trade Manager" />
 

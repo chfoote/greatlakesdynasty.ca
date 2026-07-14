@@ -221,8 +221,8 @@ export default function AuctionAdmin() {
   return (
     <>
       <PageMeta
-        title="Off-Speed | Auction Admin"
-        description="Manage auction users and team assignments for Off-Speed"
+        title="Great Lakes Dynasty Hockey League"
+        description="Manage GLDHL auction users and team assignments"
       />
       <PageBreadcrumb pageTitle="Auction Admin" />
 

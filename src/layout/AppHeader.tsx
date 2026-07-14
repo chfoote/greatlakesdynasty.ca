@@ -85,7 +85,7 @@ const AppHeader: React.FC = () => {
 
           <Link to="/" className="lg:hidden">
             <span className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">
-              Off-Speed
+              GLDHL
             </span>
           </Link>
 

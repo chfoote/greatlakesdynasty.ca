@@ -6,10 +6,14 @@ import Label from "../../components/form/Label";
 import Checkbox from "../../components/form/input/Checkbox";
 import {
   createFantasyTeam,
+  createTeamManagerTenure,
   deactivateFantasyTeam,
+  deleteTeamManagerTenure,
   FantasyTeam,
   FantasyTeamInput,
+  FantasyTeamManagerTenure,
   fetchFantasyTeams,
+  fetchTeamManagerTenures,
   updateFantasyTeam,
   uploadTeamLogo,
 } from "../../lib/fantasyTeams";
@@ -23,8 +27,8 @@ const emptyForm: FantasyTeamInput = {
   secondary_color: "#f97316",
   manager_name: "",
   manager_since: "",
-  al_farm_system: "",
-  nl_farm_system: "",
+  eastern_farm_system: "",
+  western_farm_system: "",
   championships: 0,
   runner_up_finishes: 0,
   third_place_finishes: 0,
@@ -41,8 +45,8 @@ function normalizeForm(form: FantasyTeamInput): FantasyTeamInput {
     secondary_color: form.secondary_color || null,
     manager_name: form.manager_name?.trim() || null,
     manager_since: form.manager_since || null,
-    al_farm_system: form.al_farm_system?.trim() || null,
-    nl_farm_system: form.nl_farm_system?.trim() || null,
+    eastern_farm_system: form.eastern_farm_system?.trim() || null,
+    western_farm_system: form.western_farm_system?.trim() || null,
     championships: Number(form.championships) || 0,
     runner_up_finishes: Number(form.runner_up_finishes) || 0,
     third_place_finishes: Number(form.third_place_finishes) || 0,
@@ -60,8 +64,8 @@ function toForm(team: FantasyTeam): FantasyTeamInput {
     secondary_color: team.secondary_color || "#f97316",
     manager_name: team.manager_name || "",
     manager_since: team.manager_since || "",
-    al_farm_system: team.al_farm_system || "",
-    nl_farm_system: team.nl_farm_system || "",
+    eastern_farm_system: team.eastern_farm_system || "",
+    western_farm_system: team.western_farm_system || "",
     championships: team.championships,
     runner_up_finishes: team.runner_up_finishes,
     third_place_finishes: team.third_place_finishes,
@@ -79,6 +83,10 @@ export default function TeamAdmin() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [managerTenures, setManagerTenures] = useState<FantasyTeamManagerTenure[]>([]);
+  const [tenureName, setTenureName] = useState("");
+  const [tenureStart, setTenureStart] = useState(2026);
+  const [tenureEnd, setTenureEnd] = useState<number | "">("");
 
   const activeCount = useMemo(
     () => teams.filter((team) => team.active).length,
@@ -113,6 +121,55 @@ export default function TeamAdmin() {
     setEditingTeam(null);
     setError("");
     setSuccess("");
+    setManagerTenures([]);
+  }
+
+  async function selectTeam(team: FantasyTeam) {
+    setEditingTeam(team);
+    setForm(toForm(team));
+    setError("");
+    setSuccess("");
+    try {
+      setManagerTenures(await fetchTeamManagerTenures(team.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load manager history.");
+    }
+  }
+
+  async function addManagerTenure() {
+    if (!editingTeam || !tenureName.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      await createTeamManagerTenure({
+        fantasy_team_id: editingTeam.id,
+        manager_name: tenureName.trim(),
+        start_season: tenureStart,
+        end_season: tenureEnd === "" ? null : tenureEnd,
+      });
+      setManagerTenures(await fetchTeamManagerTenures(editingTeam.id));
+      setTenureName("");
+      setTenureEnd("");
+      setSuccess("Manager season added.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to add manager season.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeManagerTenure(id: number) {
+    if (!editingTeam) return;
+    setSaving(true);
+    try {
+      await deleteTeamManagerTenure(id);
+      setManagerTenures(await fetchTeamManagerTenures(editingTeam.id));
+      setSuccess("Manager season removed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to remove manager season.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleLogoUpload(file: File | undefined) {
@@ -179,7 +236,7 @@ export default function TeamAdmin() {
 
   return (
     <div>
-      <PageMeta title="Off-Speed | Manage Teams" description="Manage fantasy teams for Off-Speed" />
+      <PageMeta title="Great Lakes Dynasty Hockey League" description="Manage Great Lakes Dynasty Hockey League teams" />
       <PageBreadcrumb pageTitle="Manage Teams" />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -243,7 +300,7 @@ export default function TeamAdmin() {
                               {team.team_name}
                             </p>
                             <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {team.abbreviation}
+                              {team.abbreviation} · Team ID {team.id}
                             </p>
                           </div>
                         </div>
@@ -252,7 +309,7 @@ export default function TeamAdmin() {
                         {team.manager_name || "Unassigned"}
                       </td>
                       <td className="px-3 py-4 text-gray-500 dark:text-gray-400">
-                        {[team.al_farm_system, team.nl_farm_system].filter(Boolean).join(" / ") || "None"}
+                        {[team.eastern_farm_system, team.western_farm_system].filter(Boolean).join(" / ") || "None"}
                       </td>
                       <td className="px-3 py-4 text-gray-500 dark:text-gray-400">
                         {team.championships} / {team.runner_up_finishes} / {team.third_place_finishes}
@@ -272,12 +329,7 @@ export default function TeamAdmin() {
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setEditingTeam(team);
-                              setForm(toForm(team));
-                              setError("");
-                              setSuccess("");
-                            }}
+                            onClick={() => void selectTeam(team)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03]"
                             title="Edit team"
                           >
@@ -315,6 +367,11 @@ export default function TeamAdmin() {
           <h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">
             {editingTeam ? "Edit Team" : "Add Team"}
           </h3>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {editingTeam
+              ? `Team ID ${editingTeam.id} · This ID remains the same when managers change.`
+              : "A permanent team ID will be assigned automatically after the team is created."}
+          </p>
 
           <div className="mt-5 grid gap-4">
             <div>
@@ -323,7 +380,7 @@ export default function TeamAdmin() {
                 id="team_name"
                 value={form.team_name}
                 onChange={(event) => updateField("team_name", event.target.value)}
-                placeholder="Off-Speed Aces"
+                placeholder="Great Lakes Aces"
               />
             </div>
 
@@ -397,23 +454,55 @@ export default function TeamAdmin() {
               />
             </div>
 
+            {editingTeam && (
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white/90">Manager History by Season</p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Add each manager to Team ID {editingTeam.id}. Leave the end season blank for the current manager.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {managerTenures.map((tenure) => (
+                    <div key={tenure.id} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-gray-600 dark:text-gray-300">
+                        {tenure.manager_name}: {tenure.start_season}–{tenure.end_season || "present"}
+                      </span>
+                      <button type="button" onClick={() => void removeManagerTenure(tenure.id)} className="text-error-600 hover:underline" disabled={saving}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  {managerTenures.length === 0 && <p className="text-xs text-gray-500">No seasonal manager history yet.</p>}
+                </div>
+                <div className="mt-4 grid gap-3">
+                  <Input value={tenureName} onChange={(event) => setTenureName(event.target.value)} placeholder="Manager name" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input type="number" min="2026" step={1} value={tenureStart} onChange={(event) => setTenureStart(Number(event.target.value))} placeholder="Start season" />
+                    <Input type="number" min={String(tenureStart)} step={1} value={tenureEnd} onChange={(event) => setTenureEnd(event.target.value ? Number(event.target.value) : "")} placeholder="End (blank = current)" />
+                  </div>
+                  <button type="button" onClick={() => void addManagerTenure()} disabled={saving || !tenureName.trim()} className="rounded-lg border border-brand-500 px-3 py-2 text-sm font-medium text-brand-500 disabled:opacity-50">
+                    Add Manager Season
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div>
-              <Label htmlFor="al_farm_system">AL Farm System</Label>
+              <Label htmlFor="eastern_farm_system">Eastern Farm System</Label>
               <Input
-                id="al_farm_system"
-                value={form.al_farm_system || ""}
-                onChange={(event) => updateField("al_farm_system", event.target.value)}
-                placeholder="Toronto Blue Jays"
+                id="eastern_farm_system"
+                value={form.eastern_farm_system || ""}
+                onChange={(event) => updateField("eastern_farm_system", event.target.value)}
+                placeholder="Toronto Maple Leafs"
               />
             </div>
 
             <div>
-              <Label htmlFor="nl_farm_system">NL Farm System</Label>
+              <Label htmlFor="western_farm_system">Western Farm System</Label>
               <Input
-                id="nl_farm_system"
-                value={form.nl_farm_system || ""}
-                onChange={(event) => updateField("nl_farm_system", event.target.value)}
-                placeholder="New York Mets"
+                id="western_farm_system"
+                value={form.western_farm_system || ""}
+                onChange={(event) => updateField("western_farm_system", event.target.value)}
+                placeholder="Vancouver Canucks"
               />
             </div>
 

@@ -279,8 +279,8 @@ export default function Standings() {
   return (
     <div>
       <PageMeta
-        title="Off-Speed | Standings"
-        description="League standings for Off-Speed"
+        title="Great Lakes Dynasty Hockey League"
+        description="Great Lakes Dynasty Hockey League standings"
       />
       <PageBreadcrumb pageTitle="Standings" />
 

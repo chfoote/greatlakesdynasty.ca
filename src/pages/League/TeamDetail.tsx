@@ -4,7 +4,10 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import {
   FantasyTeam,
+  FantasyTeamManagerTenure,
   fetchFantasyTeamByAbbreviation,
+  fetchTeamManagerTenures,
+  getManagerForSeason,
 } from "../../lib/fantasyTeams";
 import {
   fetchPlayerSeasonsByTeamAndSeason,
@@ -592,6 +595,7 @@ function CapOnlyRosterTable({
 export default function TeamDetail() {
   const { abbreviation = "" } = useParams();
   const [team, setTeam] = useState<FantasyTeam | null>(null);
+  const [managerTenures, setManagerTenures] = useState<FantasyTeamManagerTenure[]>([]);
   const [selectedSeason, setSelectedSeason] = useState(2026);
   const [statsView, setStatsView] = useState<StatsView>("year");
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
@@ -613,10 +617,18 @@ export default function TeamDetail() {
     setError("");
 
     fetchFantasyTeamByAbbreviation(abbreviation)
-      .then(setTeam)
+      .then(async (teamRow) => {
+        setTeam(teamRow);
+        setManagerTenures(teamRow ? await fetchTeamManagerTenures(teamRow.id) : []);
+      })
       .catch((err) => setError(err.message || "Unable to load team."))
       .finally(() => setLoading(false));
   }, [abbreviation]);
+
+  const selectedManager = useMemo(
+    () => getManagerForSeason(managerTenures, selectedSeason),
+    [managerTenures, selectedSeason],
+  );
 
   useEffect(() => {
     if (!team) {
@@ -807,7 +819,7 @@ export default function TeamDetail() {
 
   return (
     <div>
-      <PageMeta title="Off-Speed | Team Detail" description="Fantasy team details for Off-Speed" />
+      <PageMeta title="Great Lakes Dynasty Hockey League" description="GLDHL fantasy team details" />
       <PageBreadcrumb pageTitle={team?.team_name || "Team Detail"} />
 
       {loading && (
@@ -882,23 +894,25 @@ export default function TeamDetail() {
                     Manager
                   </span>
                   <span className="font-medium text-gray-800 dark:text-white/90">
-                    {team.manager_name || "Not set"}
+                    {selectedManager?.manager_name || team.manager_name || "Not set"}
                   </span>
                 </div>
                 <div className="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-800">
                   <span className="block text-xs uppercase text-gray-500 dark:text-gray-400">
-                    Since
+                    Seasons
                   </span>
                   <span className="font-medium text-gray-800 dark:text-white/90">
-                    {formatYear(team.manager_since)}
+                    {selectedManager
+                      ? `${selectedManager.start_season}–${selectedManager.end_season || "present"}`
+                      : formatYear(team.manager_since)}
                   </span>
                 </div>
               </div>
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <DetailItem label="AL Farm System" value={team.al_farm_system || "Not set"} />
-              <DetailItem label="NL Farm System" value={team.nl_farm_system || "Not set"} />
+              <DetailItem label="Eastern Farm System" value={team.eastern_farm_system || "Not set"} />
+              <DetailItem label="Western Farm System" value={team.western_farm_system || "Not set"} />
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-3">

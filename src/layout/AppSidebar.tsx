@@ -39,22 +39,17 @@ const navItems: NavItem[] = [
   },
   {
     icon: <UserCircleIcon />,
-    name: "Batter Stats",
-    path: "/batter-stats",
+    name: "Skater Stats",
+    path: "/skater-stats",
   },
   {
     icon: <TableIcon />,
-    name: "Pitcher Stats",
-    path: "/pitcher-stats",
+    name: "Goalie Stats",
+    path: "/goalie-stats",
   },
 ];
 
 const leagueToolItems: NavItem[] = [
-  {
-    icon: <TableIcon />,
-    name: "Auction House",
-    path: "/auction-house",
-  },
   {
     icon: <TableIcon />,
     name: "Trade Manager",
@@ -63,6 +58,11 @@ const leagueToolItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
+  {
+    icon: <TableIcon />,
+    name: "Auction House",
+    path: "/admin/auction-house",
+  },
   {
     icon: <TableIcon />,
     name: "Manage Teams",
@@ -323,11 +323,11 @@ const AppSidebar: React.FC = () => {
       >
         <Link to="/" className="flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500 text-sm font-semibold text-white">
-            O
+            GL
           </div>
           {(isExpanded || isHovered || isMobileOpen) && (
             <span className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">
-              Off-Speed
+              GLDHL
             </span>
           )}
         </Link>

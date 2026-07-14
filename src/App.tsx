@@ -17,17 +17,17 @@ import FormElements from "./pages/Forms/FormElements";
 import Blank from "./pages/Blank";
 import AppLayout from "./layout/AppLayout";
 import { ScrollToTop } from "./components/common/ScrollToTop";
-import Home from "./pages/Dashboard/Home";
+import HockeyHome from "./pages/Dashboard/HockeyHome";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import AdminRoute from "./components/auth/AdminRoute";
 import Standings from "./pages/League/Standings";
 import Teams from "./pages/League/Teams";
 import Transactions from "./pages/League/Transactions";
-import BatterStats from "./pages/League/BatterStats";
-import PitcherStats from "./pages/League/PitcherStats";
+import SkaterStats from "./pages/League/SkaterStats";
+import GoalieStats from "./pages/League/GoalieStats";
 import PlayerProfile from "./pages/League/PlayerProfile";
 import TeamAdmin from "./pages/League/TeamAdmin";
-import TeamDetail from "./pages/League/TeamDetail";
+import HockeyTeamDetail from "./pages/League/HockeyTeamDetail";
 import PlayerAdmin from "./pages/League/PlayerAdmin";
 import TradeManager from "./pages/League/TradeManager";
 import AuctionHouse from "./pages/League/AuctionHouse";
@@ -42,11 +42,11 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/teams" element={<Teams />} />
-            <Route path="/teams/:abbreviation" element={<TeamDetail />} />
+            <Route path="/teams/:abbreviation" element={<HockeyTeamDetail />} />
 
             {/* Protected Dashboard Layout — requires login */}
             <Route element={<ProtectedRoute />}>
-              <Route index path="/" element={<Home />} />
+              <Route index path="/" element={<HockeyHome />} />
 
               {/* Others Page */}
               <Route path="/profile" element={<UserProfiles />} />
@@ -54,15 +54,17 @@ export default function App() {
               <Route path="/blank" element={<Blank />} />
               <Route path="/standings" element={<Standings />} />
               <Route path="/transactions" element={<Transactions />} />
-              <Route path="/batter-stats" element={<BatterStats />} />
-              <Route path="/pitcher-stats" element={<PitcherStats />} />
+              <Route path="/skater-stats" element={<SkaterStats />} />
+              <Route path="/goalie-stats" element={<GoalieStats />} />
+              <Route path="/batter-stats" element={<SkaterStats />} />
+              <Route path="/pitcher-stats" element={<GoalieStats />} />
               <Route path="/player-profile" element={<PlayerProfile />} />
               <Route path="/trade-manager" element={<TradeManager />} />
               <Route path="/admin/trade-manager" element={<TradeManager />} />
-              <Route path="/auction-house" element={<AuctionHouse />} />
-              <Route path="/admin/auction-house" element={<AuctionHouse />} />
 
               <Route element={<AdminRoute />}>
+                <Route path="/auction-house" element={<AuctionHouse />} />
+                <Route path="/admin/auction-house" element={<AuctionHouse />} />
                 <Route path="/admin/teams" element={<TeamAdmin />} />
                 <Route path="/admin/players" element={<PlayerAdmin />} />
                 <Route path="/admin/trades" element={<TradeAdmin />} />

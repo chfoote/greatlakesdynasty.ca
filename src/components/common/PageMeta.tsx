@@ -1,6 +1,6 @@
 import { HelmetProvider, Helmet } from "react-helmet-async";
 
-const APP_TITLE = "Off-Speed Fanasty Baseball";
+const APP_TITLE = "Great Lakes Dynasty Hockey League";
 
 const PageMeta = ({
   description,

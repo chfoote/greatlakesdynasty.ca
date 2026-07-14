@@ -18,7 +18,7 @@ export default function Teams() {
 
   return (
     <div>
-      <PageMeta title="Off-Speed | Teams" description="League teams for Off-Speed" />
+      <PageMeta title="Great Lakes Dynasty Hockey League" description="Great Lakes Dynasty Hockey League teams" />
       <PageBreadcrumb pageTitle="Teams" />
 
       <div className="rounded-2xl border border-gray-200 bg-white px-5 py-6 dark:border-gray-800 dark:bg-white/[0.03] xl:px-8">
@@ -27,7 +27,7 @@ export default function Teams() {
             League Teams
           </h3>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Active fantasy teams in the Off-Speed league.
+            Active fantasy teams in the Great Lakes Dynasty Hockey League.
           </p>
         </div>
 
@@ -86,23 +86,31 @@ export default function Teams() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex gap-2">
-                  <span
-                    className="h-6 w-6 rounded-full border border-gray-200 dark:border-gray-700"
-                    style={{ backgroundColor: team.primary_color || "#e5e7eb" }}
-                    title="Primary color"
-                  />
-                  <span
-                    className="h-6 w-6 rounded-full border border-gray-200 dark:border-gray-700"
-                    style={{ backgroundColor: team.secondary_color || "#f9fafb" }}
-                    title="Secondary color"
-                  />
+                <div className="mt-4 grid grid-cols-3 gap-2" aria-label="League finishes">
+                  <div className="rounded-lg bg-amber-50 px-2 py-2 text-center dark:bg-amber-500/10">
+                    <span className="block text-lg" aria-hidden="true">🥇</span>
+                    <span className="block text-sm font-semibold text-amber-700 dark:text-amber-300">
+                      {team.championships}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-gray-100 px-2 py-2 text-center dark:bg-gray-500/10">
+                    <span className="block text-lg" aria-hidden="true">🥈</span>
+                    <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      {team.runner_up_finishes}
+                    </span>
+                  </div>
+                  <div className="rounded-lg bg-orange-50 px-2 py-2 text-center dark:bg-orange-500/10">
+                    <span className="block text-lg" aria-hidden="true">🥉</span>
+                    <span className="block text-sm font-semibold text-orange-700 dark:text-orange-300">
+                      {team.third_place_finishes}
+                    </span>
+                  </div>
                 </div>
 
-                {(team.al_farm_system || team.nl_farm_system) && (
+                {(team.eastern_farm_system || team.western_farm_system) && (
                   <div className="mt-4 grid gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    {team.al_farm_system && <p>AL farm: {team.al_farm_system}</p>}
-                    {team.nl_farm_system && <p>NL farm: {team.nl_farm_system}</p>}
+                    {team.eastern_farm_system && <p>Eastern farm: {team.eastern_farm_system}</p>}
+                    {team.western_farm_system && <p>Western farm: {team.western_farm_system}</p>}
                   </div>
                 )}
               </Link>

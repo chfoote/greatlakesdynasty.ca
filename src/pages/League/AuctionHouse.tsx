@@ -322,8 +322,8 @@ export default function AuctionHouse() {
   return (
     <>
       <PageMeta
-        title="Off-Speed | Auction House"
-        description="Fantasy baseball Auction House for Off-Speed"
+        title="Great Lakes Dynasty Hockey League"
+        description="GLDHL fantasy hockey Auction House"
       />
       <PageBreadcrumb pageTitle="Auction House" />
 

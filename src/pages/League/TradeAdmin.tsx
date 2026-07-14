@@ -13,11 +13,15 @@ const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
 function TradeAdminOfferCard({
   offer,
   busy,
+  transactionDate,
+  onTransactionDateChange,
   onApprove,
   onDecline,
 }: {
   offer: TradeOffer;
   busy: boolean;
+  transactionDate: string;
+  onTransactionDateChange: (date: string) => void;
   onApprove: () => void;
   onDecline: () => void;
 }) {
@@ -39,11 +43,23 @@ function TradeAdminOfferCard({
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label htmlFor={`trade-date-${offer.id}`} className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              Date of Transaction
+            </label>
+            <input
+              id={`trade-date-${offer.id}`}
+              type="date"
+              value={transactionDate}
+              onChange={(event) => onTransactionDateChange(event.target.value)}
+              className="h-9 rounded-lg border border-gray-300 bg-transparent px-3 text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+            />
+          </div>
           <button
             type="button"
             onClick={onApprove}
-            disabled={busy || offer.status !== "accepted"}
+            disabled={busy || offer.status !== "accepted" || !transactionDate}
             className="rounded-lg bg-success-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Approve & Move Players
@@ -109,6 +125,7 @@ export default function TradeAdmin() {
   const [offers, setOffers] = useState<TradeOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyOfferId, setBusyOfferId] = useState<number | null>(null);
+  const [transactionDates, setTransactionDates] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -119,6 +136,9 @@ export default function TradeAdmin() {
     try {
       const rows = await fetchTradeOffers(selectedSeason);
       setOffers(rows);
+      setTransactionDates((current) => Object.fromEntries(
+        rows.map((offer) => [offer.id, current[offer.id] || new Date().toLocaleDateString("en-CA")]),
+      ));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load trade offers.");
     } finally {
@@ -137,8 +157,10 @@ export default function TradeAdmin() {
     setSuccess("");
 
     try {
-      await approveTradeOffer(offer.id);
-      setSuccess(`Trade #${offer.id} approved and completed.`);
+      const transactionDate = transactionDates[offer.id];
+      if (!transactionDate) throw new Error("Date of Transaction is required.");
+      await approveTradeOffer(offer.id, transactionDate);
+      setSuccess(`Trade #${offer.id} approved and posted with a ${transactionDate} transaction date.`);
       await loadOffers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to approve trade.");
@@ -171,7 +193,7 @@ export default function TradeAdmin() {
   return (
     <>
       <PageMeta
-        title="Off-Speed | Trade Admin"
+        title="Great Lakes Dynasty Hockey League"
         description="Approve or decline fantasy baseball trades"
       />
       <PageBreadcrumb pageTitle="Trade Admin" />
@@ -236,6 +258,8 @@ export default function TradeAdmin() {
                 key={offer.id}
                 offer={offer}
                 busy={busyOfferId === offer.id}
+                transactionDate={transactionDates[offer.id] || ""}
+                onTransactionDateChange={(date) => setTransactionDates((current) => ({ ...current, [offer.id]: date }))}
                 onApprove={() => handleApprove(offer)}
                 onDecline={() => handleDecline(offer)}
               />

@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/nhl-api/:path*",
+      "destination": "https://api.nhle.com/stats/rest/en/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

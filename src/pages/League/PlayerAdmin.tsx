@@ -20,6 +20,7 @@ import {
   updatePlayerSeason,
 } from "../../lib/fantasyPlayers";
 import { PencilIcon, PlusIcon, TrashBinIcon } from "../../icons";
+import { postSigningTransaction, type TransactionAction } from "../../lib/transactions";
 
 const currentYear = new Date().getFullYear();
 
@@ -41,6 +42,8 @@ type SeasonForm = {
   term_end_year: string;
   contract_group: string;
   notes: string;
+  transaction_date: string;
+  transaction_action: TransactionAction;
 };
 
 const emptySeasonForm: SeasonForm = {
@@ -52,6 +55,8 @@ const emptySeasonForm: SeasonForm = {
   term_end_year: "",
   contract_group: "",
   notes: "",
+  transaction_date: new Date().toLocaleDateString("en-CA"),
+  transaction_action: "signed",
 };
 
 function normalizePlayerForm(form: FantasyPlayerInput): FantasyPlayerInput {
@@ -78,7 +83,7 @@ function normalizeSeasonForm(form: SeasonForm): PlayerSeasonInput {
     salary: form.salary ? Number(form.salary) : null,
     position: form.position.trim() || null,
     term_end_year: form.term_end_year ? Number(form.term_end_year) : null,
-    contract_group: form.contract_group.trim() || null,
+          contract_group: form.contract_group.trim() || null,
     notes: form.notes.trim() || null,
   };
 }
@@ -143,6 +148,15 @@ export default function PlayerAdmin() {
     setSuccess("");
   }
 
+  function prepareNextContractSeason() {
+    setSeasonForm((current) => ({
+      ...current,
+      season_year: String(Number(current.season_year) + 1),
+    }));
+    setEditingSeason(null);
+    setError("");
+  }
+
   async function handlePlayerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -172,6 +186,8 @@ export default function PlayerAdmin() {
 
   async function handleSeasonSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const submitAction = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value");
+    const shouldPostTransaction = submitAction === "post-transaction";
     setSaving(true);
     setError("");
     setSuccess("");
@@ -181,16 +197,41 @@ export default function PlayerAdmin() {
       if (!payload.player_id || !payload.season_year) {
         throw new Error("Player and season year are required.");
       }
-
-      if (editingSeason) {
-        await updatePlayerSeason(editingSeason.id, payload);
-        setSuccess("Player season updated.");
-      } else {
-        await createPlayerSeason(payload);
-        setSuccess("Player season added.");
+      if (shouldPostTransaction && !seasonForm.transaction_date) {
+        throw new Error("Date of Transaction is required when posting a transaction.");
       }
 
-      resetSeasonForm();
+      if (editingSeason) {
+        const updatedSeason = await updatePlayerSeason(editingSeason.id, payload);
+        if (shouldPostTransaction) {
+          await postSigningTransaction(
+            updatedSeason,
+            seasonForm.transaction_date,
+            seasonForm.transaction_action,
+          );
+        }
+        prepareNextContractSeason();
+        setSuccess(
+          shouldPostTransaction
+            ? "Player season updated and transaction published. Form advanced to the next season."
+            : "Player season updated. Form advanced to the next season.",
+        );
+      } else {
+        const createdSeason = await createPlayerSeason(payload);
+        if (shouldPostTransaction) {
+          await postSigningTransaction(
+            createdSeason,
+            seasonForm.transaction_date,
+            seasonForm.transaction_action,
+          );
+        }
+        prepareNextContractSeason();
+        setSuccess(
+          shouldPostTransaction
+            ? "Player season added and transaction published. Form advanced to the next season."
+            : "Player season added. Form advanced to the next season.",
+        );
+      }
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save player season.");
@@ -235,7 +276,7 @@ export default function PlayerAdmin() {
 
   return (
     <div>
-      <PageMeta title="Off-Speed | Manage Players" description="Manage fantasy players and seasons for Off-Speed" />
+      <PageMeta title="Great Lakes Dynasty Hockey League" description="Manage GLDHL fantasy players and seasons" />
       <PageBreadcrumb pageTitle="Manage Players" />
 
       {error && (
@@ -418,6 +459,8 @@ export default function PlayerAdmin() {
                                 term_end_year: season.term_end_year === null ? "" : String(season.term_end_year),
                                 contract_group: season.contract_group || "",
                                 notes: season.notes || "",
+                                transaction_date: new Date().toLocaleDateString("en-CA"),
+                                transaction_action: "signed",
                               });
                             }}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03]"
@@ -469,8 +512,11 @@ export default function PlayerAdmin() {
                   onChange={(event) =>
                     setPlayerForm((current) => ({ ...current, player_api_id: event.target.value }))
                   }
-                  placeholder="Example: 660271"
+                  placeholder="Example: 8478402"
                 />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Enter the NHL player ID used by the NHL API, not the player salary.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -591,14 +637,25 @@ export default function PlayerAdmin() {
                 </div>
                 <div>
                   <Label htmlFor="position">Position</Label>
-                  <Input
+                  <select
                     id="position"
                     value={seasonForm.position}
-                    onChange={(event) =>
-                      setSeasonForm((current) => ({ ...current, position: event.target.value }))
-                    }
-                    placeholder="SS"
-                  />
+                    onChange={(event) => setSeasonForm((current) => ({ ...current, position: event.target.value }))}
+                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                  >
+                    <option value="">Select position</option>
+                    <option value="C">C — Center</option>
+                    <option value="LW">LW — Left Wing</option>
+                    <option value="RW">RW — Right Wing</option>
+                    <option value="D">D — Defence</option>
+                    <option value="G">G — Goalie</option>
+                    <option value="W">W — Waivers</option>
+                    <option value="IR">IR — Injured Reserve</option>
+                    <option value="LTIR">LTIR — Long-Term Injured Reserve</option>
+                    <option value="RETENTION">Retention</option>
+                    <option value="BUYOUT">Buyout</option>
+                    <option value="PROSPECT">Acquired Prospect</option>
+                  </select>
                 </div>
               </div>
 
@@ -649,14 +706,20 @@ export default function PlayerAdmin() {
 
               <div>
                 <Label htmlFor="contract_group">Contract Group</Label>
-                <Input
+                <select
                   id="contract_group"
                   value={seasonForm.contract_group}
                   onChange={(event) =>
                     setSeasonForm((current) => ({ ...current, contract_group: event.target.value }))
                   }
-                  placeholder="MLB, Farm, Extension"
-                />
+                  className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                >
+                  <option value="">Select contract group</option>
+                  <option value="UFA">UFA</option>
+                  <option value="RFA">RFA</option>
+                  <option value="ELC">ELC</option>
+                  <option value="Extension">Extension</option>
+                </select>
               </div>
 
               <div>
@@ -671,15 +734,62 @@ export default function PlayerAdmin() {
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
                 />
               </div>
+
+              <div className="grid gap-4">
+                  <div>
+                    <Label htmlFor="transaction_action">Action</Label>
+                    <select
+                      id="transaction_action"
+                      value={seasonForm.transaction_action}
+                      onChange={(event) => setSeasonForm((current) => ({ ...current, transaction_action: event.target.value as TransactionAction }))}
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                    >
+                      <option value="signed">Signed</option>
+                      <option value="called_up">Called-up</option>
+                      <option value="waived">Waived</option>
+                      <option value="claimed">Claimed</option>
+                      <option value="bought_out">Bought out</option>
+                      <option value="retained">Retained</option>
+                      <option value="injured_reserve">Assigned to Injured Reserve</option>
+                      <option value="long_term_injured_reserve">Assigned to Long Term Injured Reserve</option>
+                      <option value="released_to_rfa_offer">Released to RFA offer</option>
+                      <option value="matched_rfa_offer">Matched RFA offer</option>
+                      <option value="traded">Traded</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="transaction_date">Date of Transaction</Label>
+                    <Input
+                      id="transaction_date"
+                      type="date"
+                      value={seasonForm.transaction_date}
+                      onChange={(event) =>
+                        setSeasonForm((current) => ({ ...current, transaction_date: event.target.value }))
+                      }
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Action and date are used only when you click Save and Publish.
+                    </p>
+                  </div>
+              </div>
             </div>
 
             <div className="mt-6 flex gap-3">
               <button
                 type="submit"
+                value="save-season"
                 disabled={saving}
                 className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand-500 px-4 py-3 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? "Saving..." : "Save Season"}
+              </button>
+              <button
+                type="submit"
+                value="post-transaction"
+                disabled={saving}
+                className="inline-flex flex-1 items-center justify-center rounded-lg border border-brand-500 px-4 py-3 text-sm font-medium text-brand-500 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-brand-500/10"
+              >
+                Save and Publish
               </button>
               {editingSeason && (
                 <button

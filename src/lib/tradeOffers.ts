@@ -180,9 +180,10 @@ export async function updateTradeOfferStatus({
   return data as TradeOffer;
 }
 
-export async function approveTradeOffer(tradeOfferId: number) {
-  const { data, error } = await supabase.rpc("approve_trade_offer", {
-    trade_offer_id: tradeOfferId,
+export async function approveTradeOffer(tradeOfferId: number, transactionDate: string) {
+  const { data, error } = await supabase.rpc("approve_trade_offer_with_date", {
+    p_trade_offer_id: tradeOfferId,
+    p_transaction_date: transactionDate,
   });
 
   if (error) throw error;
