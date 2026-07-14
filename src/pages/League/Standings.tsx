@@ -291,7 +291,7 @@ export default function Standings() {
               Standings
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Top positional scorers from each team's active scoring slots.
+              Top positional scorers from each team's active scoring slots. Insert text here.
             </p>
           </div>
 
