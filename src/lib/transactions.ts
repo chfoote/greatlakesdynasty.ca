@@ -2,6 +2,21 @@ import { supabase } from "./supabase";
 import type { FantasyPlayer, PlayerSeasonWithRelations } from "./fantasyPlayers";
 import type { FantasyTeam } from "./fantasyTeams";
 
+type TransactionTradePlayer = {
+  id: number;
+  to_team_id: number;
+  to_team: FantasyTeam | null;
+  player_season: PlayerSeasonWithRelations | null;
+};
+
+type TransactionTradeOffer = {
+  id: number;
+  from_team: FantasyTeam | null;
+  to_team: FantasyTeam | null;
+  third_team: FantasyTeam | null;
+  trade_offer_players: TransactionTradePlayer[];
+};
+
 export type TransactionAction =
   | "signed"
   | "called_up"
@@ -27,19 +42,41 @@ export type LeagueTransaction = {
   salary: number | null;
   term_end_year: number | null;
   contract_group: string | null;
+  position: string | null;
   notes: string | null;
   description: string | null;
   trade_offer_id: number | null;
+  related_trade_offer_id: number | null;
   created_at: string;
   player: FantasyPlayer | null;
   fantasy_team: FantasyTeam | null;
   player_season: PlayerSeasonWithRelations | null;
+  trade_offer: TransactionTradeOffer | null;
+  related_trade_offer: { id: number } | null;
 };
 
 export async function fetchLeagueTransactions() {
   const { data, error } = await supabase
     .from("league_transactions")
-    .select("*, player:players(*), fantasy_team:fantasy_teams(*), player_season:player_seasons(*)")
+    .select(`
+      *,
+      player:players(*),
+      fantasy_team:fantasy_teams(*),
+      player_season:player_seasons(*),
+      trade_offer:trade_offers!league_transactions_trade_offer_id_fkey(
+        id,
+        from_team:fantasy_teams!trade_offers_from_team_id_fkey(*),
+        to_team:fantasy_teams!trade_offers_to_team_id_fkey(*),
+        third_team:fantasy_teams!trade_offers_third_team_id_fkey(*),
+        trade_offer_players(
+          id,
+          to_team_id,
+          to_team:fantasy_teams!trade_offer_players_to_team_id_fkey(*),
+          player_season:player_seasons(*, player:players(*))
+        )
+      ),
+      related_trade_offer:trade_offers!league_transactions_related_trade_offer_id_fkey(id)
+    `)
     .order("transaction_date", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -50,6 +87,8 @@ export async function postSigningTransaction(
   season: PlayerSeasonWithRelations,
   transactionDate: string,
   action: TransactionAction,
+  relatedTradeOfferId?: number | null,
+  transactionPosition?: string | null,
 ) {
   if (!season.fantasy_team_id) {
     throw new Error("Choose a fantasy team before posting a signing transaction.");
@@ -57,7 +96,7 @@ export async function postSigningTransaction(
 
   const { data, error } = await supabase
     .from("league_transactions")
-    .upsert({
+    .insert({
       player_season_id: season.id,
       player_id: season.player_id,
       fantasy_team_id: season.fantasy_team_id,
@@ -68,12 +107,23 @@ export async function postSigningTransaction(
       salary: season.salary,
       term_end_year: season.term_end_year,
       contract_group: season.contract_group,
+      position: transactionPosition?.trim() || season.position,
       notes: season.notes,
-    }, { onConflict: "player_season_id" })
+      related_trade_offer_id: relatedTradeOfferId ?? null,
+    })
     .select()
     .single();
   if (error) {
     throw error;
   }
   return data;
+}
+
+export async function deleteLeagueTransaction(transactionId: number) {
+  const { error } = await supabase
+    .from("league_transactions")
+    .delete()
+    .eq("id", transactionId)
+    .is("trade_offer_id", null);
+  if (error) throw error;
 }

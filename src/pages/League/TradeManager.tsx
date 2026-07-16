@@ -8,13 +8,22 @@ import {
   fetchPlayerSeasonsByTeamAndSeason,
   type PlayerSeasonWithRelations,
 } from "../../lib/fantasyPlayers";
-import { fetchMlbStats, type MlbStatRecord } from "../../lib/mlb";
+import {
+  fetchNhlGoalieStats,
+  fetchNhlSkaterStats,
+  getGoalieScore,
+  getSkaterScore,
+  type NhlGoalieRecord,
+  type NhlSkaterRecord,
+} from "../../lib/nhl";
 import {
   fetchLatestUserTeamAssignment,
   fetchUserTeamAssignment,
 } from "../../lib/teamUserAssignments";
 import {
   createTradeOffer,
+  createAdminTradeOffer,
+  createAdminThreeTeamTrade,
   dismissTradeOffer,
   fetchTradeOfferDismissals,
   fetchTradeOffers,
@@ -24,12 +33,18 @@ import {
 } from "../../lib/tradeOffers";
 
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
-const salaryCap = 47_000_000;
-const rosterLimit = 27;
-const positionOrder = ["C", "1B", "2B", "SS", "3B", "OF", "DH", "SP", "RP"];
-const pitcherPositions = new Set(["SP", "RP"]);
-const nonRosterPositions = new Set(["W", "IR"]);
+const rosterLimit = 23;
+const positionOrder = ["C", "LW", "RW", "D", "G"];
+const nonRosterPositions = new Set(["W", "IR", "LTIR", "RETENTION", "BUYOUT", "PROSPECT", "AP"]);
 const dismissableTradeStatuses = new Set(["admin_declined", "completed", "countered"]);
+
+function nhlSeasonId(year: number) {
+  return (year - 1) * 10000 + year;
+}
+
+function salaryCapForSeason(year: number) {
+  return year <= 2026 ? 45_000_000 : 50_000_000;
+}
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -37,14 +52,14 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
-type MlbPlayerStatMaps = {
-  hitting: Map<string, MlbStatRecord>;
-  pitching: Map<string, MlbStatRecord>;
+type NhlPlayerStatMaps = {
+  skaters: Map<string, NhlSkaterRecord>;
+  goalies: Map<string, NhlGoalieRecord>;
 };
 
-const emptyMlbPlayerStatMaps = (): MlbPlayerStatMaps => ({
-  hitting: new Map(),
-  pitching: new Map(),
+const emptyNhlPlayerStatMaps = (): NhlPlayerStatMaps => ({
+  skaters: new Map(),
+  goalies: new Map(),
 });
 
 function formatCurrency(value: number | null | undefined) {
@@ -84,7 +99,7 @@ function getErrorMessage(err: unknown, fallback: string) {
 }
 
 function formatScore(score: number) {
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+  return score.toFixed(2);
 }
 
 function formatProjectedValue(currentValue: string | number, projectedValue: string | number) {
@@ -125,53 +140,26 @@ function getContractLine(season: PlayerSeasonWithRelations) {
   }`;
 }
 
-function getBatterScore(record: MlbStatRecord | undefined) {
-  if (!record) return 0;
-
-  return (
-    Number(record.stats.runs ?? 0) * 1 +
-    Number(record.stats.hits ?? 0) * 1 +
-    Number(record.stats.doubles ?? 0) * 1 +
-    Number(record.stats.triples ?? 0) * 2 +
-    Number(record.stats.homeRuns ?? 0) * 3 +
-    Number(record.stats.rbi ?? 0) * 1 +
-    Number(record.stats.stolenBases ?? 0) * 2
-  );
-}
-
-function getPitcherScore(record: MlbStatRecord | undefined) {
-  if (!record) return 0;
-
-  return (
-    Number(record.stats.wins ?? 0) * 8 +
-    Number(record.stats.strikeOuts ?? 0) * 1 +
-    Number(record.stats.saves ?? 0) * 6 +
-    Number(record.stats.completeGames ?? 0) * 5 +
-    Number(record.stats.shutouts ?? 0) * 5
-  );
-}
-
 function getScore(
   season: PlayerSeasonWithRelations,
-  mlbPlayerStats: MlbPlayerStatMaps,
+  nhlPlayerStats: NhlPlayerStatMaps,
 ) {
-  const record = pitcherPositions.has(getPosition(season))
-    ? mlbPlayerStats.pitching.get(getPlayerApiId(season))
-    : mlbPlayerStats.hitting.get(getPlayerApiId(season));
-
-  return pitcherPositions.has(getPosition(season))
-    ? getPitcherScore(record)
-    : getBatterScore(record);
+  if (getPosition(season) === "G") {
+    const record = nhlPlayerStats.goalies.get(getPlayerApiId(season));
+    return record ? getGoalieScore(record) : 0;
+  }
+  const record = nhlPlayerStats.skaters.get(getPlayerApiId(season));
+  return record ? getSkaterScore(record) : 0;
 }
 
 function getDisplayRecord(
   season: PlayerSeasonWithRelations,
-  mlbPlayerStats: MlbPlayerStatMaps,
+  nhlPlayerStats: NhlPlayerStatMaps,
 ) {
   const apiId = getPlayerApiId(season);
-  return pitcherPositions.has(getPosition(season))
-    ? mlbPlayerStats.pitching.get(apiId) || mlbPlayerStats.hitting.get(apiId)
-    : mlbPlayerStats.hitting.get(apiId) || mlbPlayerStats.pitching.get(apiId);
+  return getPosition(season) === "G"
+    ? nhlPlayerStats.goalies.get(apiId)
+    : nhlPlayerStats.skaters.get(apiId);
 }
 
 function getPositionRank(position: string) {
@@ -181,7 +169,7 @@ function getPositionRank(position: string) {
 
 function sortRoster(
   roster: PlayerSeasonWithRelations[],
-  mlbPlayerStats: MlbPlayerStatMaps,
+  nhlPlayerStats: NhlPlayerStatMaps,
 ) {
   return [...roster].sort((a, b) => {
     const aPositionRank = getPositionRank(getPosition(a));
@@ -191,8 +179,8 @@ function sortRoster(
       return aPositionRank - bPositionRank;
     }
 
-    const aScore = getScore(a, mlbPlayerStats);
-    const bScore = getScore(b, mlbPlayerStats);
+    const aScore = getScore(a, nhlPlayerStats);
+    const bScore = getScore(b, nhlPlayerStats);
 
     if (bScore !== aScore) {
       return bScore - aScore;
@@ -477,12 +465,13 @@ type TeamColumnProps = {
   teams: FantasyTeam[];
   selectedTeamId: string;
   otherTeamId: string;
+  excludedTeamIds?: string[];
   onTeamChange: (teamId: string) => void;
   roster: PlayerSeasonWithRelations[];
   selectedIds: Set<number>;
   onTogglePlayer: (playerSeasonId: number, checked: boolean) => void;
   loading: boolean;
-  mlbPlayerStats: MlbPlayerStatMaps;
+  nhlPlayerStats: NhlPlayerStatMaps;
   salaryGoingOut: number;
   salaryComingIn: number;
   netSalaryChange: number;
@@ -493,6 +482,10 @@ type TeamColumnProps = {
   sourceTeamName: string;
   incomingPlayers: PlayerSeasonWithRelations[];
   tradeNotes: string;
+  salaryCap: number;
+  destinationTeams?: FantasyTeam[];
+  destinations?: Record<number, string>;
+  onDestinationChange?: (playerSeasonId: number, teamId: string) => void;
 };
 
 function TeamColumn({
@@ -500,12 +493,13 @@ function TeamColumn({
   teams,
   selectedTeamId,
   otherTeamId,
+  excludedTeamIds,
   onTeamChange,
   roster,
   selectedIds,
   onTogglePlayer,
   loading,
-  mlbPlayerStats,
+  nhlPlayerStats,
   salaryGoingOut,
   salaryComingIn,
   netSalaryChange,
@@ -516,12 +510,16 @@ function TeamColumn({
   sourceTeamName,
   incomingPlayers,
   tradeNotes,
+  salaryCap,
+  destinationTeams,
+  destinations,
+  onDestinationChange,
 }: TeamColumnProps) {
   const selectedTeam = teams.find((team) => String(team.id) === selectedTeamId);
   const tradeableRoster = useMemo(() => getTradeableRoster(roster), [roster]);
   const sortedRoster = useMemo(
-    () => sortRoster(tradeableRoster, mlbPlayerStats),
-    [tradeableRoster, mlbPlayerStats],
+    () => sortRoster(tradeableRoster, nhlPlayerStats),
+    [tradeableRoster, nhlPlayerStats],
   );
   const projectedSalary = currentSalary + netSalaryChange;
   const projectedCapSpace = salaryCap - projectedSalary;
@@ -562,7 +560,7 @@ function TeamColumn({
             <option
               key={team.id}
               value={team.id}
-              disabled={String(team.id) === otherTeamId}
+              disabled={(excludedTeamIds || [otherTeamId]).includes(String(team.id))}
             >
               {team.team_name}
             </option>
@@ -658,8 +656,8 @@ function TeamColumn({
           <div className="space-y-2">
             {sortedRoster.map((season) => {
               const checked = selectedIds.has(season.id);
-              const record = getDisplayRecord(season, mlbPlayerStats);
-              const score = getScore(season, mlbPlayerStats);
+              const record = getDisplayRecord(season, nhlPlayerStats);
+              const score = getScore(season, nhlPlayerStats);
 
               return (
                 <div
@@ -681,15 +679,15 @@ function TeamColumn({
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex min-w-0 items-center gap-2">
                           <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
-                            {record?.teamLogoUrl ? (
+                            {record?.teamAbbrevs ? (
                               <img
-                                src={record.teamLogoUrl}
-                                alt={`${record.teamName} logo`}
+                                src={`https://assets.nhle.com/logos/nhl/svg/${record.teamAbbrevs.split(',')[0]}_light.svg`}
+                                alt={`${record.teamAbbrevs} logo`}
                                 className="h-full w-full object-contain"
                               />
                             ) : (
                               <span className="text-[10px] font-semibold text-gray-500">
-                                MLB
+                                NHL
                               </span>
                             )}
                           </div>
@@ -712,6 +710,19 @@ function TeamColumn({
                         </div>
                       </div>
                     </div>
+                    {checked && destinationTeams && onDestinationChange && (
+                      <div className="mt-3 pl-9">
+                        <label className="mb-1 block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Traded to</label>
+                        <select
+                          value={destinations?.[season.id] || ""}
+                          onChange={(event) => onDestinationChange(season.id, event.target.value)}
+                          className="h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                        >
+                          <option value="">Choose destination</option>
+                          {destinationTeams.map((team) => <option key={team.id} value={team.id}>{team.team_name}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -724,13 +735,16 @@ function TeamColumn({
 }
 
 export default function TradeManager() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [team1Id, setTeam1Id] = useState("");
   const [team2Id, setTeam2Id] = useState("");
+  const [threeTeamMode, setThreeTeamMode] = useState(false);
+  const [team3Id, setTeam3Id] = useState("");
   const [selectedSeason, setSelectedSeason] = useState(2026);
   const [team1Roster, setTeam1Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [team2Roster, setTeam2Roster] = useState<PlayerSeasonWithRelations[]>([]);
+  const [team3Roster, setTeam3Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [tradeOffers, setTradeOffers] = useState<TradeOffer[]>([]);
   const [dismissedTradeOfferIds, setDismissedTradeOfferIds] = useState<Set<number>>(
     () => new Set(),
@@ -749,14 +763,17 @@ export default function TradeManager() {
   const [team2SelectedIds, setTeam2SelectedIds] = useState<Set<number>>(
     () => new Set(),
   );
+  const [team3SelectedIds, setTeam3SelectedIds] = useState<Set<number>>(() => new Set());
+  const [playerDestinations, setPlayerDestinations] = useState<Record<number, string>>({});
   const [tradeNotes, setTradeNotes] = useState("");
-  const [mlbPlayerStats, setMlbPlayerStats] = useState<MlbPlayerStatMaps>(
-    emptyMlbPlayerStatMaps,
+  const [nhlPlayerStats, setNhlPlayerStats] = useState<NhlPlayerStatMaps>(
+    emptyNhlPlayerStatMaps,
   );
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [loadingTeam1Roster, setLoadingTeam1Roster] = useState(false);
   const [loadingTeam2Roster, setLoadingTeam2Roster] = useState(false);
-  const [loadingMlbTeams, setLoadingMlbTeams] = useState(false);
+  const [loadingTeam3Roster, setLoadingTeam3Roster] = useState(false);
+  const [loadingNhlStats, setLoadingNhlStats] = useState(false);
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [sendingOffer, setSendingOffer] = useState(false);
   const [respondingOfferId, setRespondingOfferId] = useState<number | null>(null);
@@ -857,43 +874,29 @@ export default function TradeManager() {
   useEffect(() => {
     let active = true;
 
-    async function loadMlbData() {
-      setLoadingMlbTeams(true);
+    async function loadNhlData() {
+      setLoadingNhlStats(true);
 
       try {
-        const [hitters, pitchers] = await Promise.all([
-          fetchMlbStats("hitting", selectedSeason),
-          fetchMlbStats("pitching", selectedSeason),
+        const [skaters, goalies] = await Promise.all([
+          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
+          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
         ]);
-        const hittingMap = new Map<string, MlbStatRecord>();
-        const pitchingMap = new Map<string, MlbStatRecord>();
-
-        hitters.forEach((record) => {
-          if (record.playerId) {
-            hittingMap.set(String(record.playerId), record);
-          }
-        });
-
-        pitchers.forEach((record) => {
-          if (record.playerId) {
-            pitchingMap.set(String(record.playerId), record);
-          }
-        });
 
         if (active) {
-          setMlbPlayerStats({
-            hitting: hittingMap,
-            pitching: pitchingMap,
+          setNhlPlayerStats({
+            skaters: new Map(skaters.map((record) => [String(record.playerId), record])),
+            goalies: new Map(goalies.map((record) => [String(record.playerId), record])),
           });
         }
       } catch {
-        if (active) setMlbPlayerStats(emptyMlbPlayerStatMaps());
+        if (active) setNhlPlayerStats(emptyNhlPlayerStatMaps());
       } finally {
-        if (active) setLoadingMlbTeams(false);
+        if (active) setLoadingNhlStats(false);
       }
     }
 
-    loadMlbData();
+    loadNhlData();
 
     return () => {
       active = false;
@@ -977,6 +980,29 @@ export default function TradeManager() {
   }, [team2Id, selectedSeason]);
 
   useEffect(() => {
+    let active = true;
+    async function loadRoster() {
+      setTeam3SelectedIds(new Set());
+      if (!threeTeamMode || !team3Id) {
+        setTeam3Roster([]);
+        return;
+      }
+      setLoadingTeam3Roster(true);
+      setError("");
+      try {
+        const rows = await fetchPlayerSeasonsByTeamAndSeason(Number(team3Id), selectedSeason);
+        if (active) setTeam3Roster(rows);
+      } catch (err) {
+        if (active) setError(getErrorMessage(err, "Unable to load Team 3 roster."));
+      } finally {
+        if (active) setLoadingTeam3Roster(false);
+      }
+    }
+    loadRoster();
+    return () => { active = false; };
+  }, [team3Id, selectedSeason, threeTeamMode]);
+
+  useEffect(() => {
     if (
       !pendingCounterSelection ||
       pendingCounterSelection.team1Id !== team1Id ||
@@ -1004,19 +1030,36 @@ export default function TradeManager() {
       ),
     [team2Roster, team2SelectedIds],
   );
+  const team3OutgoingPlayers = useMemo(
+    () => getTradeableRoster(team3Roster).filter((season) => team3SelectedIds.has(season.id)),
+    [team3Roster, team3SelectedIds],
+  );
+
+  const teamIds = [team1Id, team2Id, ...(threeTeamMode ? [team3Id] : [])].filter(Boolean);
+  const selectedPlayers = [...team1OutgoingPlayers, ...team2OutgoingPlayers, ...team3OutgoingPlayers];
+  const incomingFor = (teamId: string) => threeTeamMode
+    ? selectedPlayers.filter((season) => playerDestinations[season.id] === teamId)
+    : teamId === team1Id ? team2OutgoingPlayers : team1OutgoingPlayers;
 
   const team1CurrentSalary = sumSalary(team1Roster);
   const team2CurrentSalary = sumSalary(team2Roster);
   const team1CurrentRosterCount = getRosterCount(team1Roster);
   const team2CurrentRosterCount = getRosterCount(team2Roster);
+  const team3CurrentSalary = sumSalary(team3Roster);
+  const team3CurrentRosterCount = getRosterCount(team3Roster);
   const team1OutgoingSalary = sumSalary(team1OutgoingPlayers);
   const team2OutgoingSalary = sumSalary(team2OutgoingPlayers);
-  const team1NetSalaryChange = team2OutgoingSalary - team1OutgoingSalary;
-  const team2NetSalaryChange = team1OutgoingSalary - team2OutgoingSalary;
-  const team1NetRosterChange =
-    team2OutgoingPlayers.length - team1OutgoingPlayers.length;
-  const team2NetRosterChange =
-    team1OutgoingPlayers.length - team2OutgoingPlayers.length;
+  const team3OutgoingSalary = sumSalary(team3OutgoingPlayers);
+  const team1IncomingPlayers = incomingFor(team1Id);
+  const team2IncomingPlayers = incomingFor(team2Id);
+  const team3IncomingPlayers = incomingFor(team3Id);
+  const team1NetSalaryChange = sumSalary(team1IncomingPlayers) - team1OutgoingSalary;
+  const team2NetSalaryChange = sumSalary(team2IncomingPlayers) - team2OutgoingSalary;
+  const team3NetSalaryChange = sumSalary(team3IncomingPlayers) - team3OutgoingSalary;
+  const team1NetRosterChange = team1IncomingPlayers.length - team1OutgoingPlayers.length;
+  const team2NetRosterChange = team2IncomingPlayers.length - team2OutgoingPlayers.length;
+  const team3NetRosterChange = team3IncomingPlayers.length - team3OutgoingPlayers.length;
+  const selectedSalaryCap = salaryCapForSeason(selectedSeason);
 
   function toggleTeam1Player(playerSeasonId: number, checked: boolean) {
     setTeam1SelectedIds((current) => {
@@ -1036,12 +1079,25 @@ export default function TradeManager() {
     });
   }
 
+  function toggleTeam3Player(playerSeasonId: number, checked: boolean) {
+    setTeam3SelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(playerSeasonId); else next.delete(playerSeasonId);
+      return next;
+    });
+  }
+
+  function setDestination(playerSeasonId: number, teamId: string) {
+    setPlayerDestinations((current) => ({ ...current, [playerSeasonId]: teamId }));
+  }
+
   function handleTeam1Change(nextTeamId: string) {
     setTeam1Id(nextTeamId);
     setSuccess("");
     setCounteringOffer(null);
     setPendingCounterSelection(null);
     if (nextTeamId && nextTeamId === team2Id) setTeam2Id("");
+    if (nextTeamId && nextTeamId === team3Id) setTeam3Id("");
   }
 
   function handleTeam2Change(nextTeamId: string) {
@@ -1050,12 +1106,21 @@ export default function TradeManager() {
     setCounteringOffer(null);
     setPendingCounterSelection(null);
     if (nextTeamId && nextTeamId === team1Id) setTeam1Id("");
+    if (nextTeamId && nextTeamId === team3Id) setTeam3Id("");
+  }
+
+  function handleTeam3Change(nextTeamId: string) {
+    setTeam3Id(nextTeamId);
+    setSuccess("");
+    setPlayerDestinations({});
+    if (nextTeamId && nextTeamId === team1Id) setTeam1Id("");
+    if (nextTeamId && nextTeamId === team2Id) setTeam2Id("");
   }
 
   async function handleSendOffer() {
-    if (!user || !team1Id || !team2Id) return;
+    if (!user || !team1Id || !team2Id || (threeTeamMode && !team3Id)) return;
 
-    const playerMoves = [
+    const twoTeamMoves = [
       ...team1OutgoingPlayers.map((season) => ({
         playerSeasonId: season.id,
         fromTeamId: Number(team1Id),
@@ -1067,6 +1132,22 @@ export default function TradeManager() {
         toTeamId: Number(team1Id),
       })),
     ];
+    const threeTeamPlayers = [
+      ...team1OutgoingPlayers.map((season) => ({ season, fromTeamId: Number(team1Id) })),
+      ...team2OutgoingPlayers.map((season) => ({ season, fromTeamId: Number(team2Id) })),
+      ...team3OutgoingPlayers.map((season) => ({ season, fromTeamId: Number(team3Id) })),
+    ];
+    if (threeTeamMode && threeTeamPlayers.some(({ season }) => !playerDestinations[season.id])) {
+      setError("Choose a destination team for every selected player.");
+      return;
+    }
+    const playerMoves = threeTeamMode
+      ? threeTeamPlayers.map(({ season, fromTeamId }) => ({
+          playerSeasonId: season.id,
+          fromTeamId,
+          toTeamId: Number(playerDestinations[season.id]),
+        }))
+      : twoTeamMoves;
 
     if (playerMoves.length === 0 && !tradeNotes.trim()) {
       setError("Select at least one player or add trade notes before sending an offer.");
@@ -1078,15 +1159,34 @@ export default function TradeManager() {
     setSuccess("");
 
     try {
-      await createTradeOffer({
-        seasonYear: selectedSeason,
-        fromTeamId: Number(team1Id),
-        toTeamId: Number(team2Id),
-        createdBy: user.id,
-        notes: tradeNotes.trim() || null,
-        parentTradeOfferId: counteringOffer?.id ?? null,
-        playerMoves,
-      });
+      if (isAdmin && threeTeamMode && !counteringOffer) {
+        await createAdminThreeTeamTrade({
+          seasonYear: selectedSeason,
+          team1Id: Number(team1Id),
+          team2Id: Number(team2Id),
+          team3Id: Number(team3Id),
+          notes: tradeNotes.trim() || null,
+          playerMoves,
+        });
+      } else if (isAdmin && !counteringOffer) {
+        await createAdminTradeOffer({
+          seasonYear: selectedSeason,
+          fromTeamId: Number(team1Id),
+          toTeamId: Number(team2Id),
+          notes: tradeNotes.trim() || null,
+          playerMoves,
+        });
+      } else {
+        await createTradeOffer({
+          seasonYear: selectedSeason,
+          fromTeamId: Number(team1Id),
+          toTeamId: Number(team2Id),
+          createdBy: user.id,
+          notes: tradeNotes.trim() || null,
+          parentTradeOfferId: counteringOffer?.id ?? null,
+          playerMoves,
+        });
+      }
 
       if (counteringOffer) {
         await updateTradeOfferStatus({
@@ -1097,10 +1197,14 @@ export default function TradeManager() {
 
       setTeam1SelectedIds(new Set());
       setTeam2SelectedIds(new Set());
+      setTeam3SelectedIds(new Set());
+      setPlayerDestinations({});
       setTradeNotes("");
       setCounteringOffer(null);
       setSuccess(
-        counteringOffer
+        isAdmin && !counteringOffer
+          ? "Agreed trade submitted to Trade Admin for final approval."
+          : counteringOffer
           ? `Counter offer sent to ${team2Name}.`
           : `Trade offer sent to ${team2Name}.`,
       );
@@ -1213,6 +1317,8 @@ export default function TradeManager() {
     teams.find((team) => String(team.id) === team1Id)?.team_name || "Team 1";
   const team2Name =
     teams.find((team) => String(team.id) === team2Id)?.team_name || "Team 2";
+  const team3Name =
+    teams.find((team) => String(team.id) === team3Id)?.team_name || "Team 3";
   const visibleTradeOffers = tradeOffers.filter(
     (offer) =>
       !["declined", "revoked"].includes(offer.status) &&
@@ -1275,7 +1381,7 @@ export default function TradeManager() {
             </div>
           </div>
 
-          {(loadingTeams || loadingMlbTeams) && (
+          {(loadingTeams || loadingNhlStats) && (
             <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
               Loading trade data...
             </p>
@@ -1352,6 +1458,23 @@ export default function TradeManager() {
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+          {isAdmin && !counteringOffer && (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-500/30 dark:bg-brand-500/10">
+              <Checkbox
+                checked={threeTeamMode}
+                onChange={(checked) => {
+                  setThreeTeamMode(checked);
+                  setTeam3Id("");
+                  setTeam3SelectedIds(new Set());
+                  setPlayerDestinations({});
+                }}
+              />
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Add Third Team</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Admin-only: select a destination for every player included in the trade.</p>
+              </div>
+            </div>
+          )}
           <label
             htmlFor="trade-notes"
             className="block text-sm font-semibold text-gray-900 dark:text-white"
@@ -1392,7 +1515,9 @@ export default function TradeManager() {
           />
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Sending creates a pending offer for the other manager. Players move only after admin approval.
+              {isAdmin
+                ? "Admin Trade submits an agreed deal to Trade Admin. Players move only after final approval."
+                : "Sending creates a pending offer for the other manager. Players move only after admin approval."}
             </p>
             <button
               type="button"
@@ -1401,8 +1526,10 @@ export default function TradeManager() {
                 sendingOffer ||
                 !team1Id ||
                 !team2Id ||
+                (threeTeamMode && !team3Id) ||
                 (!team1OutgoingPlayers.length &&
                   !team2OutgoingPlayers.length &&
+                  !team3OutgoingPlayers.length &&
                   !tradeNotes.trim())
               }
               className="h-11 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1411,33 +1538,40 @@ export default function TradeManager() {
                 ? "Sending..."
                 : counteringOffer
                   ? "Submit Counter Offer"
-                  : "Send Offer"}
+                  : isAdmin
+                    ? "Admin Trade"
+                    : "Send Offer"}
             </button>
           </div>
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-2">
+        <div className={`grid gap-6 ${threeTeamMode ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
           <TeamColumn
             label="Team 1"
             teams={teams}
             selectedTeamId={team1Id}
             otherTeamId={team2Id}
+            excludedTeamIds={[team2Id, ...(threeTeamMode ? [team3Id] : [])]}
             onTeamChange={handleTeam1Change}
             roster={team1Roster}
             selectedIds={team1SelectedIds}
             onTogglePlayer={toggleTeam1Player}
             loading={loadingTeam1Roster}
-            mlbPlayerStats={mlbPlayerStats}
+            nhlPlayerStats={nhlPlayerStats}
             salaryGoingOut={team1OutgoingSalary}
-            salaryComingIn={team2OutgoingSalary}
+            salaryComingIn={sumSalary(team1IncomingPlayers)}
             netSalaryChange={team1NetSalaryChange}
             netRosterChange={team1NetRosterChange}
             currentSalary={team1CurrentSalary}
             currentRosterCount={team1CurrentRosterCount}
             teamName={team1Name}
-            sourceTeamName={team2Name}
-            incomingPlayers={team2OutgoingPlayers}
+            sourceTeamName={threeTeamMode ? "the other teams" : team2Name}
+            incomingPlayers={team1IncomingPlayers}
             tradeNotes={tradeNotes}
+            salaryCap={selectedSalaryCap}
+            destinationTeams={threeTeamMode ? teams.filter((team) => ![team1Id].includes(String(team.id)) && teamIds.includes(String(team.id))) : undefined}
+            destinations={playerDestinations}
+            onDestinationChange={setDestination}
           />
 
           <TeamColumn
@@ -1445,23 +1579,58 @@ export default function TradeManager() {
             teams={teams}
             selectedTeamId={team2Id}
             otherTeamId={team1Id}
+            excludedTeamIds={[team1Id, ...(threeTeamMode ? [team3Id] : [])]}
             onTeamChange={handleTeam2Change}
             roster={team2Roster}
             selectedIds={team2SelectedIds}
             onTogglePlayer={toggleTeam2Player}
             loading={loadingTeam2Roster}
-            mlbPlayerStats={mlbPlayerStats}
+            nhlPlayerStats={nhlPlayerStats}
             salaryGoingOut={team2OutgoingSalary}
-            salaryComingIn={team1OutgoingSalary}
+            salaryComingIn={sumSalary(team2IncomingPlayers)}
             netSalaryChange={team2NetSalaryChange}
             netRosterChange={team2NetRosterChange}
             currentSalary={team2CurrentSalary}
             currentRosterCount={team2CurrentRosterCount}
             teamName={team2Name}
-            sourceTeamName={team1Name}
-            incomingPlayers={team1OutgoingPlayers}
+            sourceTeamName={threeTeamMode ? "the other teams" : team1Name}
+            incomingPlayers={team2IncomingPlayers}
             tradeNotes={tradeNotes}
+            salaryCap={selectedSalaryCap}
+            destinationTeams={threeTeamMode ? teams.filter((team) => ![team2Id].includes(String(team.id)) && teamIds.includes(String(team.id))) : undefined}
+            destinations={playerDestinations}
+            onDestinationChange={setDestination}
           />
+
+          {threeTeamMode && (
+            <TeamColumn
+              label="Team 3"
+              teams={teams}
+              selectedTeamId={team3Id}
+              otherTeamId={team1Id}
+              excludedTeamIds={[team1Id, team2Id]}
+              onTeamChange={handleTeam3Change}
+              roster={team3Roster}
+              selectedIds={team3SelectedIds}
+              onTogglePlayer={toggleTeam3Player}
+              loading={loadingTeam3Roster}
+              nhlPlayerStats={nhlPlayerStats}
+              salaryGoingOut={team3OutgoingSalary}
+              salaryComingIn={sumSalary(team3IncomingPlayers)}
+              netSalaryChange={team3NetSalaryChange}
+              netRosterChange={team3NetRosterChange}
+              currentSalary={team3CurrentSalary}
+              currentRosterCount={team3CurrentRosterCount}
+              teamName={team3Name}
+              sourceTeamName="the other teams"
+              incomingPlayers={team3IncomingPlayers}
+              tradeNotes={tradeNotes}
+              salaryCap={selectedSalaryCap}
+              destinationTeams={teams.filter((team) => String(team.id) !== team3Id && teamIds.includes(String(team.id)))}
+              destinations={playerDestinations}
+              onDestinationChange={setDestination}
+            />
+          )}
         </div>
       </div>
     </>

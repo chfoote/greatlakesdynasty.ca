@@ -51,6 +51,11 @@ const navItems: NavItem[] = [
 
 const leagueToolItems: NavItem[] = [
   {
+    icon: <GridIcon />,
+    name: "Dashboard",
+    path: "/league-dashboard",
+  },
+  {
     icon: <TableIcon />,
     name: "Trade Manager",
     path: "/trade-manager",
@@ -82,6 +87,11 @@ const adminItems: NavItem[] = [
     icon: <UserCircleIcon />,
     name: "Auction Admin",
     path: "/admin/auction-admin",
+  },
+  {
+    icon: <UserCircleIcon />,
+    name: "Manage Awards",
+    path: "/admin/awards",
   },
 ];
 

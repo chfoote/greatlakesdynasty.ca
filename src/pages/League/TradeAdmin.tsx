@@ -25,14 +25,14 @@ function TradeAdminOfferCard({
   onApprove: () => void;
   onDecline: () => void;
 }) {
+  const participatingTeams = [offer.from_team, offer.to_team, offer.third_team].filter(Boolean);
   return (
     <article className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-              {offer.from_team?.team_name || "Unknown Team"} to{" "}
-              {offer.to_team?.team_name || "Unknown Team"}
+              {participatingTeams.map((team) => team?.team_name).join(" / ") || "Unknown Teams"}
             </h3>
             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold uppercase text-gray-700 dark:bg-gray-800 dark:text-gray-300">
               {offer.status.replace("_", " ")}
@@ -75,35 +75,17 @@ function TradeAdminOfferCard({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
-            {offer.to_team?.team_name || "Receiving Team"} receives
-          </p>
-          <ul className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-            {offer.trade_offer_players
-              .filter((player) => player.to_team_id === offer.to_team_id)
-              .map((player) => (
-                <li key={player.id}>
-                  {player.player_season?.player?.full_name || "Unknown Player"}
-                </li>
+      <div className={`mt-4 grid gap-4 ${participatingTeams.length === 3 ? "lg:grid-cols-3" : "md:grid-cols-2"}`}>
+        {participatingTeams.map((team) => team && (
+          <div key={team.id}>
+            <p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{team.team_name} receives</p>
+            <ul className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+              {offer.trade_offer_players.filter((player) => player.to_team_id === team.id).map((player) => (
+                <li key={player.id}>{player.player_season?.player?.full_name || "Unknown Player"}</li>
               ))}
-          </ul>
-        </div>
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
-            {offer.from_team?.team_name || "Offering Team"} receives
-          </p>
-          <ul className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-            {offer.trade_offer_players
-              .filter((player) => player.to_team_id === offer.from_team_id)
-              .map((player) => (
-                <li key={player.id}>
-                  {player.player_season?.player?.full_name || "Unknown Player"}
-                </li>
-              ))}
-          </ul>
-        </div>
+            </ul>
+          </div>
+        ))}
       </div>
 
       {offer.notes && (

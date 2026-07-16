@@ -12,12 +12,14 @@ import {
 } from "../../lib/nhl";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import NhlPlayerCell from "./NhlPlayerCell";
+import { fetchPlayerAwards, mapAwardsByPlayer, type PlayerAward } from "../../lib/awards";
 
 export default function GoalieStats() {
   const [records, setRecords] = useState<NhlGoalieRecord[]>([]);
   const [fantasySeasons, setFantasySeasons] = useState<Map<string, PlayerSeasonWithRelations>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [awardsByPlayer, setAwardsByPlayer] = useState<Map<number, PlayerAward[]>>(new Map());
 
   useEffect(() => {
     let active = true;
@@ -40,6 +42,10 @@ export default function GoalieStats() {
       .catch(() => {
         // NHL stats should remain usable when optional fantasy roster metadata fails.
       });
+
+    fetchPlayerAwards(FANTASY_SEASON_YEAR)
+      .then((rows) => { if (active) setAwardsByPlayer(mapAwardsByPlayer(rows)); })
+      .catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -63,7 +69,7 @@ export default function GoalieStats() {
               {[...records].sort((a, b) => getGoalieScore(b) - getGoalieScore(a)).map((record) => {
                 const score = getGoalieScore(record);
                 return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} /></td>
+                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
                   {[record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.savePct === null ? '—' : record.savePct.toFixed(3)}</td>
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(record.goalsAgainstAverage, 2)}</td>

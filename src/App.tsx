@@ -33,6 +33,8 @@ import TradeManager from "./pages/League/TradeManager";
 import AuctionHouse from "./pages/League/AuctionHouse";
 import AuctionAdmin from "./pages/League/AuctionAdmin";
 import TradeAdmin from "./pages/League/TradeAdmin";
+import AwardAdmin from "./pages/League/AwardAdmin";
+import LeagueDashboard from "./pages/League/LeagueDashboard";
 
 export default function App() {
   return (
@@ -60,6 +62,7 @@ export default function App() {
               <Route path="/pitcher-stats" element={<GoalieStats />} />
               <Route path="/player-profile" element={<PlayerProfile />} />
               <Route path="/trade-manager" element={<TradeManager />} />
+              <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/admin/trade-manager" element={<TradeManager />} />
 
               <Route element={<AdminRoute />}>
@@ -69,6 +72,7 @@ export default function App() {
                 <Route path="/admin/players" element={<PlayerAdmin />} />
                 <Route path="/admin/trades" element={<TradeAdmin />} />
                 <Route path="/admin/auction-admin" element={<AuctionAdmin />} />
+                <Route path="/admin/awards" element={<AwardAdmin />} />
               </Route>
 
               {/* Forms */}

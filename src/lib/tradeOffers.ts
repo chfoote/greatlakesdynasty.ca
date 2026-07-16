@@ -28,6 +28,7 @@ export type TradeOffer = {
   season_year: number;
   from_team_id: number;
   to_team_id: number;
+  third_team_id: number | null;
   created_by: string;
   status: TradeOfferStatus;
   parent_trade_offer_id: number | null;
@@ -43,6 +44,7 @@ export type TradeOffer = {
   updated_at: string;
   from_team: FantasyTeam | null;
   to_team: FantasyTeam | null;
+  third_team: FantasyTeam | null;
   trade_offer_players: TradeOfferPlayer[];
 };
 
@@ -57,6 +59,7 @@ const tradeOfferSelect = `
   *,
   from_team:fantasy_teams!trade_offers_from_team_id_fkey(*),
   to_team:fantasy_teams!trade_offers_to_team_id_fkey(*),
+  third_team:fantasy_teams!trade_offers_third_team_id_fkey(*),
   trade_offer_players(
     *,
     from_team:fantasy_teams!trade_offer_players_from_team_id_fkey(*),
@@ -136,6 +139,57 @@ export async function createTradeOffer({
 
   if (error) throw error;
   return data as TradeOffer;
+}
+
+export async function createAdminTradeOffer({
+  seasonYear,
+  fromTeamId,
+  toTeamId,
+  notes,
+  playerMoves,
+}: {
+  seasonYear: number;
+  fromTeamId: number;
+  toTeamId: number;
+  notes: string | null;
+  playerMoves: Array<{ playerSeasonId: number; fromTeamId: number; toTeamId: number }>;
+}) {
+  const { data, error } = await supabase.rpc("create_admin_trade_offer", {
+    p_season_year: seasonYear,
+    p_from_team_id: fromTeamId,
+    p_to_team_id: toTeamId,
+    p_notes: notes,
+    p_player_moves: playerMoves,
+  });
+  if (error) throw error;
+  return data as TradeOffer;
+}
+
+export async function createAdminThreeTeamTrade({
+  seasonYear,
+  team1Id,
+  team2Id,
+  team3Id,
+  notes,
+  playerMoves,
+}: {
+  seasonYear: number;
+  team1Id: number;
+  team2Id: number;
+  team3Id: number;
+  notes: string | null;
+  playerMoves: Array<{ playerSeasonId: number; fromTeamId: number; toTeamId: number }>;
+}) {
+  const { data, error } = await supabase.rpc("create_admin_three_team_trade", {
+    p_season_year: seasonYear,
+    p_team_1_id: team1Id,
+    p_team_2_id: team2Id,
+    p_team_3_id: team3Id,
+    p_notes: notes,
+    p_player_moves: playerMoves,
+  });
+  if (error) throw error;
+  return data;
 }
 
 export async function updateTradeOfferStatus({

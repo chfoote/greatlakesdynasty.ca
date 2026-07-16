@@ -44,6 +44,13 @@ export type FantasyTeamManagerTenure = {
   end_season: number | null;
 };
 
+export type FantasyTeamFinish = {
+  id: number;
+  fantasy_team_id: number;
+  season_year: number;
+  placement: 1 | 2 | 3;
+};
+
 export async function fetchFantasyTeams(includeInactive = false) {
   let query = supabase
     .from("fantasy_teams")
@@ -143,6 +150,31 @@ export async function deleteTeamManagerTenure(id: number) {
     .from("fantasy_team_manager_tenures")
     .delete()
     .eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchTeamFinishes(teamId: number) {
+  const { data, error } = await supabase
+    .from("fantasy_team_finishes")
+    .select("*")
+    .eq("fantasy_team_id", teamId)
+    .order("season_year", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as FantasyTeamFinish[];
+}
+
+export async function createTeamFinish(input: Omit<FantasyTeamFinish, "id">) {
+  const { data, error } = await supabase
+    .from("fantasy_team_finishes")
+    .insert(input)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as FantasyTeamFinish;
+}
+
+export async function deleteTeamFinish(id: number) {
+  const { error } = await supabase.from("fantasy_team_finishes").delete().eq("id", id);
   if (error) throw error;
 }
 

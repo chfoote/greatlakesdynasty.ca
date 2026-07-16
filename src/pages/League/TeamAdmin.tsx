@@ -6,14 +6,18 @@ import Label from "../../components/form/Label";
 import Checkbox from "../../components/form/input/Checkbox";
 import {
   createFantasyTeam,
+  createTeamFinish,
   createTeamManagerTenure,
   deactivateFantasyTeam,
   deleteTeamManagerTenure,
+  deleteTeamFinish,
   FantasyTeam,
   FantasyTeamInput,
   FantasyTeamManagerTenure,
+  FantasyTeamFinish,
   fetchFantasyTeams,
   fetchTeamManagerTenures,
+  fetchTeamFinishes,
   updateFantasyTeam,
   uploadTeamLogo,
 } from "../../lib/fantasyTeams";
@@ -87,6 +91,9 @@ export default function TeamAdmin() {
   const [tenureName, setTenureName] = useState("");
   const [tenureStart, setTenureStart] = useState(2026);
   const [tenureEnd, setTenureEnd] = useState<number | "">("");
+  const [teamFinishes, setTeamFinishes] = useState<FantasyTeamFinish[]>([]);
+  const [finishYear, setFinishYear] = useState(2026);
+  const [finishPlacement, setFinishPlacement] = useState<1 | 2 | 3>(1);
 
   const activeCount = useMemo(
     () => teams.filter((team) => team.active).length,
@@ -122,6 +129,7 @@ export default function TeamAdmin() {
     setError("");
     setSuccess("");
     setManagerTenures([]);
+    setTeamFinishes([]);
   }
 
   async function selectTeam(team: FantasyTeam) {
@@ -130,9 +138,63 @@ export default function TeamAdmin() {
     setError("");
     setSuccess("");
     try {
-      setManagerTenures(await fetchTeamManagerTenures(team.id));
+      const [tenures, finishes] = await Promise.all([
+        fetchTeamManagerTenures(team.id),
+        fetchTeamFinishes(team.id),
+      ]);
+      setManagerTenures(tenures);
+      setTeamFinishes(finishes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load manager history.");
+    }
+  }
+
+  async function addTeamFinish() {
+    if (!editingTeam) return;
+    setSaving(true);
+    setError("");
+    try {
+      await createTeamFinish({
+        fantasy_team_id: editingTeam.id,
+        season_year: finishYear,
+        placement: finishPlacement,
+      });
+      const finishes = await fetchTeamFinishes(editingTeam.id);
+      setTeamFinishes(finishes);
+      setForm((current) => ({
+        ...current,
+        championships: finishes.filter((finish) => finish.placement === 1).length,
+        runner_up_finishes: finishes.filter((finish) => finish.placement === 2).length,
+        third_place_finishes: finishes.filter((finish) => finish.placement === 3).length,
+      }));
+      setSuccess(`${finishYear} finish added.`);
+      await loadTeams();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to add finish history.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeTeamFinish(id: number) {
+    if (!editingTeam) return;
+    setSaving(true);
+    try {
+      await deleteTeamFinish(id);
+      const finishes = await fetchTeamFinishes(editingTeam.id);
+      setTeamFinishes(finishes);
+      setForm((current) => ({
+        ...current,
+        championships: finishes.filter((finish) => finish.placement === 1).length,
+        runner_up_finishes: finishes.filter((finish) => finish.placement === 2).length,
+        third_place_finishes: finishes.filter((finish) => finish.placement === 3).length,
+      }));
+      setSuccess("Finish history removed.");
+      await loadTeams();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to remove finish history.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -486,6 +548,37 @@ export default function TeamAdmin() {
               </div>
             )}
 
+            {editingTeam && (
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white/90">League Finish History</p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Add the team&apos;s placement for each completed season. Medal totals update automatically.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {teamFinishes.map((finish) => (
+                    <div key={finish.id} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-gray-600 dark:text-gray-300">
+                        {finish.placement === 1 ? "🥇" : finish.placement === 2 ? "🥈" : "🥉"} {finish.season_year}
+                      </span>
+                      <button type="button" onClick={() => void removeTeamFinish(finish.id)} disabled={saving} className="text-error-600 hover:underline">Remove</button>
+                    </div>
+                  ))}
+                  {teamFinishes.length === 0 && <p className="text-xs text-gray-500">No finish history yet.</p>}
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <Input type="number" min="2026" step={1} value={finishYear} onChange={(event) => setFinishYear(Number(event.target.value))} />
+                  <select value={finishPlacement} onChange={(event) => setFinishPlacement(Number(event.target.value) as 1 | 2 | 3)} className="h-11 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+                    <option value={1}>🥇 First Place</option>
+                    <option value={2}>🥈 Second Place</option>
+                    <option value={3}>🥉 Third Place</option>
+                  </select>
+                </div>
+                <button type="button" onClick={() => void addTeamFinish()} disabled={saving} className="mt-3 w-full rounded-lg border border-brand-500 px-3 py-2 text-sm font-medium text-brand-500 disabled:opacity-50">
+                  Add Season Finish
+                </button>
+              </div>
+            )}
+
             <div>
               <Label htmlFor="eastern_farm_system">Eastern Farm System</Label>
               <Input
@@ -515,7 +608,7 @@ export default function TeamAdmin() {
                   min="0"
                   step={1}
                   value={form.championships}
-                  onChange={(event) => updateField("championships", Number(event.target.value))}
+                  disabled
                 />
               </div>
               <div>
@@ -526,7 +619,7 @@ export default function TeamAdmin() {
                   min="0"
                   step={1}
                   value={form.runner_up_finishes}
-                  onChange={(event) => updateField("runner_up_finishes", Number(event.target.value))}
+                  disabled
                 />
               </div>
               <div>
@@ -537,7 +630,7 @@ export default function TeamAdmin() {
                   min="0"
                   step={1}
                   value={form.third_place_finishes}
-                  onChange={(event) => updateField("third_place_finishes", Number(event.target.value))}
+                  disabled
                 />
               </div>
             </div>

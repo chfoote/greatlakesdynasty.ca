@@ -1,4 +1,6 @@
 import type { PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import type { PlayerAward } from "../../lib/awards";
+import PlayerAwardBadges from "./PlayerAwardBadges";
 
 const currencyFormatter = new Intl.NumberFormat("en-CA", {
   style: "currency",
@@ -11,11 +13,13 @@ export default function NhlPlayerCell({
   teamAbbreviation,
   fantasySeason,
   showNhlTeam = true,
+  awards = [],
 }: {
   playerName: string;
   teamAbbreviation: string;
   fantasySeason?: PlayerSeasonWithRelations;
   showNhlTeam?: boolean;
+  awards?: PlayerAward[];
 }) {
   const salary = fantasySeason?.salary;
 
@@ -36,6 +40,7 @@ export default function NhlPlayerCell({
       </div>
       <div className="text-left">
         <span className="font-medium text-gray-800 dark:text-white/90">{playerName}</span>
+        <PlayerAwardBadges awards={awards} />
         <p className="mt-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
           {[
             showNhlTeam ? teamAbbreviation : null,

@@ -7,34 +7,24 @@ import {
   type PlayerSeasonWithRelations,
 } from "../../lib/fantasyPlayers";
 import {
-  fetchMlbStats,
-  type MlbStatRecord,
-} from "../../lib/mlb";
+  fetchNhlGoalieStats,
+  fetchNhlSkaterStats,
+  getGoalieScore,
+  getSkaterScore,
+  type NhlGoalieRecord,
+  type NhlSkaterRecord,
+} from "../../lib/nhl";
 
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
 
-const batterSlots = [
-  { key: "C", position: "C", label: "C", slotIndex: 0 },
-  { key: "1B", position: "1B", label: "1B", slotIndex: 0 },
-  { key: "2B", position: "2B", label: "2B", slotIndex: 0 },
-  { key: "SS", position: "SS", label: "SS", slotIndex: 0 },
-  { key: "3B", position: "3B", label: "3B", slotIndex: 0 },
-  { key: "OF1", position: "OF", label: "OF1", slotIndex: 0 },
-  { key: "OF2", position: "OF", label: "OF2", slotIndex: 1 },
-  { key: "OF3", position: "OF", label: "OF3", slotIndex: 2 },
-  { key: "DH", position: "DH", label: "DH", slotIndex: 0 },
+const skaterSlots = [
+  ...Array.from({ length: 3 }, (_, index) => ({ key: `C${index + 1}`, position: "C", label: `C${index + 1}`, slotIndex: index })),
+  ...Array.from({ length: 3 }, (_, index) => ({ key: `LW${index + 1}`, position: "LW", label: `LW${index + 1}`, slotIndex: index })),
+  ...Array.from({ length: 3 }, (_, index) => ({ key: `RW${index + 1}`, position: "RW", label: `RW${index + 1}`, slotIndex: index })),
+  ...Array.from({ length: 6 }, (_, index) => ({ key: `D${index + 1}`, position: "D", label: `D${index + 1}`, slotIndex: index })),
 ];
-
-const pitcherSlots = [
-  { key: "SP1", position: "SP", label: "SP1", slotIndex: 0 },
-  { key: "SP2", position: "SP", label: "SP2", slotIndex: 1 },
-  { key: "SP3", position: "SP", label: "SP3", slotIndex: 2 },
-  { key: "SP4", position: "SP", label: "SP4", slotIndex: 3 },
-  { key: "SP5", position: "SP", label: "SP5", slotIndex: 4 },
-  { key: "RP", position: "RP", label: "RP", slotIndex: 0 },
-];
-
-const standingsSlots = [...batterSlots, ...pitcherSlots];
+const goalieSlots = Array.from({ length: 2 }, (_, index) => ({ key: `G${index + 1}`, position: "G", label: `G${index + 1}`, slotIndex: index }));
+const standingsSlots = [...skaterSlots, ...goalieSlots];
 
 type StandingsRow = {
   team: FantasyTeam;
@@ -44,32 +34,6 @@ type StandingsRow = {
   pointsBehind: number;
 };
 
-function getBatterScore(record: MlbStatRecord | undefined) {
-  if (!record) return 0;
-
-  return (
-    Number(record.stats.runs ?? 0) * 1 +
-    Number(record.stats.hits ?? 0) * 1 +
-    Number(record.stats.doubles ?? 0) * 1 +
-    Number(record.stats.triples ?? 0) * 2 +
-    Number(record.stats.homeRuns ?? 0) * 3 +
-    Number(record.stats.rbi ?? 0) * 1 +
-    Number(record.stats.stolenBases ?? 0) * 2
-  );
-}
-
-function getPitcherScore(record: MlbStatRecord | undefined) {
-  if (!record) return 0;
-
-  return (
-    Number(record.stats.wins ?? 0) * 8 +
-    Number(record.stats.strikeOuts ?? 0) * 1 +
-    Number(record.stats.saves ?? 0) * 6 +
-    Number(record.stats.completeGames ?? 0) * 5 +
-    Number(record.stats.shutouts ?? 0) * 5
-  );
-}
-
 function getPlayerApiId(season: PlayerSeasonWithRelations) {
   return season.player?.player_api_id || "";
 }
@@ -78,17 +42,23 @@ function getPosition(season: PlayerSeasonWithRelations) {
   return (season.position || "").toUpperCase();
 }
 
-function scoreSlot(
+function scoreSlot<T>(
   players: PlayerSeasonWithRelations[],
   slot: { position: string; slotIndex: number },
-  stats: Map<string, MlbStatRecord>,
-  getScore: (record: MlbStatRecord | undefined) => number,
+  stats: Map<string, T>,
+  getScore: (record: T) => number,
 ) {
   return players
     .filter((season) => getPosition(season) === slot.position)
-    .map((season) => getScore(stats.get(getPlayerApiId(season))))
+    .map((season) => stats.get(getPlayerApiId(season)))
+    .filter((record): record is T => Boolean(record))
+    .map(getScore)
     .sort((a, b) => b - a)
     [slot.slotIndex] || 0;
+}
+
+function nhlSeasonId(year: number) {
+  return (year - 1) * 10000 + year;
 }
 
 function average(values: number[]) {
@@ -148,8 +118,8 @@ export default function Standings() {
   const [selectedSeason, setSelectedSeason] = useState(2026);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
-  const [hittingStats, setHittingStats] = useState<Map<string, MlbStatRecord>>(new Map());
-  const [pitchingStats, setPitchingStats] = useState<Map<string, MlbStatRecord>>(new Map());
+  const [skaterStats, setSkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
+  const [goalieStats, setGoalieStats] = useState<Map<string, NhlGoalieRecord>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -162,28 +132,16 @@ export default function Standings() {
     Promise.all([
       fetchFantasyTeams(),
       fetchPlayerSeasonsBySeason(selectedSeason),
-      fetchMlbStats("hitting", selectedSeason),
-      fetchMlbStats("pitching", selectedSeason),
+      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
+      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
     ])
-      .then(([teamRows, seasonRows, hitters, pitchers]) => {
+      .then(([teamRows, seasonRows, skaters, goalies]) => {
         if (!active) return;
 
         setTeams(teamRows);
         setPlayerSeasons(seasonRows);
-        setHittingStats(
-          new Map(
-            hitters
-              .filter((record) => record.playerId)
-              .map((record) => [String(record.playerId), record]),
-          ),
-        );
-        setPitchingStats(
-          new Map(
-            pitchers
-              .filter((record) => record.playerId)
-              .map((record) => [String(record.playerId), record]),
-          ),
-        );
+        setSkaterStats(new Map(skaters.map((record) => [String(record.playerId), record])));
+        setGoalieStats(new Map(goalies.map((record) => [String(record.playerId), record])));
       })
       .catch((err) => {
         if (active) {
@@ -208,22 +166,12 @@ export default function Standings() {
       );
       const slotScores: Record<string, number> = {};
 
-      batterSlots.forEach((slot) => {
-        slotScores[slot.key] = scoreSlot(
-          teamPlayers,
-          slot,
-          hittingStats,
-          getBatterScore,
-        );
+      skaterSlots.forEach((slot) => {
+        slotScores[slot.key] = scoreSlot(teamPlayers, slot, skaterStats, getSkaterScore);
       });
 
-      pitcherSlots.forEach((slot) => {
-        slotScores[slot.key] = scoreSlot(
-          teamPlayers,
-          slot,
-          pitchingStats,
-          getPitcherScore,
-        );
+      goalieSlots.forEach((slot) => {
+        slotScores[slot.key] = scoreSlot(teamPlayers, slot, goalieStats, getGoalieScore);
       });
 
       return {
@@ -246,7 +194,7 @@ export default function Standings() {
       rank: index + 1,
       pointsBehind: leaderPoints - row.points,
     }));
-  }, [teams, playerSeasons, hittingStats, pitchingStats]);
+  }, [teams, playerSeasons, skaterStats, goalieStats]);
 
   const averageRow = useMemo(() => {
     const slotScores = Object.fromEntries(
@@ -291,7 +239,7 @@ export default function Standings() {
               Standings
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Top positional scorers from each team's active scoring slots. Insert text here.
+              Top 3 centers, left wings and right wings, top 6 defence, and top 2 goalies using GLDHL scoring.
             </p>
           </div>
 

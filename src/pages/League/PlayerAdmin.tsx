@@ -21,6 +21,7 @@ import {
 } from "../../lib/fantasyPlayers";
 import { PencilIcon, PlusIcon, TrashBinIcon } from "../../icons";
 import { postSigningTransaction, type TransactionAction } from "../../lib/transactions";
+import { fetchTradeOffers, type TradeOffer } from "../../lib/tradeOffers";
 
 const currentYear = new Date().getFullYear();
 
@@ -44,6 +45,8 @@ type SeasonForm = {
   notes: string;
   transaction_date: string;
   transaction_action: TransactionAction;
+  related_trade_offer_id: string;
+  transaction_position: string;
 };
 
 const emptySeasonForm: SeasonForm = {
@@ -57,6 +60,8 @@ const emptySeasonForm: SeasonForm = {
   notes: "",
   transaction_date: new Date().toLocaleDateString("en-CA"),
   transaction_action: "signed",
+  related_trade_offer_id: "",
+  transaction_position: "",
 };
 
 function normalizePlayerForm(form: FantasyPlayerInput): FantasyPlayerInput {
@@ -96,6 +101,7 @@ export default function PlayerAdmin() {
   const [players, setPlayers] = useState<FantasyPlayer[]>([]);
   const [seasons, setSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
+  const [completedTrades, setCompletedTrades] = useState<TradeOffer[]>([]);
   const [playerForm, setPlayerForm] = useState<FantasyPlayerInput>(emptyPlayerForm);
   const [seasonForm, setSeasonForm] = useState<SeasonForm>(emptySeasonForm);
   const [editingPlayer, setEditingPlayer] = useState<FantasyPlayer | null>(null);
@@ -133,6 +139,14 @@ export default function PlayerAdmin() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const seasonYear = Number(seasonForm.season_year);
+    if (!seasonYear) return;
+    fetchTradeOffers(seasonYear)
+      .then((offers) => setCompletedTrades(offers.filter((offer) => offer.status === "completed")))
+      .catch(() => setCompletedTrades([]));
+  }, [seasonForm.season_year]);
 
   function resetPlayerForm() {
     setPlayerForm(emptyPlayerForm);
@@ -208,6 +222,8 @@ export default function PlayerAdmin() {
             updatedSeason,
             seasonForm.transaction_date,
             seasonForm.transaction_action,
+            seasonForm.related_trade_offer_id ? Number(seasonForm.related_trade_offer_id) : null,
+            seasonForm.transaction_position || null,
           );
         }
         prepareNextContractSeason();
@@ -223,6 +239,8 @@ export default function PlayerAdmin() {
             createdSeason,
             seasonForm.transaction_date,
             seasonForm.transaction_action,
+            seasonForm.related_trade_offer_id ? Number(seasonForm.related_trade_offer_id) : null,
+            seasonForm.transaction_position || null,
           );
         }
         prepareNextContractSeason();
@@ -461,6 +479,8 @@ export default function PlayerAdmin() {
                                 notes: season.notes || "",
                                 transaction_date: new Date().toLocaleDateString("en-CA"),
                                 transaction_action: "signed",
+                                related_trade_offer_id: "",
+                                transaction_position: "",
                               });
                             }}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03]"
@@ -771,6 +791,37 @@ export default function PlayerAdmin() {
                       Action and date are used only when you click Save and Publish.
                     </p>
                   </div>
+                  <div>
+                    <Label htmlFor="transaction_position">Transaction Position (optional)</Label>
+                    <select
+                      id="transaction_position"
+                      value={seasonForm.transaction_position}
+                      onChange={(event) => setSeasonForm((current) => ({ ...current, transaction_position: event.target.value }))}
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                    >
+                      <option value="">Use season position ({seasonForm.position || "not set"})</option>
+                      {['C', 'LW', 'RW', 'D', 'G', 'PROSPECT', 'W', 'IR', 'LTIR', 'RETENTION', 'BUYOUT'].map((position) => <option key={position} value={position}>{position}</option>)}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Snapshots how the player should appear in this historical transaction without changing their roster position.</p>
+                  </div>
+                  {seasonForm.transaction_action === "traded" && (
+                    <div>
+                      <Label htmlFor="related_trade_offer_id">Related Completed Trade (optional)</Label>
+                      <select
+                        id="related_trade_offer_id"
+                        value={seasonForm.related_trade_offer_id}
+                        onChange={(event) => setSeasonForm((current) => ({ ...current, related_trade_offer_id: event.target.value }))}
+                        className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                      >
+                        <option value="">No related trade</option>
+                        {completedTrades.map((offer) => (
+                          <option key={offer.id} value={offer.id}>
+                            Trade #{offer.id}: {[offer.from_team?.team_name, offer.to_team?.team_name, offer.third_team?.team_name].filter(Boolean).join(" / ")}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
               </div>
             </div>
 
