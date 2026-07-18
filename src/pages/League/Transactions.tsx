@@ -1,9 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
 import { deleteLeagueTransaction, fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
+
+const transactionTypeOptions = [
+  { value: "trade", label: "Trades" },
+  { value: "signed", label: "Signed" },
+  { value: "called_up", label: "Called-up" },
+  { value: "waived", label: "Waived" },
+  { value: "claimed", label: "Claimed" },
+  { value: "bought_out", label: "Bought out" },
+  { value: "retained", label: "Retained" },
+  { value: "injured_reserve", label: "Injured Reserve" },
+  { value: "long_term_injured_reserve", label: "Long Term Injured Reserve" },
+  { value: "released_to_rfa_offer", label: "Released to RFA Offer" },
+  { value: "matched_rfa_offer", label: "Matched RFA Offer" },
+  { value: "traded", label: "Acquired via Trade" },
+] as const;
 
 const money = new Intl.NumberFormat("en-CA", {
   style: "currency",
@@ -138,6 +153,13 @@ function TeamLogo({ team }: { team: LeagueTransaction["fantasy_team"] }) {
   );
 }
 
+function transactionTeams(transaction: LeagueTransaction) {
+  const teams = transaction.trade_offer_id
+    ? [transaction.trade_offer?.from_team, transaction.trade_offer?.to_team, transaction.trade_offer?.third_team]
+    : [transaction.fantasy_team];
+  return teams.filter((team): team is NonNullable<typeof team> => Boolean(team));
+}
+
 export function TradeTransactionDetails({ transaction }: { transaction: LeagueTransaction }) {
   const trade = transaction.trade_offer;
   const teams = [trade?.from_team, trade?.to_team, trade?.third_team].filter(Boolean);
@@ -209,6 +231,8 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
 
   async function handleDeleteTransaction(transaction: LeagueTransaction) {
     if (transaction.trade_offer_id) return;
@@ -232,6 +256,28 @@ export default function Transactions() {
       .finally(() => setLoading(false));
   }, []);
 
+  const filterTeams = useMemo(() => {
+    const teams = new Map<number, ReturnType<typeof transactionTeams>[number]>();
+    transactions.forEach((transaction) => transactionTeams(transaction).forEach((team) => teams.set(team.id, team)));
+    return [...teams.values()].sort((a, b) => a.id - b.id);
+  }, [transactions]);
+
+  const filteredTransactions = useMemo(() => transactions.filter((transaction) => {
+    const transactionType = transaction.trade_offer_id ? "trade" : transaction.action;
+    if (typeFilter !== "all" && transactionType !== typeFilter) return false;
+    if (selectedTeamIds.size && !transactionTeams(transaction).some((team) => selectedTeamIds.has(team.id))) return false;
+    return true;
+  }), [transactions, typeFilter, selectedTeamIds]);
+
+  function toggleTeam(teamId: number) {
+    setSelectedTeamIds((current) => {
+      const next = new Set(current);
+      if (next.has(teamId)) next.delete(teamId);
+      else next.add(teamId);
+      return next;
+    });
+  }
+
   return (
     <div>
       <PageMeta title="Great Lakes Dynasty Hockey League" description="Great Lakes Dynasty Hockey League transactions" />
@@ -242,13 +288,36 @@ export default function Transactions() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Official GLDHL signings and player transactions.</p>
         </div>
 
+        {!loading && !error && transactions.length > 0 && <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)_auto] md:items-end">
+            <div>
+              <label htmlFor="transaction-type" className="mb-1.5 block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Transaction Type</label>
+              <select id="transaction-type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900">
+                <option value="all">All Transactions</option>
+                {transactionTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">User Team <span className="font-normal normal-case">(select multiple)</span></p>
+              <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">{filterTeams.map((team) => {
+                const checked = selectedTeamIds.has(team.id);
+                return <button key={team.id} type="button" onClick={() => toggleTeam(team.id)} title={team.team_name} className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${checked ? "border-brand-500 bg-brand-500 text-white" : "border-gray-300 bg-white text-gray-600 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"}`}>{team.abbreviation}</button>;
+              })}</div>
+            </div>
+            <button type="button" onClick={() => { setTypeFilter("all"); setSelectedTeamIds(new Set()); }} className="h-10 whitespace-nowrap rounded-lg border border-gray-300 px-3 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900">Clear Filters</button>
+          </div>
+          <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">Showing {filteredTransactions.length} of {transactions.length} transactions.</p>
+        </div>}
+
         {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Loading transactions…</p>}
         {error && <p className="rounded-lg border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">{error}</p>}
         {!loading && !error && transactions.length === 0 && <p className="text-sm text-gray-500 dark:text-gray-400">No transactions have been posted yet.</p>}
 
-        {!loading && !error && transactions.length > 0 && (
+        {!loading && !error && transactions.length > 0 && filteredTransactions.length === 0 && <p className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">No transactions match the selected filters.</p>}
+
+        {!loading && !error && filteredTransactions.length > 0 && (
           <div className="space-y-4">
-            {transactions.map((transaction) => (
+            {filteredTransactions.map((transaction) => (
               <article
                 key={transaction.id}
                 id={transaction.trade_offer_id ? `trade-${transaction.trade_offer_id}` : undefined}

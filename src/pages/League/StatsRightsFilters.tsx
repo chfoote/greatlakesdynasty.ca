@@ -24,11 +24,11 @@ export default function StatsRightsFilters({
   onClear: () => void;
 }) {
   return <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-    <div className="grid gap-4 md:grid-cols-[180px_180px_minmax(0,1fr)_auto] md:items-end">
+    <div className={`grid gap-4 md:items-end ${positions ? "md:grid-cols-[180px_180px_minmax(0,1fr)_auto]" : "md:grid-cols-[180px_minmax(0,1fr)_auto]"}`}>
       {positions && <div><label className="mb-1.5 block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Position</label><select value={position || "all"} onChange={(event) => onPositionChange?.(event.target.value)} className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"><option value="all">All Positions</option>{positions.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>}
       <div><label className="mb-1.5 block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Rights</label><select value={rights} onChange={(event) => onRightsChange(event.target.value as RightsFilter)} className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900"><option value="all">All Players</option><option value="owned">Owned</option><option value="unowned">Not Owned</option></select></div>
       <div><p className="mb-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">User Team <span className="normal-case font-normal">(select multiple)</span></p><div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto">{teams.map((team) => { const checked = selectedTeamIds.has(team.id); return <button key={team.id} type="button" onClick={() => onToggleTeam(team.id)} className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${checked ? "border-brand-500 bg-brand-500 text-white" : "border-gray-300 bg-white text-gray-600 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"}`}>{team.abbreviation}</button>; })}</div></div>
-      <button type="button" onClick={onClear} className="h-10 rounded-lg border border-gray-300 px-3 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900">Clear Filters</button>
+      <button type="button" onClick={onClear} className="h-10 whitespace-nowrap rounded-lg border border-gray-300 px-3 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-900">Clear Filters</button>
     </div>
   </div>;
 }
