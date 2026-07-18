@@ -1,18 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { useNavigate } from "react-router";
 import { useAuth } from "../../context/AuthContext";
+import { fetchProfile } from "../../lib/profiles";
 
 export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const [profileName, setProfileName] = useState("");
 
   const firstName = (user?.user_metadata?.first_name as string) || "";
   const lastName = (user?.user_metadata?.last_name as string) || "";
-  const fullName = `${firstName} ${lastName}`.trim() || "User";
+  const fullName = profileName || `${firstName} ${lastName}`.trim() || user?.email || "User";
   const email = user?.email || "";
+
+  useEffect(() => {
+    if (!user) {
+      setProfileName("");
+      return;
+    }
+    fetchProfile(user.id).then((profile) => setProfileName(profile?.display_name?.trim() || "")).catch(() => setProfileName(""));
+  }, [user]);
+
+  const avatarInitials = fullName.replace(/@.*$/, "").split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "GL";
 
   function toggleDropdown() {
     setIsOpen(!isOpen);
@@ -46,8 +58,8 @@ export default function UserDropdown() {
         onClick={toggleDropdown}
         className="flex items-center text-gray-700 dropdown-toggle dark:text-gray-400"
       >
-        <span className="mr-3 overflow-hidden rounded-full h-11 w-11">
-          <img src="/images/user/owner.jpg" alt="User" />
+        <span className="mr-3 flex h-11 w-11 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-600 dark:bg-brand-500/15 dark:text-brand-300" aria-hidden="true">
+          {avatarInitials}
         </span>
 
         <span className="block mr-1 font-medium text-theme-sm">{fullName}</span>
