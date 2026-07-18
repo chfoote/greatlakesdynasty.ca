@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
@@ -91,7 +92,7 @@ function podiumRankClass(rank: number) {
   return "text-gray-500 dark:text-gray-400";
 }
 
-function TeamCell({ row }: { row: StandingsRow }) {
+function TeamCell({ row, season }: { row: StandingsRow; season: number }) {
   return (
     <div className="flex min-w-56 items-center gap-3">
       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${podiumRankClass(row.rank)}`}>
@@ -111,9 +112,9 @@ function TeamCell({ row }: { row: StandingsRow }) {
         )}
       </div>
       <div>
-        <p className="font-medium text-gray-800 dark:text-white/90">
+        <Link to={`/teams/${row.team.id}?season=${season}`} className="font-medium text-brand-500 hover:text-brand-600 hover:underline">
           {row.team.team_name}
-        </p>
+        </Link>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           {row.team.abbreviation}
         </p>
@@ -323,7 +324,7 @@ export default function Standings() {
                     className="hover:bg-gray-50 dark:hover:bg-white/[0.03]"
                   >
                     <td className="sticky left-0 z-10 bg-white px-3 py-3 dark:bg-gray-900">
-                      <TeamCell row={row} />
+                      <TeamCell row={row} season={selectedSeason} />
                     </td>
                     {standingsSlots.map((slot) => (
                       <td

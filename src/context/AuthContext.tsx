@@ -27,7 +27,7 @@ type AuthContextType = {
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const bootstrapAdminEmails = new Set(["charlesfoote13@gmail.com"]);
+const bootstrapAdminEmails = new Set(["sales@sg-print.com"]);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);

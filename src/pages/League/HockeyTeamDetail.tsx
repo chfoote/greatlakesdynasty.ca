@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import {
@@ -294,11 +294,15 @@ const emptyGoalie: NhlGoalieRecord = { playerId: 0, goalieFullName: "", teamAbbr
 
 export default function HockeyTeamDetail() {
   const { abbreviation = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedSeason = Number(searchParams.get("season"));
   const [team, setTeam] = useState<FantasyTeam | null>(null);
   const [managerTenures, setManagerTenures] = useState<FantasyTeamManagerTenure[]>([]);
   const [teamFinishes, setTeamFinishes] = useState<FantasyTeamFinish[]>([]);
   const [brandingHistory, setBrandingHistory] = useState<FantasyTeamBranding[]>([]);
-  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
+  const [selectedSeason, setSelectedSeason] = useState(
+    seasonOptions.includes(requestedSeason) ? requestedSeason : CURRENT_LEAGUE_SEASON,
+  );
   const [viewMode, setViewMode] = useState<"single" | "multi">("single");
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [multiYearRosters, setMultiYearRosters] = useState<Record<number, PlayerSeasonWithRelations[]>>({});
@@ -308,6 +312,11 @@ export default function HockeyTeamDetail() {
   const [error, setError] = useState("");
   const [statsError, setStatsError] = useState("");
   const [awardsByPlayer, setAwardsByPlayer] = useState<Map<number, PlayerAward[]>>(new Map());
+
+  function handleSeasonChange(year: number) {
+    setSelectedSeason(year);
+    setSearchParams({ season: String(year) }, { replace: true });
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -410,7 +419,7 @@ export default function HockeyTeamDetail() {
         <div className="mt-4 grid grid-cols-3 gap-3"><Medal icon="🥇" value={team.championships} label="Championships" years={finishYears(1)} tone="gold" /><Medal icon="🥈" value={team.runner_up_finishes} label="Runner-up finishes" years={finishYears(2)} tone="silver" /><Medal icon="🥉" value={team.third_place_finishes} label="Third-place finishes" years={finishYears(3)} tone="bronze" /></div>
 
         <div className="mt-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">Roster &amp; Payroll</h3><p className="text-xs text-gray-500">Active roster limit: {ROSTER_LIMIT} players.</p></div><div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end"><div className="inline-flex h-11 rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setViewMode("single")} className={`rounded-md px-3 text-sm font-medium ${viewMode === "single" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Single Season</button><button type="button" onClick={() => setViewMode("multi")} className={`rounded-md px-3 text-sm font-medium ${viewMode === "multi" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Multi-Year</button></div><div className="w-full sm:w-44"><label htmlFor="season" className="mb-1 block text-sm font-medium">{viewMode === "multi" ? "Starting Season" : "Season"}</label><select id="season" value={selectedSeason} onChange={(event) => setSelectedSeason(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div></div></div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">Roster &amp; Payroll</h3><p className="text-xs text-gray-500">Active roster limit: {ROSTER_LIMIT} players.</p></div><div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end"><div className="inline-flex h-11 rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setViewMode("single")} className={`rounded-md px-3 text-sm font-medium ${viewMode === "single" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Single Season</button><button type="button" onClick={() => setViewMode("multi")} className={`rounded-md px-3 text-sm font-medium ${viewMode === "multi" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Multi-Year</button></div><div className="w-full sm:w-44"><label htmlFor="season" className="mb-1 block text-sm font-medium">{viewMode === "multi" ? "Starting Season" : "Season"}</label><select id="season" value={selectedSeason} onChange={(event) => handleSeasonChange(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div></div></div>
           {viewMode === "single" && <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><PayrollCard label="Salary Cap" value={money.format(salaryCap)} /><PayrollCard label="Cap Salary" value={money.format(capSalary)} /><PayrollCard label={capSpace >= 0 ? "Cap Space" : "Over Cap"} value={money.format(Math.abs(capSpace))} danger={capSpace < 0} /><PayrollCard label="Active Roster" value={`${rosterCount} / ${ROSTER_LIMIT}`} danger={rosterCount > ROSTER_LIMIT} /></div>}
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
