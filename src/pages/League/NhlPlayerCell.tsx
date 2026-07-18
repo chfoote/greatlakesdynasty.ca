@@ -1,6 +1,7 @@
 import type { PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import type { PlayerAward } from "../../lib/awards";
 import PlayerAwardBadges from "./PlayerAwardBadges";
+import { Link } from "react-router";
 
 const currencyFormatter = new Intl.NumberFormat("en-CA", {
   style: "currency",
@@ -10,18 +11,25 @@ const currencyFormatter = new Intl.NumberFormat("en-CA", {
 
 export default function NhlPlayerCell({
   playerName,
+  playerId,
   teamAbbreviation,
   fantasySeason,
   showNhlTeam = true,
   awards = [],
 }: {
   playerName: string;
+  playerId?: string | number;
   teamAbbreviation: string;
   fantasySeason?: PlayerSeasonWithRelations;
   showNhlTeam?: boolean;
   awards?: PlayerAward[];
 }) {
   const salary = fantasySeason?.salary;
+  const profilePlayerId = fantasySeason?.player?.player_api_id || playerId;
+  const isExpiring = Boolean(
+    fantasySeason?.term_end_year
+    && fantasySeason.term_end_year === fantasySeason.season_year,
+  );
 
   return (
     <div className="flex min-w-52 items-center gap-2">
@@ -39,9 +47,9 @@ export default function NhlPlayerCell({
         )}
       </div>
       <div className="text-left">
-        <span className="font-medium text-gray-800 dark:text-white/90">{playerName}</span>
+        {profilePlayerId ? <Link to={`/player-profile?playerId=${profilePlayerId}`} className="font-medium text-brand-500 hover:text-brand-600 hover:underline">{playerName}</Link> : <span className="font-medium text-gray-800 dark:text-white/90">{playerName}</span>}
         <PlayerAwardBadges awards={awards} />
-        <p className="mt-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+        <p className={`mt-0.5 text-[11px] font-medium ${isExpiring ? "text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
           {[
             showNhlTeam ? teamAbbreviation : null,
             salary === null || salary === undefined
@@ -51,6 +59,11 @@ export default function NhlPlayerCell({
           ]
             .filter(Boolean)
             .join(" | ")}
+          {isExpiring && (
+            <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">
+              Expiring
+            </span>
+          )}
         </p>
       </div>
     </div>

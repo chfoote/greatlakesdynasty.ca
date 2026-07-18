@@ -146,6 +146,16 @@ export async function fetchPlayerSeasonsBySeason(seasonYear: number) {
   return (data ?? []) as PlayerSeasonWithRelations[];
 }
 
+export async function fetchPlayerSeasonsByPlayer(playerId: number) {
+  const { data, error } = await supabase
+    .from("player_seasons")
+    .select("*, player:players(*), fantasy_team:fantasy_teams(*)")
+    .eq("player_id", playerId)
+    .order("season_year", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as PlayerSeasonWithRelations[];
+}
+
 export async function createPlayerSeason(season: PlayerSeasonInput) {
   const { data, error } = await supabase
     .from("player_seasons")

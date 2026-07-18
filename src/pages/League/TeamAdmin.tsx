@@ -7,17 +7,21 @@ import Checkbox from "../../components/form/input/Checkbox";
 import {
   createFantasyTeam,
   createTeamFinish,
+  createTeamBranding,
   createTeamManagerTenure,
   deactivateFantasyTeam,
   deleteTeamManagerTenure,
   deleteTeamFinish,
+  deleteTeamBranding,
   FantasyTeam,
   FantasyTeamInput,
   FantasyTeamManagerTenure,
   FantasyTeamFinish,
+  FantasyTeamBranding,
   fetchFantasyTeams,
   fetchTeamManagerTenures,
   fetchTeamFinishes,
+  fetchTeamBrandingHistory,
   updateFantasyTeam,
   uploadTeamLogo,
 } from "../../lib/fantasyTeams";
@@ -94,6 +98,14 @@ export default function TeamAdmin() {
   const [teamFinishes, setTeamFinishes] = useState<FantasyTeamFinish[]>([]);
   const [finishYear, setFinishYear] = useState(2026);
   const [finishPlacement, setFinishPlacement] = useState<1 | 2 | 3>(1);
+  const [brandingHistory, setBrandingHistory] = useState<FantasyTeamBranding[]>([]);
+  const [brandingStart, setBrandingStart] = useState(2027);
+  const [brandingEnd, setBrandingEnd] = useState<number | "">("");
+  const [brandingName, setBrandingName] = useState("");
+  const [brandingAbbreviation, setBrandingAbbreviation] = useState("");
+  const [brandingLogo, setBrandingLogo] = useState("");
+  const [brandingPrimary, setBrandingPrimary] = useState("#1d4ed8");
+  const [brandingSecondary, setBrandingSecondary] = useState("#f97316");
 
   const activeCount = useMemo(
     () => teams.filter((team) => team.active).length,
@@ -130,6 +142,7 @@ export default function TeamAdmin() {
     setSuccess("");
     setManagerTenures([]);
     setTeamFinishes([]);
+    setBrandingHistory([]);
   }
 
   async function selectTeam(team: FantasyTeam) {
@@ -138,15 +151,53 @@ export default function TeamAdmin() {
     setError("");
     setSuccess("");
     try {
-      const [tenures, finishes] = await Promise.all([
+      const [tenures, finishes, branding] = await Promise.all([
         fetchTeamManagerTenures(team.id),
         fetchTeamFinishes(team.id),
+        fetchTeamBrandingHistory(team.id),
       ]);
       setManagerTenures(tenures);
       setTeamFinishes(finishes);
+      setBrandingHistory(branding);
+      setBrandingName(team.team_name);
+      setBrandingAbbreviation(team.abbreviation);
+      setBrandingLogo(team.logo || "");
+      setBrandingPrimary(team.primary_color || "#1d4ed8");
+      setBrandingSecondary(team.secondary_color || "#f97316");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load manager history.");
     }
+  }
+
+  async function addBrandingSeason() {
+    if (!editingTeam || !brandingName.trim() || !brandingAbbreviation.trim()) return;
+    setSaving(true); setError("");
+    try {
+      await createTeamBranding({
+        fantasy_team_id: editingTeam.id,
+        start_season: brandingStart,
+        end_season: brandingEnd === "" ? null : brandingEnd,
+        team_name: brandingName.trim(),
+        abbreviation: brandingAbbreviation.trim().toUpperCase(),
+        logo: brandingLogo.trim() || null,
+        primary_color: brandingPrimary,
+        secondary_color: brandingSecondary,
+      });
+      setBrandingHistory(await fetchTeamBrandingHistory(editingTeam.id));
+      setSuccess("Team branding season added.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Unable to add branding history."); }
+    finally { setSaving(false); }
+  }
+
+  async function removeBrandingSeason(id: number) {
+    if (!editingTeam) return;
+    setSaving(true);
+    try {
+      await deleteTeamBranding(id);
+      setBrandingHistory(await fetchTeamBrandingHistory(editingTeam.id));
+      setSuccess("Branding history removed.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Unable to remove branding history."); }
+    finally { setSaving(false); }
   }
 
   async function addTeamFinish() {
@@ -544,6 +595,28 @@ export default function TeamAdmin() {
                   <button type="button" onClick={() => void addManagerTenure()} disabled={saving || !tenureName.trim()} className="rounded-lg border border-brand-500 px-3 py-2 text-sm font-medium text-brand-500 disabled:opacity-50">
                     Add Manager Season
                   </button>
+                </div>
+              </div>
+            )}
+
+            {editingTeam && (
+              <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white/90">Team Branding History</p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Preserve each name, abbreviation, logo, and colour set for Team ID {editingTeam.id}. Season ranges cannot overlap.</p>
+                <div className="mt-3 space-y-2">
+                  {brandingHistory.map((branding) => <div key={branding.id} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-2 text-sm dark:bg-gray-900">
+                    <div className="flex min-w-0 items-center gap-2">{branding.logo && <img src={branding.logo} alt="" className="h-8 w-8 rounded object-contain" />}<span className="truncate text-gray-700 dark:text-gray-300">{branding.team_name} ({branding.abbreviation}): {branding.start_season}–{branding.end_season || "present"}</span></div>
+                    <button type="button" onClick={() => void removeBrandingSeason(branding.id)} disabled={saving} className="text-xs text-error-600 hover:underline">Remove</button>
+                  </div>)}
+                  {!brandingHistory.length && <p className="text-xs text-gray-500">No seasonal branding history yet.</p>}
+                </div>
+                <div className="mt-4 grid gap-3">
+                  <div className="grid grid-cols-2 gap-3"><Input type="number" min="2026" value={brandingStart} onChange={(event) => setBrandingStart(Number(event.target.value))} placeholder="Start season" /><Input type="number" min={String(brandingStart)} value={brandingEnd} onChange={(event) => setBrandingEnd(event.target.value ? Number(event.target.value) : "")} placeholder="End (blank = current)" /></div>
+                  <Input value={brandingName} onChange={(event) => setBrandingName(event.target.value)} placeholder="Team name" />
+                  <Input value={brandingAbbreviation} onChange={(event) => setBrandingAbbreviation(event.target.value)} placeholder="Abbreviation" />
+                  <Input value={brandingLogo} onChange={(event) => setBrandingLogo(event.target.value)} placeholder="Logo URL" />
+                  <div className="grid grid-cols-2 gap-3"><input type="color" value={brandingPrimary} onChange={(event) => setBrandingPrimary(event.target.value)} className="h-11 w-full rounded-lg border border-gray-300 p-1 dark:border-gray-700" /><input type="color" value={brandingSecondary} onChange={(event) => setBrandingSecondary(event.target.value)} className="h-11 w-full rounded-lg border border-gray-300 p-1 dark:border-gray-700" /></div>
+                  <button type="button" onClick={() => void addBrandingSeason()} disabled={saving || !brandingName.trim() || !brandingAbbreviation.trim()} className="rounded-lg border border-brand-500 px-3 py-2 text-sm font-medium text-brand-500 disabled:opacity-50">Add Branding Season</button>
                 </div>
               </div>
             )}

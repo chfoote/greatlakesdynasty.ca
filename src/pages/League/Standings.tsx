@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import { fetchFantasyTeams, type FantasyTeam } from "../../lib/fantasyTeams";
+import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import {
   fetchPlayerSeasonsBySeason,
   type PlayerSeasonWithRelations,
@@ -14,8 +14,9 @@ import {
   type NhlGoalieRecord,
   type NhlSkaterRecord,
 } from "../../lib/nhl";
+import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 
-const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
+const seasonOptions = playedAndCurrentSeasons;
 
 const skaterSlots = [
   ...Array.from({ length: 3 }, (_, index) => ({ key: `C${index + 1}`, position: "C", label: `C${index + 1}`, slotIndex: index })),
@@ -83,10 +84,17 @@ function formatPoints(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function podiumRankClass(rank: number) {
+  if (rank === 1) return "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300";
+  if (rank === 2) return "bg-slate-200 text-slate-700 dark:bg-slate-400/20 dark:text-slate-200";
+  if (rank === 3) return "bg-orange-100 text-orange-800 dark:bg-orange-700/20 dark:text-orange-300";
+  return "text-gray-500 dark:text-gray-400";
+}
+
 function TeamCell({ row }: { row: StandingsRow }) {
   return (
     <div className="flex min-w-56 items-center gap-3">
-      <span className="w-8 shrink-0 text-sm font-semibold text-gray-500 dark:text-gray-400">
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${podiumRankClass(row.rank)}`}>
         {row.rank}
       </span>
       <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
@@ -115,7 +123,7 @@ function TeamCell({ row }: { row: StandingsRow }) {
 }
 
 export default function Standings() {
-  const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [skaterStats, setSkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
@@ -131,14 +139,15 @@ export default function Standings() {
 
     Promise.all([
       fetchFantasyTeams(),
+      fetchTeamBrandingHistory(),
       fetchPlayerSeasonsBySeason(selectedSeason),
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
+      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
+      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
     ])
-      .then(([teamRows, seasonRows, skaters, goalies]) => {
+      .then(([teamRows, brandingRows, seasonRows, skaters, goalies]) => {
         if (!active) return;
 
-        setTeams(teamRows);
+        setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
         setPlayerSeasons(seasonRows);
         setSkaterStats(new Map(skaters.map((record) => [String(record.playerId), record])));
         setGoalieStats(new Map(goalies.map((record) => [String(record.playerId), record])));

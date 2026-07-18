@@ -51,6 +51,18 @@ export type FantasyTeamFinish = {
   placement: 1 | 2 | 3;
 };
 
+export type FantasyTeamBranding = {
+  id: number;
+  fantasy_team_id: number;
+  start_season: number;
+  end_season: number | null;
+  team_name: string;
+  abbreviation: string;
+  logo: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+};
+
 export async function fetchFantasyTeams(includeInactive = false) {
   let query = supabase
     .from("fantasy_teams")
@@ -72,8 +84,11 @@ export async function fetchFantasyTeamByAbbreviation(
 ) {
   let query = supabase
     .from("fantasy_teams")
-    .select("*")
-    .ilike("abbreviation", abbreviation);
+    .select("*");
+
+  query = /^\d+$/.test(abbreviation)
+    ? query.eq("id", Number(abbreviation))
+    : query.ilike("abbreviation", abbreviation);
 
   if (!includeInactive) {
     query = query.eq("active", true);
@@ -82,6 +97,39 @@ export async function fetchFantasyTeamByAbbreviation(
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return data as FantasyTeam | null;
+}
+
+export async function fetchTeamBrandingHistory(teamId?: number) {
+  let query = supabase
+    .from("fantasy_team_branding_history")
+    .select("*")
+    .order("start_season", { ascending: true });
+  if (teamId) query = query.eq("fantasy_team_id", teamId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as FantasyTeamBranding[];
+}
+
+export function getBrandingForSeason(history: FantasyTeamBranding[], teamId: number, seasonYear: number) {
+  return [...history]
+    .filter((item) => item.fantasy_team_id === teamId && item.start_season <= seasonYear && (item.end_season === null || item.end_season >= seasonYear))
+    .sort((a, b) => b.start_season - a.start_season)[0] ?? null;
+}
+
+export function applyTeamBranding(team: FantasyTeam, history: FantasyTeamBranding[], seasonYear: number): FantasyTeam {
+  const branding = getBrandingForSeason(history, team.id, seasonYear);
+  return branding ? { ...team, team_name: branding.team_name, abbreviation: branding.abbreviation, logo: branding.logo, primary_color: branding.primary_color, secondary_color: branding.secondary_color } : team;
+}
+
+export async function createTeamBranding(input: Omit<FantasyTeamBranding, "id">) {
+  const { data, error } = await supabase.from("fantasy_team_branding_history").insert(input).select().single();
+  if (error) throw error;
+  return data as FantasyTeamBranding;
+}
+
+export async function deleteTeamBranding(id: number) {
+  const { error } = await supabase.from("fantasy_team_branding_history").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function createFantasyTeam(team: FantasyTeamInput) {

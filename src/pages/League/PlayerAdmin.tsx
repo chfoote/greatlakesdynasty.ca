@@ -674,6 +674,7 @@ export default function PlayerAdmin() {
                     <option value="LTIR">LTIR — Long-Term Injured Reserve</option>
                     <option value="RETENTION">Retention</option>
                     <option value="BUYOUT">Buyout</option>
+                    <option value="RFA">RFA Rights</option>
                     <option value="PROSPECT">Acquired Prospect</option>
                   </select>
                 </div>
@@ -800,7 +801,7 @@ export default function PlayerAdmin() {
                       className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
                     >
                       <option value="">Use season position ({seasonForm.position || "not set"})</option>
-                      {['C', 'LW', 'RW', 'D', 'G', 'PROSPECT', 'W', 'IR', 'LTIR', 'RETENTION', 'BUYOUT'].map((position) => <option key={position} value={position}>{position}</option>)}
+                      {['C', 'LW', 'RW', 'D', 'G', 'PROSPECT', 'RFA', 'W', 'IR', 'LTIR', 'RETENTION', 'BUYOUT'].map((position) => <option key={position} value={position}>{position}</option>)}
                     </select>
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Snapshots how the player should appear in this historical transaction without changing their roster position.</p>
                   </div>

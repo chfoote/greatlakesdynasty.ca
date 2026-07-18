@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import { fetchFantasyTeams, FantasyTeam } from "../../lib/fantasyTeams";
+import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, FantasyTeam } from "../../lib/fantasyTeams";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 
 export default function Teams() {
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
@@ -10,8 +11,8 @@ export default function Teams() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchFantasyTeams()
-      .then(setTeams)
+    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory()])
+      .then(([teamRows, branding]) => setTeams(teamRows.map((team) => applyTeamBranding(team, branding, CURRENT_LEAGUE_SEASON))))
       .catch((err) => setError(err.message || "Unable to load teams."))
       .finally(() => setLoading(false));
   }, []);
@@ -54,7 +55,7 @@ export default function Teams() {
             {teams.map((team) => (
               <Link
                 key={team.id}
-                to={`/teams/${team.abbreviation}`}
+                to={`/teams/${team.id}`}
                 className="rounded-lg border border-gray-200 bg-white p-5 shadow-theme-xs transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-theme-md dark:border-gray-800 dark:bg-gray-900 dark:hover:border-brand-500"
               >
                 <div className="flex items-start gap-4">

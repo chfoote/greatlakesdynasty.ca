@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import Checkbox from "../../components/form/input/Checkbox";
 import { useAuth } from "../../context/AuthContext";
-import { fetchFantasyTeams, type FantasyTeam } from "../../lib/fantasyTeams";
+import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import {
   fetchPlayerSeasonsByTeamAndSeason,
   type PlayerSeasonWithRelations,
@@ -31,11 +32,13 @@ import {
   type TradeOffer,
   type TradeOfferPlayer,
 } from "../../lib/tradeOffers";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
 const rosterLimit = 23;
 const positionOrder = ["C", "LW", "RW", "D", "G"];
-const nonRosterPositions = new Set(["W", "IR", "LTIR", "RETENTION", "BUYOUT", "PROSPECT", "AP"]);
+const activeRosterPositions = new Set(["C", "LW", "RW", "D", "G"]);
+const tradeablePositions = new Set([...activeRosterPositions, "RFA", "PROSPECT", "AP"]);
 const dismissableTradeStatuses = new Set(["admin_declined", "completed", "countered"]);
 
 function nhlSeasonId(year: number) {
@@ -195,11 +198,15 @@ function sumSalary(players: PlayerSeasonWithRelations[]) {
 }
 
 function getTradeableRoster(roster: PlayerSeasonWithRelations[]) {
-  return roster.filter((season) => !nonRosterPositions.has(getPosition(season)));
+  return roster.filter((season) => tradeablePositions.has(getPosition(season)));
 }
 
 function getRosterCount(roster: PlayerSeasonWithRelations[]) {
-  return getTradeableRoster(roster).length;
+  return roster.filter((season) => activeRosterPositions.has(getPosition(season))).length;
+}
+
+function getActivePlayerCount(players: PlayerSeasonWithRelations[]) {
+  return players.filter((season) => activeRosterPositions.has(getPosition(season))).length;
 }
 
 function ComplianceItem({
@@ -262,7 +269,7 @@ function TradeSummaryCard({
               key={season.id}
               className="text-sm text-gray-700 dark:text-gray-300"
             >
-              <span className="font-medium">{getPlayerName(season)}</span>
+              {season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="font-medium text-brand-500 hover:underline">{getPlayerName(season)}</Link> : <span className="font-medium">{getPlayerName(season)}</span>}
               <span className="text-gray-500 dark:text-gray-400">
                 {" "}
                 ({getContractLine(season)})
@@ -692,9 +699,7 @@ function TeamColumn({
                             )}
                           </div>
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                              {getPlayerName(season)}
-                            </p>
+                            <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{getPlayerName(season)}</Link> : getPlayerName(season)}</p>
                             <p className="mt-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                               {getContractLine(season)}
                             </p>
@@ -741,7 +746,7 @@ export default function TradeManager() {
   const [team2Id, setTeam2Id] = useState("");
   const [threeTeamMode, setThreeTeamMode] = useState(false);
   const [team3Id, setTeam3Id] = useState("");
-  const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [team1Roster, setTeam1Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [team2Roster, setTeam2Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [team3Roster, setTeam3Roster] = useState<PlayerSeasonWithRelations[]>([]);
@@ -788,8 +793,8 @@ export default function TradeManager() {
       setError("");
 
       try {
-        const teamRows = await fetchFantasyTeams();
-        if (active) setTeams(teamRows);
+        const [teamRows, branding] = await Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory()]);
+        if (active) setTeams(teamRows.map((team) => applyTeamBranding(team, branding, selectedSeason)));
       } catch (err) {
         if (active) {
           setError(err instanceof Error ? err.message : "Unable to load teams.");
@@ -804,7 +809,7 @@ export default function TradeManager() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedSeason]);
 
   useEffect(() => {
     let active = true;
@@ -878,15 +883,21 @@ export default function TradeManager() {
       setLoadingNhlStats(true);
 
       try {
-        const [skaters, goalies] = await Promise.all([
-          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
-          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
+        const [currentSkaters, currentGoalies, previousSkaters, previousGoalies] = await Promise.all([
+          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
+          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
+          fetchNhlSkaterStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlSkaterRecord[]),
+          fetchNhlGoalieStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlGoalieRecord[]),
         ]);
 
         if (active) {
+          const skaters = new Map(previousSkaters.map((record) => [String(record.playerId), record]));
+          const goalies = new Map(previousGoalies.map((record) => [String(record.playerId), record]));
+          currentSkaters.forEach((record) => skaters.set(String(record.playerId), record));
+          currentGoalies.forEach((record) => goalies.set(String(record.playerId), record));
           setNhlPlayerStats({
-            skaters: new Map(skaters.map((record) => [String(record.playerId), record])),
-            goalies: new Map(goalies.map((record) => [String(record.playerId), record])),
+            skaters,
+            goalies,
           });
         }
       } catch {
@@ -1056,9 +1067,9 @@ export default function TradeManager() {
   const team1NetSalaryChange = sumSalary(team1IncomingPlayers) - team1OutgoingSalary;
   const team2NetSalaryChange = sumSalary(team2IncomingPlayers) - team2OutgoingSalary;
   const team3NetSalaryChange = sumSalary(team3IncomingPlayers) - team3OutgoingSalary;
-  const team1NetRosterChange = team1IncomingPlayers.length - team1OutgoingPlayers.length;
-  const team2NetRosterChange = team2IncomingPlayers.length - team2OutgoingPlayers.length;
-  const team3NetRosterChange = team3IncomingPlayers.length - team3OutgoingPlayers.length;
+  const team1NetRosterChange = getActivePlayerCount(team1IncomingPlayers) - getActivePlayerCount(team1OutgoingPlayers);
+  const team2NetRosterChange = getActivePlayerCount(team2IncomingPlayers) - getActivePlayerCount(team2OutgoingPlayers);
+  const team3NetRosterChange = getActivePlayerCount(team3IncomingPlayers) - getActivePlayerCount(team3OutgoingPlayers);
   const selectedSalaryCap = salaryCapForSeason(selectedSeason);
 
   function toggleTeam1Player(playerSeasonId: number, checked: boolean) {

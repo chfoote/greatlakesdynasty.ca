@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import { fetchFantasyTeams, type FantasyTeam } from "../../lib/fantasyTeams";
+import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import { CURRENT_LEAGUE_SEASON, dashboardSeasons } from "../../lib/leagueSeasons";
 
-const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
+const seasonOptions = dashboardSeasons;
 const rosterLimit = 23;
 const positionMinimums = { C: 3, LW: 3, RW: 3, D: 6, G: 2 } as const;
 const activePositions = new Set(Object.keys(positionMinimums));
@@ -29,7 +30,7 @@ type DashboardRow = {
 };
 
 export default function LeagueDashboard() {
-  const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [seasons, setSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,10 +41,10 @@ export default function LeagueDashboard() {
     let active = true;
     setLoading(true);
     setError("");
-    Promise.all([fetchFantasyTeams(), fetchPlayerSeasonsBySeason(selectedSeason)])
-      .then(([teamRows, seasonRows]) => {
+    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason)])
+      .then(([teamRows, brandingRows, seasonRows]) => {
         if (!active) return;
-        setTeams(teamRows);
+        setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
         setSeasons(seasonRows);
       })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "Unable to load dashboard."); })
@@ -85,7 +86,7 @@ export default function LeagueDashboard() {
       {!loading && !error && <div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
         <thead className="bg-gray-50 dark:bg-white/[0.03]"><tr>{["Team", "Salary Spent", "Cap Space", "Roster", "C / 3", "LW / 3", "RW / 3", "D / 6", "G / 2"].map((label) => <th key={label} className={`whitespace-nowrap px-3 py-3 font-semibold text-gray-700 dark:text-gray-200 ${label === "Team" ? "text-left" : "text-center"}`}>{label}</th>)}</tr></thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.map((row) => <tr key={row.team.id} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-          <td className="px-3 py-3"><Link to={`/teams/${row.team.abbreviation}`} className="flex min-w-56 items-center gap-3 font-medium text-gray-800 hover:text-brand-500 dark:text-white/90"><div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900">{row.team.logo ? <img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /> : row.team.abbreviation}</div><span>{row.team.team_name}</span></Link></td>
+          <td className="px-3 py-3"><Link to={`/teams/${row.team.id}`} className="flex min-w-56 items-center gap-3 font-medium text-gray-800 hover:text-brand-500 dark:text-white/90"><div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900">{row.team.logo ? <img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /> : row.team.abbreviation}</div><span>{row.team.team_name}</span></Link></td>
           <td className="px-3 py-3 text-center font-medium text-gray-700 dark:text-gray-300">{money.format(row.salarySpent)}</td>
           <td className={`px-3 py-3 text-center font-semibold ${row.capSpace < 0 ? "text-error-500" : "text-success-600 dark:text-success-400"}`}>{row.capSpace < 0 ? `Over ${money.format(Math.abs(row.capSpace))}` : money.format(row.capSpace)}</td>
           <td className={`px-3 py-3 text-center font-semibold ${row.rosterSize > rosterLimit ? "text-error-500" : "text-gray-700 dark:text-gray-300"}`}>{row.rosterSize} / {rosterLimit}</td>

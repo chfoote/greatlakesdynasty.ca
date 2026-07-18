@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import type { FantasyPlayer, PlayerSeasonWithRelations } from "./fantasyPlayers";
-import type { FantasyTeam } from "./fantasyTeams";
+import { applyTeamBranding, fetchTeamBrandingHistory, type FantasyTeam } from "./fantasyTeams";
 
 type TransactionTradePlayer = {
   id: number;
@@ -80,7 +80,22 @@ export async function fetchLeagueTransactions() {
     .order("transaction_date", { ascending: false })
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as LeagueTransaction[];
+  const transactions = (data ?? []) as LeagueTransaction[];
+  const branding = await fetchTeamBrandingHistory();
+  return transactions.map((transaction) => {
+    const brand = (team: FantasyTeam | null) => team ? applyTeamBranding(team, branding, transaction.season_year) : null;
+    return {
+      ...transaction,
+      fantasy_team: brand(transaction.fantasy_team),
+      trade_offer: transaction.trade_offer ? {
+        ...transaction.trade_offer,
+        from_team: brand(transaction.trade_offer.from_team),
+        to_team: brand(transaction.trade_offer.to_team),
+        third_team: brand(transaction.trade_offer.third_team),
+        trade_offer_players: transaction.trade_offer.trade_offer_players.map((move) => ({ ...move, to_team: brand(move.to_team) })),
+      } : null,
+    };
+  });
 }
 
 export async function postSigningTransaction(

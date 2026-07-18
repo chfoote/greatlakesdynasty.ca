@@ -5,6 +5,10 @@
       "destination": "https://api.nhle.com/stats/rest/en/:path*"
     },
     {
+      "source": "/nhl-web-api/:path*",
+      "destination": "https://api-web.nhle.com/v1/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

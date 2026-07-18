@@ -11,6 +11,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/nhl-api/, "/stats/rest/en"),
       },
+      "/nhl-web-api": {
+        target: "https://api-web.nhle.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/nhl-web-api/, "/v1"),
+      },
     },
   },
   plugins: [

@@ -59,6 +59,40 @@ export type NhlGoalieRecord = {
   goalsAgainstAverage: number | null;
 };
 
+type LocalizedName = { default?: string };
+export type NhlPlayerLanding = {
+  playerId: number;
+  firstName?: LocalizedName;
+  lastName?: LocalizedName;
+  fullTeamName?: LocalizedName;
+  currentTeamAbbrev?: string;
+  teamLogo?: string;
+  sweaterNumber?: number;
+  position?: string;
+  headshot?: string;
+  heroImage?: string;
+  birthDate?: string;
+  birthCity?: LocalizedName;
+  birthStateProvince?: LocalizedName;
+  birthCountry?: string;
+  heightInInches?: number;
+  weightInPounds?: number;
+  shootsCatches?: string;
+  draftDetails?: {
+    year?: number;
+    teamAbbrev?: string;
+    round?: number;
+    pickInRound?: number;
+    overallPick?: number;
+  };
+};
+
+export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
+  const response = await fetch(`/nhl-web-api/player/${playerId}/landing`);
+  if (!response.ok) throw new Error(`Unable to load NHL player profile (${response.status})`);
+  return response.json() as Promise<NhlPlayerLanding>;
+}
+
 function reportUrl(position: "skater" | "goalie", report: string, seasonId: number) {
   const params = new URLSearchParams({
     limit: "-1",

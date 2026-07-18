@@ -1,343 +1,127 @@
-import { useEffect, useState } from "react";
-import { useLocation } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "../../components/ui/table";
-import {
-  fetchMlbPlayerProfile,
-  formatStatValue,
-  type MlbPlayerProfile,
-} from "../../lib/mlb";
+import { fetchFantasyPlayerByApiId, fetchPlayerSeasonsByPlayer, type FantasyPlayer, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats, formatFantasyPoints, formatNhlStat, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlPlayerLanding, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchPlayerAwards, type PlayerAward } from "../../lib/awards";
+import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
+import { applyTeamBranding, fetchTeamBrandingHistory } from "../../lib/fantasyTeams";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
+import { TradeTransactionDetails } from "./Transactions";
 
-function getBatterScore(stats: Record<string, string | number | null> | null | undefined) {
-  if (!stats) return 0;
+const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
+function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
+function displayPosition(position?: string | null) { return position === "L" ? "LW" : position === "R" ? "RW" : position || "—"; }
+function playerName(player: FantasyPlayer | null, landing: NhlPlayerLanding | null) { return player?.full_name || [player?.first_name, player?.last_name].filter(Boolean).join(" ") || [landing?.firstName?.default, landing?.lastName?.default].filter(Boolean).join(" ") || "Unknown Player"; }
+function ageOn(date?: string) { if (!date) return null; const birth = new Date(`${date}T00:00:00`); const today = new Date(); let age = today.getFullYear() - birth.getFullYear(); if (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate())) age -= 1; return age; }
+function formatDate(date: string) { return new Date(`${date}T00:00:00`).toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" }); }
+function actionLabel(action: string) { return action.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase()); }
 
-  return (
-    Number(stats.runs ?? 0) * 1 +
-    Number(stats.hits ?? 0) * 1 +
-    Number(stats.doubles ?? 0) * 1 +
-    Number(stats.triples ?? 0) * 2 +
-    Number(stats.homeRuns ?? 0) * 3 +
-    Number(stats.rbi ?? 0) * 1 +
-    Number(stats.stolenBases ?? 0) * 2
-  );
+function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
+  return <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/70"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p><div className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">{value || "—"}</div></div>;
 }
 
-function getPitcherScore(stats: Record<string, string | number | null> | null | undefined) {
-  if (!stats) return 0;
-
-  return (
-    Number(stats.wins ?? 0) * 8 +
-    Number(stats.strikeOuts ?? 0) * 1 +
-    Number(stats.saves ?? 0) * 6 +
-    Number(stats.completeGames ?? 0) * 5 +
-    Number(stats.shutouts ?? 0) * 5
-  );
+function SkaterStats({ record, season }: { record: NhlSkaterRecord; season: number }) {
+  const score = getSkaterScore(record);
+  const values = [record.gamesPlayed, record.goals, record.assists, record.plusMinus, record.penaltyMinutes, record.ppGoals, record.ppPoints-record.ppGoals, record.shGoals, record.shPoints-record.shGoals, record.gameWinningGoals, record.shots, record.blockedShots, record.hits, record.totalFaceoffWins];
+  return <StatsTable title={`Skater Stats · ${season}`} headings={["GP","G","A","+/-","PIM","PPG","PPA","SHG","SHA","GWG","S","B","H","FOW","SCORE","FPPG"]} values={[...values, formatFantasyPoints(score), record.gamesPlayed ? formatFantasyPoints(score/record.gamesPlayed) : "—"]} />;
 }
 
-function getBatterPpg(stats: Record<string, string | number | null> | null | undefined) {
-  if (!stats) return null;
-
-  const gamesPlayed = Number(stats.gamesPlayed ?? 0);
-  const score = getBatterScore(stats);
-
-  if (!gamesPlayed) {
-    return null;
-  }
-
-  return score / gamesPlayed;
+function GoalieStats({ record, season }: { record: NhlGoalieRecord; season: number }) {
+  const score = getGoalieScore(record);
+  return <StatsTable title={`Goalie Stats · ${season}`} headings={["GP","GS","W","L","OTL","GA","SV","SO","PIM","G","A","SV%","GAA","SCORE","FPPG"]} values={[record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists,record.savePct?.toFixed(3) ?? "—",formatNhlStat(record.goalsAgainstAverage,2),formatFantasyPoints(score),record.gamesPlayed ? formatFantasyPoints(score/record.gamesPlayed) : "—"]} />;
 }
 
-function getPitcherPpg(stats: Record<string, string | number | null> | null | undefined) {
-  if (!stats) return null;
-
-  const gamesPlayed = Number(stats.gamesPlayed ?? 0);
-  const score = getPitcherScore(stats);
-
-  if (!gamesPlayed) {
-    return null;
-  }
-
-  return score / gamesPlayed;
+function StatsTable({ title, headings, values }: { title: string; headings: string[]; values: Array<string | number> }) {
+  return <section className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800"><h2 className="border-b border-gray-200 px-4 py-3 font-semibold text-gray-800 dark:border-gray-800 dark:text-white/90">{title}</h2><div className="overflow-x-auto"><table className="min-w-full text-xs"><thead className="bg-gray-50 dark:bg-white/[0.03]"><tr>{headings.map((heading) => <th key={heading} className="whitespace-nowrap px-3 py-2.5 text-center text-gray-500">{heading}</th>)}</tr></thead><tbody><tr>{values.map((value, index) => <td key={headings[index]} className={`px-3 py-3 text-center ${headings[index] === "SCORE" ? "font-bold text-gray-900 dark:text-white" : "text-gray-600 dark:text-gray-300"}`}>{value}</td>)}</tr></tbody></table></div></section>;
 }
 
-function ProfileStatTable({
-  title,
-  stats,
-  type,
-}: {
-  title: string;
-  stats: Record<string, string | number | null> | null | undefined;
-  type: "batter" | "pitcher";
-}) {
-  if (!stats) {
-    return null;
-  }
+function PlayerTransactionCard({ transaction, fallbackPosition }: { transaction: LeagueTransaction; fallbackPosition: string }) {
+  if (transaction.trade_offer_id) return <article className="relative overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 sm:p-5">
+    <div className="absolute inset-y-0 left-0 w-1 bg-brand-500" />
+    <div className="flex flex-col items-start gap-1"><span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Trade</span><time className="text-xs font-medium text-gray-500">{formatDate(transaction.transaction_date)}</time></div>
+    <TradeTransactionDetails transaction={transaction} />
+    {transaction.notes && <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.03] dark:text-gray-400">{transaction.notes}</p>}
+  </article>;
 
-  const score = type === "batter" ? getBatterScore(stats) : getPitcherScore(stats);
-  const ppg = type === "batter" ? getBatterPpg(stats) : getPitcherPpg(stats);
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/[0.05] dark:bg-white/[0.03]">
-      <div className="border-b border-gray-100 px-5 py-3 dark:border-white/[0.05]">
-        <h4 className="text-base font-semibold text-gray-800 dark:text-white/90">{title}</h4>
-      </div>
-      <div className="max-w-full overflow-x-auto">
-        <Table>
-          <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
-            <TableRow>
-              {type === "batter" ? (
-                <>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">G</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">AB</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">R</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">H</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">2B</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">3B</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">HR</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">RBI</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">BB</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SO</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SB</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SCORE</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">PPG</TableCell>
-                </>
-              ) : (
-                <>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">G</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">GS</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">IP</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">W</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">L</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SV</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">H</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">ER</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">HR</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">BB</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SO</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">C</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SHO</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">SCORE</TableCell>
-                  <TableCell isHeader className="px-3 py-3 text-center font-medium text-gray-500 text-theme-xs dark:text-gray-400">PPG</TableCell>
-                </>
-              )}
-            </TableRow>
-          </TableHeader>
-
-          <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
-            <TableRow>
-              {type === "batter" ? (
-                <>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.gamesPlayed)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.atBats)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.runs)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.hits)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.doubles)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.triples)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.homeRuns)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.rbi)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.baseOnBalls)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.strikeOuts)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.stolenBases)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center font-medium text-gray-800 text-theme-sm dark:text-white/90">{score}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{ppg === null ? "—" : ppg.toFixed(2)}</TableCell>
-                </>
-              ) : (
-                <>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.gamesPlayed)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.gamesStarted)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.inningsPitched)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.wins)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.losses)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.saves)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.hits)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.earnedRuns)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.homeRuns)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.baseOnBalls)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.strikeOuts)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.completeGames)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{formatStatValue(stats.shutouts)}</TableCell>
-                  <TableCell className="px-3 py-4 text-center font-medium text-gray-800 text-theme-sm dark:text-white/90">{score}</TableCell>
-                  <TableCell className="px-3 py-4 text-center text-gray-500 text-theme-sm dark:text-gray-400">{ppg === null ? "—" : ppg.toFixed(2)}</TableCell>
-                </>
-              )}
-            </TableRow>
-          </TableBody>
-        </Table>
-      </div>
-    </div>
-  );
+  return <article className="relative overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900">
+    <div className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: transaction.fantasy_team?.primary_color || "#465fff" }} />
+    <div className="flex items-start gap-3">{transaction.fantasy_team?.logo && <Link to={`/teams/${transaction.fantasy_team.id}`} className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"><img src={transaction.fantasy_team.logo} alt={`${transaction.fantasy_team.team_name} logo`} className="h-full w-full object-contain" /></Link>}<div className="min-w-0 flex-1"><div className="flex flex-col items-start gap-1"><span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-bold uppercase text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{actionLabel(transaction.action)}</span><time className="text-xs font-medium text-gray-500">{formatDate(transaction.transaction_date)}</time></div><p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{transaction.fantasy_team?.team_name || "Team"} · {transaction.position || fallbackPosition}{transaction.salary != null ? ` · ${money.format(transaction.salary)}` : ""}{transaction.term_end_year ? ` · ${transaction.term_end_year}` : ""}</p>{transaction.notes && <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:bg-white/[0.03]">{transaction.notes}</p>}</div></div>
+  </article>;
 }
 
 export default function PlayerProfile() {
-  const location = useLocation();
-  const playerIdParam = new URLSearchParams(location.search).get("playerId");
-  const [profile, setProfile] = useState<MlbPlayerProfile | null>(null);
+  const playerApiId = new URLSearchParams(useLocation().search).get("playerId") || "";
+  const [landing, setLanding] = useState<NhlPlayerLanding | null>(null);
+  const [fantasyPlayer, setFantasyPlayer] = useState<FantasyPlayer | null>(null);
+  const [seasons, setSeasons] = useState<PlayerSeasonWithRelations[]>([]);
+  const [awards, setAwards] = useState<PlayerAward[]>([]);
+  const [transactions, setTransactions] = useState<LeagueTransaction[]>([]);
+  const [skater, setSkater] = useState<NhlSkaterRecord | null>(null);
+  const [goalie, setGoalie] = useState<NhlGoalieRecord | null>(null);
+  const [statsSeason, setStatsSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const id = Number(playerIdParam);
-
-    if (!playerIdParam || Number.isNaN(id)) {
-      setError("No player ID was provided.");
-      setLoading(false);
-      return;
-    }
-
     let active = true;
-
-    const load = async () => {
+    const apiId = Number(playerApiId);
+    if (!playerApiId || Number.isNaN(apiId)) { setError("No valid NHL player ID was provided."); setLoading(false); return; }
+    async function load() {
+      setLoading(true); setError("");
       try {
-        setLoading(true);
-        const data = await fetchMlbPlayerProfile(id);
-        if (active) {
-          setProfile(data);
-          setError(null);
-        }
-      } catch (err) {
-        if (active) {
-          setError(err instanceof Error ? err.message : "Unable to load player profile");
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
+        const [landingRow, playerRow, currentSkaters, currentGoalies, previousSkaters, previousGoalies, allAwards, allTransactions, branding] = await Promise.all([
+          fetchNhlPlayerLanding(apiId),
+          fetchFantasyPlayerByApiId(playerApiId),
+          fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON)).catch(() => []),
+          fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON)).catch(() => []),
+          fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
+          fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
+          fetchPlayerAwards(), fetchLeagueTransactions(), fetchTeamBrandingHistory(),
+        ]);
+        const playerSeasons = playerRow ? await fetchPlayerSeasonsByPlayer(playerRow.id) : [];
+        const brandedSeasons = playerSeasons.map((season) => ({ ...season, fantasy_team: season.fantasy_team ? applyTeamBranding(season.fantasy_team, branding, season.season_year) : null }));
+        const currentSkater = currentSkaters.find((row) => row.playerId === apiId);
+        const currentGoalie = currentGoalies.find((row) => row.playerId === apiId);
+        const previousSkater = previousSkaters.find((row) => row.playerId === apiId);
+        const previousGoalie = previousGoalies.find((row) => row.playerId === apiId);
+        if (!active) return;
+        setLanding(landingRow); setFantasyPlayer(playerRow); setSeasons(brandedSeasons);
+        setSkater(currentSkater || previousSkater || null); setGoalie(currentGoalie || previousGoalie || null);
+        setStatsSeason(currentSkater || currentGoalie ? CURRENT_LEAGUE_SEASON : CURRENT_LEAGUE_SEASON - 1);
+        setAwards(playerRow ? allAwards.filter((award) => award.player_id === playerRow.id) : []);
+        setTransactions(playerRow ? allTransactions.filter((transaction) => transaction.player_id === playerRow.id || transaction.trade_offer?.trade_offer_players.some((move) => move.player_season?.player_id === playerRow.id)).sort((a,b) => b.transaction_date.localeCompare(a.transaction_date) || b.created_at.localeCompare(a.created_at)) : []);
+      } catch (err) { if (active) setError(err instanceof Error ? err.message : "Unable to load player profile."); }
+      finally { if (active) setLoading(false); }
+    }
+    void load(); return () => { active = false; };
+  }, [playerApiId]);
 
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [playerIdParam]);
+  const currentSeason = useMemo(() => seasons.find((season) => season.season_year === CURRENT_LEAGUE_SEASON) || seasons[0] || null, [seasons]);
+  const name = playerName(fantasyPlayer, landing);
+  const position = displayPosition(currentSeason?.position === "RFA" || currentSeason?.position === "PROSPECT" ? landing?.position : currentSeason?.position || landing?.position);
+  const draft = landing?.draftDetails;
 
-  const hasHitting = Boolean(profile?.hittingStats && Object.keys(profile.hittingStats).length);
-  const hasPitching = Boolean(profile?.pitchingStats && Object.keys(profile.pitchingStats).length);
-  const isTwoWay = profile?.position === "TWP" || profile?.primaryPosition?.toLowerCase().includes("two-way");
+  return <div><PageMeta title={`${name} | Great Lakes Dynasty Hockey League`} description={`${name} GLDHL player profile`} /><PageBreadcrumb pageTitle={name} />
+    <div className="space-y-6">
+      {loading && <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading player profile…</div>}
+      {error && <div className="rounded-xl border border-error-200 bg-error-50 p-4 text-error-700">{error}</div>}
+      {!loading && !error && landing && <>
+        <section className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+          {landing.heroImage && <img src={landing.heroImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-10" />}
+          <div className="relative p-5 sm:p-7"><div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-center gap-5"><div className="h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">{landing.headshot ? <img src={landing.headshot} alt={`${name} headshot`} className="h-full w-full object-cover" /> : null}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">{name}</h1>{landing.sweaterNumber != null && <span className="rounded-full bg-gray-100 px-2.5 py-1 text-sm font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">#{landing.sweaterNumber}</span>}</div><p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{position} · {landing.fullTeamName?.default || landing.currentTeamAbbrev || "NHL Team Unassigned"}</p>{awards.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{awards.map((assignment) => <div key={assignment.id} title={`${assignment.award?.name} · ${assignment.season_year}`} className="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">{assignment.award?.image_url ? <img src={assignment.award.image_url} alt="" className="h-6 w-6 object-contain" /> : <span>🏆</span>}{assignment.award?.name} · {assignment.season_year}</div>)}</div>}</div></div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:w-[430px]"><InfoCard label="Current GLDHL Team" value={currentSeason?.fantasy_team ? <Link to={`/teams/${currentSeason.fantasy_team.id}`} className="flex items-center gap-2 text-brand-500 hover:underline">{currentSeason.fantasy_team.logo && <img src={currentSeason.fantasy_team.logo} alt="" className="h-7 w-7 rounded object-contain" />}{currentSeason.fantasy_team.team_name}</Link> : "Not Owned"} /><InfoCard label="Current Contract" value={currentSeason ? `${currentSeason.salary == null ? "No salary" : money.format(currentSeason.salary)} · ${currentSeason.term_end_year || currentSeason.position || "No term"}` : "—"} /><InfoCard label="Birthday" value={landing.birthDate ? `${formatDate(landing.birthDate)} (${ageOn(landing.birthDate)})` : "—"} /><InfoCard label="Shoots / Catches" value={landing.shootsCatches || "—"} /></div></div></div>
+        </section>
 
-  return (
-    <div>
-      <PageMeta title="Great Lakes Dynasty Hockey League" description="GLDHL player profile" />
-      <PageBreadcrumb pageTitle="Player Profile" />
-      <div className="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:px-10 xl:py-12">
-        <div className="mb-6">
-          <h3 className="mb-2 font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">
-            Player Profile
-          </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400 sm:text-base">
-            Current season details for the selected player.
-          </p>
-        </div>
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><InfoCard label="NHL Team" value={<span className="flex items-center gap-2">{landing.teamLogo && <img src={landing.teamLogo} alt="" className="h-7 w-7 object-contain" />}{landing.fullTeamName?.default || landing.currentTeamAbbrev || "—"}</span>} /><InfoCard label="Position / Number" value={`${position}${landing.sweaterNumber != null ? ` · #${landing.sweaterNumber}` : ""}`} /><InfoCard label="Birthplace" value={[landing.birthCity?.default, landing.birthStateProvince?.default, landing.birthCountry].filter(Boolean).join(", ") || "—"} /><InfoCard label="Draft" value={draft ? `${draft.year || "—"} ${draft.teamAbbrev || ""} · Round ${draft.round || "—"} · Pick ${draft.pickInRound || "—"}${draft.overallPick ? ` (${draft.overallPick} overall)` : ""}` : "Undrafted"} /></section>
 
-        {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Loading player profile…</p>}
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {skater ? <SkaterStats record={skater} season={statsSeason} /> : goalie ? <GoalieStats record={goalie} season={statsSeason} /> : <div className="rounded-xl border border-dashed border-gray-300 p-6 text-sm text-gray-500">No current or previous-season NHL stats were returned.</div>}
 
-        {!loading && !error && profile && (
-          <>
-            <div className="mb-8 rounded-2xl border border-gray-200 bg-gray-50 p-6 dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="h-20 w-20 overflow-hidden rounded-full border border-gray-200 bg-white p-1 dark:border-gray-700">
-                    <img
-                      src={`https://img.mlbstatic.com/mlb-photos/image/upload/d_people:generic:headshot:67:current.png/w_180,q_auto:good/v1/people/${profile.playerId}/headshot/67/current`}
-                      alt={`${profile.playerName} headshot`}
-                      className="h-full w-full rounded-full object-cover"
-                    />
-                  </div>
-                  <div>
-                    <h4 className="text-2xl font-semibold text-gray-900 dark:text-white">{profile.playerName}</h4>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                      {profile.teamLogoUrl ? (
-                        <img src={profile.teamLogoUrl} alt={`${profile.teamName} logo`} className="h-5 w-5 object-contain" />
-                      ) : null}
-                      <span>{profile.teamAbbreviation}</span>
-                      <span>•</span>
-                      <span>{profile.position}</span>
-                    </div>
-                  </div>
-                </div>
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"><h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Trophy Case</h2>{awards.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{awards.map((assignment) => <div key={assignment.id} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">{assignment.award?.image_url ? <img src={assignment.award.image_url} alt={assignment.award.name} className="h-12 w-12 object-contain" /> : <span className="text-3xl">🏆</span>}<div><p className="font-semibold text-amber-900 dark:text-amber-200">{assignment.award?.name || "Award"}</p><p className="text-xs text-amber-700 dark:text-amber-300">Season {assignment.season_year}</p></div></div>)}</div> : <p className="mt-3 text-sm text-gray-500">No awards yet.</p>}</section>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/60">
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Height</p>
-                    <p className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">{profile.height ?? "—"}</p>
-                  </div>
-                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/60">
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Weight</p>
-                    <p className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">{profile.weight ? `${profile.weight} lb` : "—"}</p>
-                  </div>
-                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/60">
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">From</p>
-                    <p className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">
-                      {profile.birthCity && profile.birthCountry
-                        ? `${profile.birthCity}, ${profile.birthCountry}`
-                        : profile.birthCity ?? profile.birthCountry ?? "—"}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/60">
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Hands</p>
-                    <p className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">
-                      {profile.batSide && profile.pitchHand
-                        ? `Bat: ${profile.batSide} • Throw: ${profile.pitchHand}`
-                        : profile.batSide ?? profile.pitchHand ?? "—"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/60">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Draft</p>
-                  <p className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">
-                    {profile.draftYear || profile.draftRound || profile.draftPick || profile.draftTeam
-                      ? [
-                          profile.draftYear ? `${profile.draftYear}` : null,
-                          profile.draftRound ? `Round ${profile.draftRound}` : null,
-                          profile.draftPick ? `Pick ${profile.draftPick}` : null,
-                          profile.draftTeam ? `${profile.draftTeam}` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" • ")
-                      : "Not Drafted"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/60">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Birthday</p>
-                  <p className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">
-                    {profile.birthDate ? `${profile.birthDate} (${profile.currentAge})` : "—"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-8">
-              {hasHitting && (
-                <ProfileStatTable title="Batter Stats" stats={profile.hittingStats} type="batter" />
-              )}
-              {hasPitching && (
-                <ProfileStatTable title="Pitcher Stats" stats={profile.pitchingStats} type="pitcher" />
-              )}
-              {!hasHitting && !hasPitching && (
-                <div className="rounded-xl border border-dashed border-gray-300 p-6 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                  No current-season stats were returned for this player.
-                </div>
-              )}
-              {isTwoWay && hasHitting && hasPitching && (
-                <div className="rounded-xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-700 dark:border-brand-900/60 dark:bg-brand-500/10 dark:text-brand-300">
-                  This player is listed as a two-way player, so both batting and pitching stat sections are shown.
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"><h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Transaction History</h2><div className="mt-4 space-y-4">{transactions.length ? transactions.map((transaction) => <PlayerTransactionCard key={transaction.id} transaction={transaction} fallbackPosition={position} />) : <p className="text-sm text-gray-500">No transactions have been posted for this player.</p>}</div></section>
+      </>}
     </div>
-  );
+  </div>;
 }

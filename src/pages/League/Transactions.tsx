@@ -125,7 +125,7 @@ function findRelatedTradeId(
 function TeamLogo({ team }: { team: LeagueTransaction["fantasy_team"] }) {
   return (
     <Link
-      to={team?.abbreviation ? `/teams/${team.abbreviation}` : "/teams"}
+      to={team?.id ? `/teams/${team.id}` : "/teams"}
       className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white shadow-theme-xs transition hover:border-brand-300 hover:shadow-theme-sm dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500"
       title={team?.team_name || "View teams"}
     >
@@ -138,7 +138,7 @@ function TeamLogo({ team }: { team: LeagueTransaction["fantasy_team"] }) {
   );
 }
 
-function TradeDetails({ transaction }: { transaction: LeagueTransaction }) {
+export function TradeTransactionDetails({ transaction }: { transaction: LeagueTransaction }) {
   const trade = transaction.trade_offer;
   const teams = [trade?.from_team, trade?.to_team, trade?.third_team].filter(Boolean);
   const positionOrder: Record<string, number> = { C: 0, LW: 1, RW: 2, D: 3, G: 4 };
@@ -167,7 +167,7 @@ function TradeDetails({ transaction }: { transaction: LeagueTransaction }) {
             <div className="mb-4 flex items-center gap-3">
               <TeamLogo team={team} />
               <div className="min-w-0">
-                <Link to={team.abbreviation ? `/teams/${team.abbreviation}` : "/teams"} className="font-semibold text-gray-900 hover:text-brand-500 dark:text-white">
+                <Link to={team.id ? `/teams/${team.id}` : "/teams"} className="font-semibold text-gray-900 hover:text-brand-500 dark:text-white">
                   {team.team_name}
                 </Link>
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Acquire</p>
@@ -268,14 +268,14 @@ export default function Transactions() {
                         {formatTransactionDate(transaction.transaction_date)}
                       </span>
                     </div>
-                    <TradeDetails transaction={transaction} />
+                    <TradeTransactionDetails transaction={transaction} />
                     {transaction.notes && (
                       <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.03] dark:text-gray-400">{transaction.notes}</p>
                     )}
                   </div>
                 ) : <div className="flex items-start gap-4">
                   <Link
-                    to={transaction.fantasy_team?.abbreviation ? `/teams/${transaction.fantasy_team.abbreviation}` : "/teams"}
+                    to={transaction.fantasy_team?.id ? `/teams/${transaction.fantasy_team.id}` : "/teams"}
                     className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-50 shadow-theme-xs transition hover:border-brand-300 hover:shadow-theme-sm dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500"
                     title={transaction.fantasy_team?.team_name || "View teams"}
                   >
