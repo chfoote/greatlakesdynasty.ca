@@ -9,6 +9,8 @@ export type ChatMessage = {
   team_name: string | null;
   team_abbreviation: string | null;
   team_logo: string | null;
+  is_system: boolean;
+  link: string | null;
   created_at: string;
 };
 
