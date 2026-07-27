@@ -14,7 +14,7 @@ import {
   fetchTeamBrandingHistory,
   getManagerForSeason,
 } from "../../lib/fantasyTeams";
-import { fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import { fetchPlayerSeasonsByTeam, fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import {
   fetchNhlGoalieStats,
   fetchNhlSkaterStats,
@@ -25,7 +25,7 @@ import {
   type NhlGoalieRecord,
   type NhlSkaterRecord,
 } from "../../lib/nhl";
-import { fetchPlayerAwards, mapAwardsByPlayer, type PlayerAward } from "../../lib/awards";
+import { fetchAwards, fetchPlayerAwards, mapAwardsByPlayer, type Award, type PlayerAward } from "../../lib/awards";
 import PlayerAwardBadges from "./PlayerAwardBadges";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 
@@ -61,6 +61,10 @@ function salaryCapForSeason(year: number) {
 
 function playerName(season: PlayerSeasonWithRelations) {
   return season.player?.full_name || [season.player?.first_name, season.player?.last_name].filter(Boolean).join(" ") || "Unknown Player";
+}
+
+function fantasyPlayerName(player: PlayerAward["player"]) {
+  return player?.full_name || [player?.first_name, player?.last_name].filter(Boolean).join(" ") || "Unknown Player";
 }
 
 function playerApiId(season: PlayerSeasonWithRelations) {
@@ -106,6 +110,86 @@ function Medal({ icon, value, label, years, tone }: { icon: string; value: numbe
     <p className="mt-1 text-lg font-semibold">{value}</p>
     <p className="mt-1 min-h-4 text-xs font-medium opacity-80">{years.length ? years.join(", ") : "—"}</p>
   </div>;
+}
+
+const featuredAwardOrder = ["Championship", "MVP", "Rookie of the Year", "Top C", "Top LW", "Top RW", "Top D"];
+
+function normalizedAwardName(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function TrophyImage({ award, name }: { award?: Award | null; name: string }) {
+  return award?.image_url ? (
+    <img src={award.image_url} alt={`${name} trophy`} className="h-20 w-20 object-contain drop-shadow-sm" />
+  ) : (
+    <span className="text-6xl" role="img" aria-label={`${name} trophy`}>🏆</span>
+  );
+}
+
+function TrophyCase({
+  team,
+  finishes,
+  playerAwards,
+  teamSeasons,
+  awards,
+}: {
+  team: FantasyTeam;
+  finishes: FantasyTeamFinish[];
+  playerAwards: PlayerAward[];
+  teamSeasons: PlayerSeasonWithRelations[];
+  awards: Award[];
+}) {
+  const championshipAward = awards.find((award) => normalizedAwardName(award.name) === "championship");
+  const playerSeasonKeys = new Set(teamSeasons.map((season) => `${season.player_id}:${season.season_year}`));
+  const individualTrophies = playerAwards
+    .filter((assignment) => assignment.award && normalizedAwardName(assignment.award.name) !== "championship")
+    .filter((assignment) => playerSeasonKeys.has(`${assignment.player_id}:${assignment.season_year}`));
+  const trophies = [
+    ...finishes
+      .filter((finish) => finish.placement === 1)
+      .map((finish) => ({
+        key: `championship-${finish.id}`,
+        name: "Championship",
+        year: finish.season_year,
+        award: championshipAward,
+        player: null as PlayerAward["player"],
+      })),
+    ...individualTrophies.map((assignment) => ({
+      key: `player-award-${assignment.id}`,
+      name: assignment.award?.name || "Award",
+      year: assignment.season_year,
+      award: assignment.award,
+      player: assignment.player,
+    })),
+  ].sort((a, b) => {
+    const order = (name: string) => {
+      const index = featuredAwardOrder.findIndex((featuredName) => normalizedAwardName(featuredName) === normalizedAwardName(name));
+      return index === -1 ? featuredAwardOrder.length : index;
+    };
+    return b.year - a.year || order(a.name) - order(b.name);
+  });
+
+  return <section id="trophy-case" className="mt-6 scroll-mt-24 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent sm:p-6">
+    <div>
+      <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Club honours</p>
+      <h3 className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">Trophy Case</h3>
+      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Championships and individual awards won while representing the {team.team_name}.</p>
+    </div>
+    {trophies.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {trophies.map((trophy) => {
+        const apiId = trophy.player?.player_api_id;
+        const winnerName = trophy.player ? fantasyPlayerName(trophy.player) : team.team_name;
+        return <article key={trophy.key} className="flex min-h-36 items-center gap-4 rounded-xl border border-amber-200 bg-white/90 p-4 shadow-sm dark:border-amber-500/20 dark:bg-gray-900/80">
+          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-500/10"><TrophyImage award={trophy.award} name={trophy.name} /></div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">{trophy.year}</p>
+            <h4 className="mt-1 text-base font-bold text-gray-900 dark:text-white">{trophy.name}</h4>
+            {apiId ? <Link to={`/player-profile?playerId=${apiId}`} className="mt-1 block truncate text-sm font-medium text-brand-500 hover:underline">{winnerName}</Link> : <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{winnerName}</p>}
+          </div>
+        </article>;
+      })}
+    </div> : <p className="mt-5 rounded-lg border border-dashed border-amber-300 p-5 text-center text-sm text-gray-500 dark:border-amber-500/30 dark:text-gray-400">No trophies have been recorded for this team yet.</p>}
+  </section>;
 }
 
 function SkaterTable({ code, label, players, stats, awardsByPlayer }: { code: string; label: string; players: PlayerSeasonWithRelations[]; stats: Map<string, NhlSkaterRecord>; awardsByPlayer: Map<number, PlayerAward[]> }) {
@@ -312,6 +396,9 @@ export default function HockeyTeamDetail() {
   const [error, setError] = useState("");
   const [statsError, setStatsError] = useState("");
   const [awardsByPlayer, setAwardsByPlayer] = useState<Map<number, PlayerAward[]>>(new Map());
+  const [playerAwards, setPlayerAwards] = useState<PlayerAward[]>([]);
+  const [awardDefinitions, setAwardDefinitions] = useState<Award[]>([]);
+  const [teamPlayerSeasons, setTeamPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
 
   function handleSeasonChange(year: number) {
     setSelectedSeason(year);
@@ -324,17 +411,20 @@ export default function HockeyTeamDetail() {
       .then(async (row) => {
         setTeam(row);
         if (row) {
-          const [tenures, finishes, branding] = await Promise.all([
+          const [tenures, finishes, branding, historicalRosters] = await Promise.all([
             fetchTeamManagerTenures(row.id),
             fetchTeamFinishes(row.id),
             fetchTeamBrandingHistory(row.id),
+            fetchPlayerSeasonsByTeam(row.id),
           ]);
           setManagerTenures(tenures);
           setTeamFinishes(finishes);
           setBrandingHistory(branding);
+          setTeamPlayerSeasons(historicalRosters);
         } else {
           setManagerTenures([]);
           setTeamFinishes([]);
+          setTeamPlayerSeasons([]);
         }
       })
       .catch((err: Error) => setError(err.message))
@@ -366,9 +456,17 @@ export default function HockeyTeamDetail() {
         setStatsError(mergedSkaters.size || mergedGoalies.size ? "" : "Unable to load current or previous NHL player information.");
       });
 
-    fetchPlayerAwards()
-      .then((rows) => setAwardsByPlayer(mapAwardsByPlayer(rows)))
-      .catch(() => setAwardsByPlayer(new Map()));
+    Promise.all([fetchPlayerAwards(), fetchAwards(true)])
+      .then(([rows, definitions]) => {
+        setPlayerAwards(rows);
+        setAwardsByPlayer(mapAwardsByPlayer(rows));
+        setAwardDefinitions(definitions);
+      })
+      .catch(() => {
+        setPlayerAwards([]);
+        setAwardsByPlayer(new Map());
+        setAwardDefinitions([]);
+      });
   }, [team, selectedSeason]);
 
   const multiYearSeasons = useMemo(() => Array.from({ length: 5 }, (_, index) => selectedSeason + index), [selectedSeason]);
@@ -407,16 +505,48 @@ export default function HockeyTeamDetail() {
     {!loading && error && !team && <div className="rounded-2xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div>}
     {!loading && !team && !error && <div className="rounded-2xl border border-gray-200 p-10 text-center"><p>Team not found.</p><Link to="/teams" className="mt-4 inline-block text-brand-500">Back to Teams</Link></div>}
     {team && <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-      <div className="h-3" style={{ background: `linear-gradient(90deg, ${displayTeam?.primary_color || "#1d4ed8"}, ${displayTeam?.secondary_color || "#f97316"})` }} />
+      <div className="h-2" style={{ background: `linear-gradient(90deg, ${displayTeam?.primary_color || "#1d4ed8"}, ${displayTeam?.secondary_color || "#f97316"})` }} />
       <div className="p-4 xl:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">{displayTeam?.logo ? <img src={displayTeam.logo} alt={`${displayTeam.team_name} logo`} className="h-full w-full object-cover" /> : displayTeam?.abbreviation}</div>
-            <div><h2 className="text-xl font-semibold text-gray-800 dark:text-white/90">{displayTeam?.team_name}</h2><p className="text-sm text-gray-500">{displayTeam?.abbreviation} · Team ID {team.id}</p></div>
+        <header
+          className="relative overflow-hidden rounded-2xl bg-gray-950 p-5 text-white shadow-lg sm:p-7"
+          style={{ backgroundImage: `linear-gradient(125deg, #111827 0%, ${displayTeam?.primary_color || "#1d4ed8"} 72%, ${displayTeam?.secondary_color || "#f97316"} 145%)` }}
+        >
+          <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full border-[48px] border-white/5" />
+          <div className="pointer-events-none absolute -bottom-28 right-24 h-56 w-56 rounded-full bg-white/5 blur-2xl" />
+          <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+              <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/25 bg-white p-2 shadow-xl sm:h-32 sm:w-32">
+                {displayTeam?.logo ? <img src={displayTeam.logo} alt={`${displayTeam.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-2xl font-black text-gray-900">{displayTeam?.abbreviation}</span>}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white/85">GLDHL Club</span>
+                  <span className="rounded-full border border-white/20 bg-black/15 px-3 py-1 text-xs font-bold uppercase tracking-wider">{displayTeam?.abbreviation}</span>
+                </div>
+                <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">{displayTeam?.team_name}</h1>
+                <p className="mt-2 text-sm text-white/70">Team #{team.id} · Established GLDHL franchise</p>
+              </div>
+            </div>
+            <div className="min-w-56 rounded-xl border border-white/20 bg-black/20 p-4 shadow-sm backdrop-blur-sm">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">Team Manager</p>
+              <p className="mt-1 text-lg font-bold">{selectedManager?.manager_name || team.manager_name || "Not set"}</p>
+              <p className="mt-1 text-xs text-white/65">{selectedSeason} season</p>
+            </div>
           </div>
-          <div className="rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-800"><p className="text-xs uppercase text-gray-500">Manager · {selectedSeason}</p><p className="font-medium text-gray-800 dark:text-white/90">{selectedManager?.manager_name || team.manager_name || "Not set"}</p></div>
-        </div>
+          <div className="relative mt-6 grid gap-3 sm:grid-cols-2">
+            <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/15 text-sm font-black">EAST</div>
+              <div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/60">Eastern Farm System</p><p className="mt-1 truncate font-semibold">{team.eastern_farm_system || "Not assigned"}</p></div>
+            </div>
+            <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/15 text-sm font-black">WEST</div>
+              <div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/60">Western Farm System</p><p className="mt-1 truncate font-semibold">{team.western_farm_system || "Not assigned"}</p></div>
+            </div>
+          </div>
+        </header>
         <div className="mt-4 grid grid-cols-3 gap-3"><Medal icon="🥇" value={team.championships} label="Championships" years={finishYears(1)} tone="gold" /><Medal icon="🥈" value={team.runner_up_finishes} label="Runner-up finishes" years={finishYears(2)} tone="silver" /><Medal icon="🥉" value={team.third_place_finishes} label="Third-place finishes" years={finishYears(3)} tone="bronze" /></div>
+        <div className="mt-3 flex justify-end"><a href="#trophy-case" className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600">🏆 View Trophy Case</a></div>
+        <TrophyCase team={displayTeam || team} finishes={teamFinishes} playerAwards={playerAwards} teamSeasons={teamPlayerSeasons} awards={awardDefinitions} />
 
         <div className="mt-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">Roster &amp; Payroll</h3><p className="text-xs text-gray-500">Active roster limit: {ROSTER_LIMIT} players.</p></div><div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end"><div className="inline-flex h-11 rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setViewMode("single")} className={`rounded-md px-3 text-sm font-medium ${viewMode === "single" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Single Season</button><button type="button" onClick={() => setViewMode("multi")} className={`rounded-md px-3 text-sm font-medium ${viewMode === "multi" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Multi-Year</button></div><div className="w-full sm:w-44"><label htmlFor="season" className="mb-1 block text-sm font-medium">{viewMode === "multi" ? "Starting Season" : "Season"}</label><select id="season" value={selectedSeason} onChange={(event) => handleSeasonChange(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div></div></div>
