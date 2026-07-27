@@ -81,12 +81,12 @@ function nhlSkaterPosition(code: string | undefined) {
   return code || "—";
 }
 
-function PlayerName({ season, awards = [] }: { season: PlayerSeasonWithRelations; awards?: PlayerAward[] }) {
+function PlayerName({ season, nhlTeam, awards = [] }: { season: PlayerSeasonWithRelations; nhlTeam?: string; awards?: PlayerAward[] }) {
   const isExpiring = season.term_end_year === season.season_year;
   return <div className="min-w-44 text-left">
     <p className="font-medium text-gray-800 dark:text-white/90">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(season)}</Link> : playerName(season)}<PlayerAwardBadges awards={awards} /></p>
     <p className={`mt-0.5 text-[11px] ${isExpiring ? "font-semibold text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
-      {money.format(season.salary || 0)} · {season.term_end_year || "No term"}
+      {[nhlTeam || "—", money.format(season.salary || 0), season.term_end_year || "No term"].join(" | ")}
       {isExpiring && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">Expiring</span>}
     </p>
   </div>;
@@ -166,7 +166,7 @@ function TrophyCase({
       const index = featuredAwardOrder.findIndex((featuredName) => normalizedAwardName(featuredName) === normalizedAwardName(name));
       return index === -1 ? featuredAwardOrder.length : index;
     };
-    return b.year - a.year || order(a.name) - order(b.name);
+    return order(a.name) - order(b.name) || b.year - a.year;
   });
 
   return <section id="trophy-case" className="mt-6 scroll-mt-24 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent sm:p-6">
@@ -197,16 +197,15 @@ function SkaterTable({ code, label, players, stats, awardsByPlayer }: { code: st
   return <RosterSection code={code} label={label} count={players.length}>
     <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
       <thead><tr className="text-center font-semibold uppercase text-gray-500 dark:text-gray-400">
-        {['Player','NHL Team','Pos','G','A','+/-','PIMs','PPG','PPA','SHG','SHA','GWG','S','B','H','FOW','Score','PPG'].map((heading, index) => <th key={`${heading}-${index}`} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
+        {['Player','Pos','G','A','+/-','PIMs','PPG','PPA','SHG','SHA','GWG','S','B','H','FOW','Score','PPG'].map((heading, index) => <th key={`${heading}-${index}`} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
       </tr></thead>
       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-        {rows.length === 0 ? <EmptyRow columns={18} /> : rows.map((season) => {
+        {rows.length === 0 ? <EmptyRow columns={17} /> : rows.map((season) => {
           const record = stats.get(playerApiId(season));
           const score = record ? getSkaterScore(record) : 0;
           const values = record ? [record.goals, record.assists, record.plusMinus, record.penaltyMinutes, record.ppGoals, record.ppPoints-record.ppGoals, record.shGoals, record.shPoints-record.shGoals, record.gameWinningGoals, record.shots, record.blockedShots, record.hits, record.totalFaceoffWins] : Array(13).fill(null);
           return <tr key={season.id} className="text-center text-gray-600 dark:text-gray-300">
-            <td className="px-2 py-2"><PlayerName season={season} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
-            <td className="px-2 py-2">{record?.teamAbbrevs || "—"}</td>
+            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
             <td className="px-2 py-2">{nhlSkaterPosition(record?.positionCode)}</td>
             {values.map((value, index) => <td key={index} className="px-2 py-2">{formatNhlStat(value)}</td>)}
             <td className="px-2 py-2 font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>
@@ -223,16 +222,15 @@ function GoalieTable({ players, stats, awardsByPlayer }: { players: PlayerSeason
   return <RosterSection code="G" label="Goalies" count={players.length}>
     <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
       <thead><tr className="text-center font-semibold uppercase text-gray-500 dark:text-gray-400">
-        {['Player','NHL Team','Pos','GP','GS','W','L','OTL','GA','SV','SO','PIMs','G','A','SV%','GAA','Score','PPG'].map((heading, index) => <th key={heading} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
+        {['Player','Pos','GP','GS','W','L','OTL','GA','SV','SO','PIMs','G','A','SV%','GAA','Score','PPG'].map((heading, index) => <th key={heading} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
       </tr></thead>
       <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-        {rows.length === 0 ? <EmptyRow columns={18} /> : rows.map((season) => {
+        {rows.length === 0 ? <EmptyRow columns={17} /> : rows.map((season) => {
           const record = stats.get(playerApiId(season));
           const score = record ? getGoalieScore(record) : 0;
           const values = record ? [record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists] : Array(11).fill(null);
           return <tr key={season.id} className="text-center text-gray-600 dark:text-gray-300">
-            <td className="px-2 py-2"><PlayerName season={season} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
-            <td className="px-2 py-2">{record?.teamAbbrevs || "—"}</td>
+            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
             <td className="px-2 py-2">G</td>
             {values.map((value, index) => <td key={index} className="px-2 py-2">{formatNhlStat(value)}</td>)}
             <td className="px-2 py-2">{record?.savePct == null ? "—" : record.savePct.toFixed(3)}</td>
@@ -545,7 +543,7 @@ export default function HockeyTeamDetail() {
           </div>
         </header>
         <div className="mt-4 grid grid-cols-3 gap-3"><Medal icon="🥇" value={team.championships} label="Championships" years={finishYears(1)} tone="gold" /><Medal icon="🥈" value={team.runner_up_finishes} label="Runner-up finishes" years={finishYears(2)} tone="silver" /><Medal icon="🥉" value={team.third_place_finishes} label="Third-place finishes" years={finishYears(3)} tone="bronze" /></div>
-        <div className="mt-3 flex justify-end"><a href="#trophy-case" className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600">🏆 View Trophy Case</a></div>
+        <div className="mt-3 flex flex-wrap justify-end gap-3"><Link to={`/teams/${team.id}/farm-systems`} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700">🏒 View Farm Systems</Link><a href="#trophy-case" className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600">🏆 View Trophy Case</a></div>
         <TrophyCase team={displayTeam || team} finishes={teamFinishes} playerAwards={playerAwards} teamSeasons={teamPlayerSeasons} awards={awardDefinitions} />
 
         <div className="mt-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">

@@ -35,6 +35,7 @@ import AuctionAdmin from "./pages/League/AuctionAdmin";
 import TradeAdmin from "./pages/League/TradeAdmin";
 import AwardAdmin from "./pages/League/AwardAdmin";
 import LeagueDashboard from "./pages/League/LeagueDashboard";
+import FarmSystems from "./pages/League/FarmSystems";
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/teams" element={<Teams />} />
+            <Route path="/teams/:abbreviation/farm-systems" element={<FarmSystems />} />
             <Route path="/teams/:abbreviation" element={<HockeyTeamDetail />} />
 
             {/* Protected Dashboard Layout — requires login */}

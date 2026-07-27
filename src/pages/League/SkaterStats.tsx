@@ -105,7 +105,7 @@ export default function SkaterStats() {
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-left text-sm dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-white/[0.03]"><tr>
-                {['PLAYER','NHL TEAM','POS','G','A','+/-','PIMs','PPG','PPA','SHG','SHA','GWG','S','B','H','FOW','SCORE','PPG'].map((label, index) => (
+                {['PLAYER','POS','G','A','+/-','PIMs','PPG','PPA','SHG','SHA','GWG','S','B','H','FOW','SCORE','PPG'].map((label, index) => (
                   <th key={`${label}-${index}`} className="whitespace-nowrap px-3 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">{label}</th>
                 ))}
               </tr></thead>
@@ -113,8 +113,7 @@ export default function SkaterStats() {
                 {[...filteredRecords].sort((a, b) => getSkaterScore(b) - getSkaterScore(a)).map((record) => {
                   const score = getSkaterScore(record);
                   return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                    <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} showNhlTeam={false} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
-                    <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.teamAbbrevs}</td>
+                    <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
                     <td className="px-3 py-3 text-center">{record.positionCode === 'L' ? 'LW' : record.positionCode === 'R' ? 'RW' : record.positionCode}</td>
                     {[record.goals,record.assists,record.plusMinus,record.penaltyMinutes,record.ppGoals,record.ppPoints-record.ppGoals,record.shGoals,record.shPoints-record.shGoals,record.gameWinningGoals,record.shots,record.blockedShots,record.hits,record.totalFaceoffWins].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                     <td className="px-3 py-3 text-center font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>

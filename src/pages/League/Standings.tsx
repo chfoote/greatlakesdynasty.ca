@@ -86,6 +86,20 @@ function formatPoints(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function heatMapClass(value: number, values: number[]) {
+  if (!values.length) return "bg-white dark:bg-transparent";
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  if (minimum === maximum) return "bg-white dark:bg-transparent";
+
+  const position = (value - minimum) / (maximum - minimum);
+  if (position >= 0.8) return "bg-red-100/80 dark:bg-red-500/15";
+  if (position >= 0.6) return "bg-red-50/70 dark:bg-red-500/8";
+  if (position <= 0.2) return "bg-blue-100/80 dark:bg-blue-500/15";
+  if (position <= 0.4) return "bg-blue-50/70 dark:bg-blue-500/8";
+  return "bg-white dark:bg-transparent";
+}
+
 function podiumRankClass(rank: number) {
   if (rank === 1) return "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300";
   if (rank === 2) return "bg-slate-200 text-slate-700 dark:bg-slate-400/20 dark:text-slate-200";
@@ -95,11 +109,11 @@ function podiumRankClass(rank: number) {
 
 function TeamCell({ row, season }: { row: StandingsRow; season: number }) {
   return (
-    <div className="flex min-w-72 items-center gap-4">
-      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-base font-bold ${podiumRankClass(row.rank)}`}>
+    <div className="flex min-w-64 items-center gap-3.5">
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${podiumRankClass(row.rank)}`}>
         {row.rank}
       </span>
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900">
         {row.team.logo ? (
           <img
             src={row.team.logo}
@@ -107,16 +121,16 @@ function TeamCell({ row, season }: { row: StandingsRow; season: number }) {
             className="h-full w-full object-contain"
           />
         ) : (
-          <span className="text-sm font-bold text-gray-500">
+          <span className="text-xs font-semibold text-gray-500">
             {row.team.abbreviation}
           </span>
         )}
       </div>
-      <div className="min-w-0">
-        <Link to={`/teams/${row.team.id}?season=${season}`} className="block truncate text-base font-semibold text-gray-900 transition hover:text-brand-600 hover:underline dark:text-white">
+      <div>
+        <Link to={`/teams/${row.team.id}?season=${season}`} className="font-medium text-brand-500 hover:text-brand-600 hover:underline">
           {row.team.team_name}
         </Link>
-        <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
           {row.team.abbreviation}
         </p>
       </div>
@@ -130,6 +144,7 @@ export default function Standings() {
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [skaterStats, setSkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalieStats, setGoalieStats] = useState<Map<string, NhlGoalieRecord>>(new Map());
+  const [showHeatMap, setShowHeatMap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -235,44 +250,60 @@ export default function Standings() {
     };
   }, [standings]);
 
+  const heatMapValues = useMemo(
+    () => Object.fromEntries(standingsSlots.map((slot) => [
+      slot.key,
+      standings.map((row) => row.slotScores[slot.key] || 0),
+    ])),
+    [standings],
+  );
+
   return (
-    <div>
+    <div className="xl:-mx-10">
       <PageMeta
         title="Great Lakes Dynasty Hockey League"
         description="Great Lakes Dynasty Hockey League standings"
       />
       <PageBreadcrumb pageTitle="Standings" />
 
-      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-6 shadow-sm dark:border-gray-800 dark:bg-white/[0.03] sm:px-6 xl:px-8 xl:py-8">
-        <div className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 dark:border-gray-800 dark:bg-white/[0.03] xl:px-6">
+        <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+            <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90">
               Standings
             </h3>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-500 dark:text-gray-400">
-              Top 3 centers, left wings and right wings, top 6 defence, and top 2 goalies using GLDHL scoring.
-            </p>
           </div>
 
-          <div className="w-full lg:w-44">
-            <label
-              htmlFor="standings_season"
-              className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400"
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end lg:w-auto">
+            <button
+              type="button"
+              aria-pressed={showHeatMap}
+              onClick={() => setShowHeatMap((current) => !current)}
+              className={`inline-flex h-11 items-center justify-between gap-3 rounded-lg border px-3.5 text-sm font-medium shadow-theme-xs transition sm:min-w-40 ${showHeatMap ? "border-gray-300 bg-gray-50 text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-white" : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"}`}
             >
-              Season
-            </label>
-            <select
-              id="standings_season"
-              value={selectedSeason}
-              onChange={(event) => setSelectedSeason(Number(event.target.value))}
-              className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-            >
-              {seasonOptions.map((season) => (
-                <option key={season} value={season}>
-                  {season}
-                </option>
-              ))}
-            </select>
+              <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-gradient-to-br from-blue-400 via-white to-red-400 ring-1 ring-gray-300 dark:ring-gray-600" />Heat map</span>
+              <span className={`relative h-5 w-9 rounded-full transition ${showHeatMap ? "bg-brand-500" : "bg-gray-300 dark:bg-gray-600"}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${showHeatMap ? "left-[18px]" : "left-0.5"}`} /></span>
+            </button>
+            <div className="w-full sm:w-44">
+              <label
+                htmlFor="standings_season"
+                className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400"
+              >
+                Season
+              </label>
+              <select
+                id="standings_season"
+                value={selectedSeason}
+                onChange={(event) => setSelectedSeason(Number(event.target.value))}
+                className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+              >
+                {seasonOptions.map((season) => (
+                  <option key={season} value={season}>
+                    {season}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -295,25 +326,25 @@ export default function Standings() {
         )}
 
         {!loading && !error && standings.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+          <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-white/[0.03]">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-gray-50 px-5 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                  <th className="sticky left-0 z-10 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-200">
                     Team
                   </th>
                   {standingsSlots.map((slot) => (
                     <th
                       key={slot.key}
-                      className="min-w-16 px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300"
+                      className="px-3 py-3 text-center font-semibold text-gray-700 dark:text-gray-200"
                     >
                       {slot.label}
                     </th>
                   ))}
-                  <th className="min-w-24 px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                  <th className="px-4 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">
                     Points
                   </th>
-                  <th className="min-w-24 px-4 py-4 text-center text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">
+                  <th className="px-4 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">
                     Behind
                   </th>
                 </tr>
@@ -322,23 +353,23 @@ export default function Standings() {
                 {standings.map((row) => (
                   <tr
                     key={row.team.id}
-                    className="group transition-colors hover:bg-brand-50/50 dark:hover:bg-white/[0.03]"
+                    className="hover:bg-gray-50 dark:hover:bg-white/[0.03]"
                   >
-                    <td className="sticky left-0 z-10 bg-white px-5 py-4 transition-colors group-hover:bg-brand-50 dark:bg-gray-900 dark:group-hover:bg-gray-800">
+                    <td className="sticky left-0 z-10 bg-white px-3 py-3 dark:bg-gray-900">
                       <TeamCell row={row} season={selectedSeason} />
                     </td>
                     {standingsSlots.map((slot) => (
                       <td
                         key={slot.key}
-                        className="px-4 py-5 text-center font-medium text-gray-700 dark:text-gray-300"
+                        className={`whitespace-nowrap px-3 py-4 text-center font-medium tabular-nums text-gray-700 transition-colors dark:text-gray-300 ${showHeatMap ? heatMapClass(row.slotScores[slot.key] || 0, heatMapValues[slot.key]) : ""}`}
                       >
                         {formatPoints(row.slotScores[slot.key] || 0)}
                       </td>
                     ))}
-                    <td className="px-4 py-5 text-center text-base font-bold text-gray-900 dark:text-white">
+                    <td className="px-4 py-4 text-center font-semibold text-gray-900 dark:text-white">
                       {formatPoints(row.points)}
                     </td>
-                    <td className="px-4 py-5 text-center text-gray-600 dark:text-gray-300">
+                    <td className="px-4 py-4 text-center text-gray-600 dark:text-gray-300">
                       {row.pointsBehind === 0 ? "-" : formatPoints(row.pointsBehind)}
                     </td>
                   </tr>
@@ -351,15 +382,15 @@ export default function Standings() {
                   {standingsSlots.map((slot) => (
                     <td
                       key={slot.key}
-                      className="px-3 py-3 text-center text-gray-600 dark:text-gray-300"
+                      className="whitespace-nowrap px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300"
                     >
                       {formatPoints(averageRow.slotScores[slot.key] || 0)}
                     </td>
                   ))}
-                  <td className="px-3 py-3 text-center text-gray-700 dark:text-gray-200">
+                  <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-200">
                     {formatPoints(averageRow.points)}
                   </td>
-                  <td className="px-3 py-3 text-center text-gray-400">-</td>
+                  <td className="px-4 py-3 text-center text-gray-400">-</td>
                 </tr>
 
                 <tr className="bg-gray-50 font-medium dark:bg-white/[0.03]">
@@ -369,15 +400,15 @@ export default function Standings() {
                   {standingsSlots.map((slot) => (
                     <td
                       key={slot.key}
-                      className="px-3 py-3 text-center text-gray-600 dark:text-gray-300"
+                      className="whitespace-nowrap px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300"
                     >
                       {formatPoints(medianRow.slotScores[slot.key] || 0)}
                     </td>
                   ))}
-                  <td className="px-3 py-3 text-center text-gray-700 dark:text-gray-200">
+                  <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-200">
                     {formatPoints(medianRow.points)}
                   </td>
-                  <td className="px-3 py-3 text-center text-gray-400">-</td>
+                  <td className="px-4 py-3 text-center text-gray-400">-</td>
                 </tr>
               </tbody>
             </table>

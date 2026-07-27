@@ -87,10 +87,54 @@ export type NhlPlayerLanding = {
   };
 };
 
+export type NhlDraftPick = {
+  round: number;
+  pickInRound: number;
+  overallPick: number;
+  teamId: number;
+  teamAbbrev: string;
+  teamName?: LocalizedName;
+  teamCommonName?: LocalizedName;
+  teamLogoLight?: string;
+  teamLogoDark?: string;
+  firstName?: LocalizedName;
+  lastName?: LocalizedName;
+  positionCode?: string;
+  countryCode?: string;
+};
+
+type NhlDraftResponse = {
+  draftYear: number;
+  picks?: NhlDraftPick[];
+};
+
+export type NhlPlayerSearchResult = {
+  playerId: string;
+  name: string;
+  positionCode?: string;
+  teamAbbrev?: string | null;
+  lastTeamAbbrev?: string | null;
+  active?: boolean;
+};
+
 export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
   const response = await fetch(`/nhl-web-api/player/${playerId}/landing`);
   if (!response.ok) throw new Error(`Unable to load NHL player profile (${response.status})`);
   return response.json() as Promise<NhlPlayerLanding>;
+}
+
+export async function searchNhlPlayers(name: string): Promise<NhlPlayerSearchResult[]> {
+  const params = new URLSearchParams({ culture: "en-us", limit: "10", q: name });
+  const response = await fetch(`/nhl-search-api/search/player?${params}`);
+  if (!response.ok) throw new Error(`Unable to search NHL players (${response.status})`);
+  return response.json() as Promise<NhlPlayerSearchResult[]>;
+}
+
+export async function fetchNhlDraftPicks(draftYear: number): Promise<NhlDraftPick[]> {
+  const response = await fetch(`/nhl-web-api/draft/picks/${draftYear}/all`);
+  if (!response.ok) throw new Error(`Unable to load the ${draftYear} NHL Draft (${response.status})`);
+  const payload = await response.json() as NhlDraftResponse;
+  return payload.picks ?? [];
 }
 
 function reportUrl(position: "skater" | "goalie", report: string, seasonId: number) {

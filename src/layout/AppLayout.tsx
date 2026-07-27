@@ -1,13 +1,11 @@
 import { SidebarProvider, useSidebar } from "../context/SidebarContext";
-import { Outlet, useLocation } from "react-router";
+import { Outlet } from "react-router";
 import AppHeader from "./AppHeader";
 import Backdrop from "./Backdrop";
 import AppSidebar from "./AppSidebar";
 
 const LayoutContent: React.FC = () => {
   const { isExpanded, isHovered, isMobileOpen } = useSidebar();
-  const { pathname } = useLocation();
-  const isWidePage = pathname === "/standings";
 
   return (
     <div className="min-h-screen xl:flex">
@@ -21,7 +19,7 @@ const LayoutContent: React.FC = () => {
         } ${isMobileOpen ? "ml-0" : ""}`}
       >
         <AppHeader />
-        <div className={`mx-auto p-4 md:p-6 ${isWidePage ? "max-w-none xl:px-4" : "max-w-(--breakpoint-2xl)"}`}>
+        <div className="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
           <Outlet />
         </div>
       </div>

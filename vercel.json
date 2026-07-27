@@ -9,6 +9,10 @@
       "destination": "https://api-web.nhle.com/v1/:path*"
     },
     {
+      "source": "/nhl-search-api/:path*",
+      "destination": "https://search.d3.nhle.com/api/v1/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
