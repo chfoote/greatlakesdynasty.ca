@@ -1,13 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useSidebar } from "../context/SidebarContext";
 import { ThemeToggleButton } from "../components/common/ThemeToggleButton";
 import NotificationDropdown from "../components/header/NotificationDropdown";
 import UserDropdown from "../components/header/UserDropdown";
+import { fetchFantasyTeams, type FantasyTeam } from "../lib/fantasyTeams";
+import { fetchFantasyPlayers, fetchPlayerSeasons, type FantasyPlayer, type PlayerSeasonWithRelations } from "../lib/fantasyPlayers";
+
+type SearchResult =
+  | { type: "team"; key: string; label: string; detail: string; image: string | null; path: string }
+  | { type: "player"; key: string; label: string; detail: string; image: string | null; path: string };
 
 const AppHeader: React.FC = () => {
   const [isApplicationMenuOpen, setApplicationMenuOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [selectedResult, setSelectedResult] = useState(0);
+  const [teams, setTeams] = useState<FantasyTeam[]>([]);
+  const [players, setPlayers] = useState<FantasyPlayer[]>([]);
+  const [latestPlayerTeams, setLatestPlayerTeams] = useState<Map<number, PlayerSeasonWithRelations>>(new Map());
+  const navigate = useNavigate();
 
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
 
@@ -24,12 +37,63 @@ const AppHeader: React.FC = () => {
   };
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    Promise.all([fetchFantasyTeams(), fetchFantasyPlayers(), fetchPlayerSeasons()])
+      .then(([teamRows, playerRows, seasonRows]) => {
+        setTeams(teamRows);
+        setPlayers(playerRows);
+        setLatestPlayerTeams(seasonRows.reduce<Map<number, PlayerSeasonWithRelations>>((map, season) => {
+          if (season.fantasy_team_id && !map.has(season.player_id)) map.set(season.player_id, season);
+          return map;
+        }, new Map()));
+      })
+      .catch(() => {
+        // Search remains available with whichever data was loaded successfully.
+      });
+  }, []);
+
+  const searchResults = useMemo<SearchResult[]>(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return [];
+    const teamResults: SearchResult[] = teams
+      .filter((team) => team.team_name.toLowerCase().includes(term) || team.abbreviation.toLowerCase().includes(term))
+      .slice(0, 5)
+      .map((team) => ({ type: "team", key: `team-${team.id}`, label: team.team_name, detail: `${team.abbreviation} · Team`, image: team.logo, path: `/teams/${team.id}` }));
+    const playerResults: SearchResult[] = players
+      .filter((player) => {
+        const name = player.full_name || [player.first_name, player.last_name].filter(Boolean).join(" ");
+        return name.toLowerCase().includes(term) || player.player_api_id.includes(term);
+      })
+      .slice(0, 7)
+      .map((player) => {
+        const latestTeam = latestPlayerTeams.get(player.id)?.fantasy_team;
+        return {
+          type: "player",
+          key: `player-${player.id}`,
+          label: player.full_name || [player.first_name, player.last_name].filter(Boolean).join(" ") || "Unknown Player",
+          detail: latestTeam ? `${latestTeam.team_name} · Player` : "Free Agent · Player",
+          image: latestTeam?.logo || null,
+          path: `/player-profile?playerId=${player.player_api_id}`,
+        };
+      });
+    return [...teamResults, ...playerResults];
+  }, [query, teams, players, latestPlayerTeams]);
+
+  function chooseResult(result: SearchResult) {
+    setQuery("");
+    setSearchOpen(false);
+    setSelectedResult(0);
+    navigate(result.path);
+  }
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
         event.preventDefault();
         inputRef.current?.focus();
+        setSearchOpen(true);
       }
     };
 
@@ -38,6 +102,14 @@ const AppHeader: React.FC = () => {
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
+  }, []);
+
+  useEffect(() => {
+    const closeSearch = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", closeSearch);
+    return () => document.removeEventListener("mousedown", closeSearch);
   }, []);
 
   return (
@@ -110,7 +182,7 @@ const AppHeader: React.FC = () => {
           </button>
 
           <div className="hidden lg:block">
-            <form>
+            <form ref={searchRef} onSubmit={(event) => { event.preventDefault(); if (searchResults[selectedResult]) chooseResult(searchResults[selectedResult]); }}>
               <div className="relative">
                 <span className="absolute -translate-y-1/2 pointer-events-none left-4 top-1/2">
                   <svg
@@ -132,14 +204,46 @@ const AppHeader: React.FC = () => {
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Search or type command..."
+                  value={query}
+                  onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); setSelectedResult(0); }}
+                  onFocus={() => setSearchOpen(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setSelectedResult((current) => Math.min(current + 1, searchResults.length - 1));
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setSelectedResult((current) => Math.max(current - 1, 0));
+                    } else if (event.key === "Escape") {
+                      setSearchOpen(false);
+                      inputRef.current?.blur();
+                    }
+                  }}
+                  placeholder="Search players or teams..."
                   className="dark:bg-dark-900 h-11 w-full rounded-lg border border-gray-200 bg-transparent py-2.5 pl-12 pr-14 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:bg-white/[0.03] dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800 xl:w-[430px]"
                 />
 
-                <button className="absolute right-2.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-50 px-[7px] py-[4.5px] text-xs -tracking-[0.2px] text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400">
+                <button type="button" onClick={() => inputRef.current?.focus()} className="absolute right-2.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-50 px-[7px] py-[4.5px] text-xs -tracking-[0.2px] text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400">
                   <span> ⌘ </span>
                   <span> K </span>
                 </button>
+                {searchOpen && query.trim() && <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 max-h-[28rem] overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+                  {searchResults.length ? <>
+                    <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">Teams &amp; Players</p>
+                    {searchResults.map((result, index) => <button
+                      key={result.key}
+                      type="button"
+                      onMouseEnter={() => setSelectedResult(index)}
+                      onClick={() => chooseResult(result)}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selectedResult === index ? "bg-brand-50 dark:bg-brand-500/10" : "hover:bg-gray-50 dark:hover:bg-white/[0.04]"}`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 text-xs font-bold text-gray-500 dark:border-gray-700 dark:bg-gray-800">
+                        {result.image ? <img src={result.image} alt="" className="h-full w-full object-contain p-0.5" /> : result.type === "team" ? "TEAM" : result.label.split(" ").map((part) => part[0]).slice(0, 2).join("")}
+                      </span>
+                      <span className="min-w-0"><span className="block truncate text-sm font-semibold text-gray-800 dark:text-white">{result.label}</span><span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{result.detail}</span></span>
+                    </button>)}
+                  </> : <p className="px-4 py-6 text-center text-sm text-gray-500">No players or teams found.</p>}
+                </div>}
               </div>
             </form>
           </div>

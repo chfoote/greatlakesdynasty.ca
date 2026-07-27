@@ -16,6 +16,7 @@ import {
   type NhlSkaterRecord,
 } from "../../lib/nhl";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
+import TeamIdentityCard from "./TeamIdentityCard";
 
 const DRAFT_YEAR_COUNT = 10;
 
@@ -327,7 +328,10 @@ export default function FarmSystems() {
     <PageMeta title={`${team?.team_name || "Team"} Farm Systems`} description="GLDHL franchise NHL draft history and prospect statistics" />
     <PageBreadcrumb pageTitle={team ? `${team.team_name} Farm Systems` : "Farm Systems"} />
     {error ? <div className="rounded-2xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : <>
-      {team && <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-gray-500">Franchise development pipeline</p><h1 className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{team.team_name}</h1><p className="mt-1 text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p></div><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div>}
+      {team && <div className="mb-5 space-y-3">
+        <TeamIdentityCard team={team} season={CURRENT_LEAGUE_SEASON} managerName={team.manager_name} />
+        <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div>
+      </div>}
       <DraftBoard team={team} draftYears={draftYears} easternProspects={easternProspects} westernProspects={westernProspects} loading={loading} />
     </>}
   </div>;

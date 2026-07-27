@@ -28,6 +28,7 @@ import {
 import { fetchAwards, fetchPlayerAwards, mapAwardsByPlayer, type Award, type PlayerAward } from "../../lib/awards";
 import PlayerAwardBadges from "./PlayerAwardBadges";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
+import TeamIdentityCard from "./TeamIdentityCard";
 
 const ROSTER_LIMIT = 23;
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
@@ -505,43 +506,7 @@ export default function HockeyTeamDetail() {
     {team && <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
       <div className="h-2" style={{ background: `linear-gradient(90deg, ${displayTeam?.primary_color || "#1d4ed8"}, ${displayTeam?.secondary_color || "#f97316"})` }} />
       <div className="p-4 xl:p-6">
-        <header
-          className="relative overflow-hidden rounded-2xl bg-gray-950 p-5 text-white shadow-lg sm:p-7"
-          style={{ backgroundImage: `linear-gradient(125deg, #111827 0%, ${displayTeam?.primary_color || "#1d4ed8"} 72%, ${displayTeam?.secondary_color || "#f97316"} 145%)` }}
-        >
-          <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full border-[48px] border-white/5" />
-          <div className="pointer-events-none absolute -bottom-28 right-24 h-56 w-56 rounded-full bg-white/5 blur-2xl" />
-          <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/25 bg-white p-2 shadow-xl sm:h-32 sm:w-32">
-                {displayTeam?.logo ? <img src={displayTeam.logo} alt={`${displayTeam.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-2xl font-black text-gray-900">{displayTeam?.abbreviation}</span>}
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-white/85">GLDHL Club</span>
-                  <span className="rounded-full border border-white/20 bg-black/15 px-3 py-1 text-xs font-bold uppercase tracking-wider">{displayTeam?.abbreviation}</span>
-                </div>
-                <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">{displayTeam?.team_name}</h1>
-                <p className="mt-2 text-sm text-white/70">Team #{team.id} · Established GLDHL franchise</p>
-              </div>
-            </div>
-            <div className="min-w-56 rounded-xl border border-white/20 bg-black/20 p-4 shadow-sm backdrop-blur-sm">
-              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/60">Team Manager</p>
-              <p className="mt-1 text-lg font-bold">{selectedManager?.manager_name || team.manager_name || "Not set"}</p>
-              <p className="mt-1 text-xs text-white/65">{selectedSeason} season</p>
-            </div>
-          </div>
-          <div className="relative mt-6 grid gap-3 sm:grid-cols-2">
-            <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/15 text-sm font-black">EAST</div>
-              <div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/60">Eastern Farm System</p><p className="mt-1 truncate font-semibold">{team.eastern_farm_system || "Not assigned"}</p></div>
-            </div>
-            <div className="flex items-center gap-4 rounded-xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/15 text-sm font-black">WEST</div>
-              <div className="min-w-0"><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/60">Western Farm System</p><p className="mt-1 truncate font-semibold">{team.western_farm_system || "Not assigned"}</p></div>
-            </div>
-          </div>
-        </header>
+        <TeamIdentityCard team={displayTeam || team} season={selectedSeason} managerName={selectedManager?.manager_name || team.manager_name} />
         <div className="mt-4 grid grid-cols-3 gap-3"><Medal icon="🥇" value={team.championships} label="Championships" years={finishYears(1)} tone="gold" /><Medal icon="🥈" value={team.runner_up_finishes} label="Runner-up finishes" years={finishYears(2)} tone="silver" /><Medal icon="🥉" value={team.third_place_finishes} label="Third-place finishes" years={finishYears(3)} tone="bronze" /></div>
         <div className="mt-3 flex flex-wrap justify-end gap-3"><Link to={`/teams/${team.id}/farm-systems`} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700">🏒 View Farm Systems</Link><a href="#trophy-case" className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600">🏆 View Trophy Case</a></div>
         <TrophyCase team={displayTeam || team} finishes={teamFinishes} playerAwards={playerAwards} teamSeasons={teamPlayerSeasons} awards={awardDefinitions} />
