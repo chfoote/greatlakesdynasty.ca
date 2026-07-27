@@ -16,6 +16,7 @@ import NhlPlayerCell from "./NhlPlayerCell";
 import { fetchPlayerAwards, mapAwardsByPlayer, type PlayerAward } from "../../lib/awards";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import StatsRightsFilters, { type RightsFilter } from "./StatsRightsFilters";
+import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "../../lib/prospectRights";
 
 const statsSeasons = [2026, 2027];
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
@@ -23,6 +24,7 @@ function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 export default function SkaterStats() {
   const [records, setRecords] = useState<NhlSkaterRecord[]>([]);
   const [fantasySeasons, setFantasySeasons] = useState<Map<string, PlayerSeasonWithRelations>>(new Map());
+  const [prospectRights, setProspectRights] = useState<Map<string, ProspectRight>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [awardsByPlayer, setAwardsByPlayer] = useState<Map<number, PlayerAward[]>>(new Map());
@@ -35,10 +37,15 @@ export default function SkaterStats() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetchNhlSkaterStats(nhlSeasonId(selectedSeason))
-      .then((data) => {
+    Promise.all([
+      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
+      fetchProspectRights(selectedSeason).catch(() => new Map<string, ProspectRight>()),
+    ])
+      .then(async ([data, rights]) => {
+        const eligibleRights = await removeAgedOutProspectRights(rights, data.map((record) => ({ playerId: record.playerId, playerName: record.skaterFullName })));
         if (!active) return;
         setRecords(data);
+        setProspectRights(eligibleRights);
         setError(null);
       })
       .catch((err: unknown) => {
@@ -71,13 +78,15 @@ export default function SkaterStats() {
   const filteredRecords = useMemo(() => records.filter((record) => {
     const displayPosition = record.positionCode === "L" ? "LW" : record.positionCode === "R" ? "RW" : record.positionCode;
     const fantasySeason = fantasySeasons.get(String(record.playerId));
-    const owned = Boolean(fantasySeason?.fantasy_team_id);
+    const prospectRight = getProspectRight(prospectRights, record.playerId, record.skaterFullName);
+    const owned = Boolean(fantasySeason?.fantasy_team_id || prospectRight);
+    const ownerTeamId = fantasySeason?.fantasy_team_id || prospectRight?.team.id;
     if (positionFilter !== "all" && displayPosition !== positionFilter) return false;
     if (rightsFilter === "owned" && !owned) return false;
     if (rightsFilter === "unowned" && owned) return false;
-    if (selectedTeamIds.size && (!fantasySeason?.fantasy_team_id || !selectedTeamIds.has(fantasySeason.fantasy_team_id))) return false;
+    if (selectedTeamIds.size && (!ownerTeamId || !selectedTeamIds.has(ownerTeamId))) return false;
     return true;
-  }), [records, fantasySeasons, positionFilter, rightsFilter, selectedTeamIds]);
+  }), [records, fantasySeasons, prospectRights, positionFilter, rightsFilter, selectedTeamIds]);
 
   return (
     <div>
@@ -113,7 +122,7 @@ export default function SkaterStats() {
                 {[...filteredRecords].sort((a, b) => getSkaterScore(b) - getSkaterScore(a)).map((record) => {
                   const score = getSkaterScore(record);
                   return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                    <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
+                    <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.skaterFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
                     <td className="px-3 py-3 text-center">{record.positionCode === 'L' ? 'LW' : record.positionCode === 'R' ? 'RW' : record.positionCode}</td>
                     {[record.goals,record.assists,record.plusMinus,record.penaltyMinutes,record.ppGoals,record.ppPoints-record.ppGoals,record.shGoals,record.shPoints-record.shGoals,record.gameWinningGoals,record.shots,record.blockedShots,record.hits,record.totalFaceoffWins].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                     <td className="px-3 py-3 text-center font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>

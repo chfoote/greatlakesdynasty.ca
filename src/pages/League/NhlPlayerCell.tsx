@@ -2,6 +2,7 @@ import type { PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import type { PlayerAward } from "../../lib/awards";
 import PlayerAwardBadges from "./PlayerAwardBadges";
 import { Link } from "react-router";
+import type { ProspectRight } from "../../lib/prospectRights";
 
 const currencyFormatter = new Intl.NumberFormat("en-CA", {
   style: "currency",
@@ -14,6 +15,7 @@ export default function NhlPlayerCell({
   playerId,
   teamAbbreviation,
   fantasySeason,
+  prospectRight,
   showNhlTeam = true,
   awards = [],
 }: {
@@ -21,11 +23,15 @@ export default function NhlPlayerCell({
   playerId?: string | number;
   teamAbbreviation: string;
   fantasySeason?: PlayerSeasonWithRelations;
+  prospectRight?: ProspectRight;
   showNhlTeam?: boolean;
   awards?: PlayerAward[];
 }) {
   const salary = fantasySeason?.salary;
   const profilePlayerId = fantasySeason?.player?.player_api_id || playerId;
+  const displayedTeam = fantasySeason?.fantasy_team || prospectRight?.team;
+  const isProspectSeason = fantasySeason ? ["PROSPECT", "AP"].includes((fantasySeason.position || "").toUpperCase()) : false;
+  const displaysProspectRights = Boolean(prospectRight && !fantasySeason?.fantasy_team) || isProspectSeason;
   const isExpiring = Boolean(
     fantasySeason?.term_end_year
     && fantasySeason.term_end_year === fantasySeason.season_year,
@@ -34,15 +40,16 @@ export default function NhlPlayerCell({
   return (
     <div className="flex min-w-52 items-center gap-2">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
-        {fantasySeason?.fantasy_team?.logo ? (
+        {displayedTeam?.logo ? (
           <img
-            src={fantasySeason.fantasy_team.logo}
-            alt={`${fantasySeason.fantasy_team.team_name} logo`}
-            className="h-full w-full object-cover"
+            src={displayedTeam.logo}
+            alt={`${displayedTeam.team_name} logo`}
+            title={displaysProspectRights ? `${displayedTeam.team_name} prospect` : displayedTeam.team_name}
+            className="h-full w-full object-contain p-0.5"
           />
         ) : (
           <span className="text-[10px] font-semibold text-gray-500">
-            {fantasySeason?.fantasy_team?.abbreviation || "FA"}
+            {displayedTeam?.abbreviation || "FA"}
           </span>
         )}
       </div>
@@ -52,7 +59,9 @@ export default function NhlPlayerCell({
         <p className={`mt-0.5 text-[11px] font-medium ${isExpiring ? "text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
           {[
             showNhlTeam ? teamAbbreviation : null,
-            salary === null || salary === undefined
+            displaysProspectRights
+              ? `${displayedTeam?.abbreviation || prospectRight?.team.abbreviation} PROSPECT`
+              : salary === null || salary === undefined
               ? "No salary"
               : currencyFormatter.format(salary),
             fantasySeason?.term_end_year,

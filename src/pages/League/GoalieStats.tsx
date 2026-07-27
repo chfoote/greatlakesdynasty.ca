@@ -13,6 +13,7 @@ import NhlPlayerCell from "./NhlPlayerCell";
 import { fetchPlayerAwards, mapAwardsByPlayer, type PlayerAward } from "../../lib/awards";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import StatsRightsFilters, { type RightsFilter } from "./StatsRightsFilters";
+import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "../../lib/prospectRights";
 
 const statsSeasons = [2026, 2027];
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
@@ -20,6 +21,7 @@ function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 export default function GoalieStats() {
   const [records, setRecords] = useState<NhlGoalieRecord[]>([]);
   const [fantasySeasons, setFantasySeasons] = useState<Map<string, PlayerSeasonWithRelations>>(new Map());
+  const [prospectRights, setProspectRights] = useState<Map<string, ProspectRight>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [awardsByPlayer, setAwardsByPlayer] = useState<Map<number, PlayerAward[]>>(new Map());
@@ -31,10 +33,15 @@ export default function GoalieStats() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetchNhlGoalieStats(nhlSeasonId(selectedSeason))
-      .then((data) => {
+    Promise.all([
+      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
+      fetchProspectRights(selectedSeason).catch(() => new Map<string, ProspectRight>()),
+    ])
+      .then(async ([data, rights]) => {
+        const eligibleRights = await removeAgedOutProspectRights(rights, data.map((record) => ({ playerId: record.playerId, playerName: record.goalieFullName })));
         if (!active) return;
         setRecords(data);
+        setProspectRights(eligibleRights);
         setError(null);
       })
       .catch((err: unknown) => {
@@ -62,12 +69,14 @@ export default function GoalieStats() {
 
   const filteredRecords = useMemo(() => records.filter((record) => {
     const fantasySeason = fantasySeasons.get(String(record.playerId));
-    const owned = Boolean(fantasySeason?.fantasy_team_id);
+    const prospectRight = getProspectRight(prospectRights, record.playerId, record.goalieFullName);
+    const owned = Boolean(fantasySeason?.fantasy_team_id || prospectRight);
+    const ownerTeamId = fantasySeason?.fantasy_team_id || prospectRight?.team.id;
     if (rightsFilter === "owned" && !owned) return false;
     if (rightsFilter === "unowned" && owned) return false;
-    if (selectedTeamIds.size && (!fantasySeason?.fantasy_team_id || !selectedTeamIds.has(fantasySeason.fantasy_team_id))) return false;
+    if (selectedTeamIds.size && (!ownerTeamId || !selectedTeamIds.has(ownerTeamId))) return false;
     return true;
-  }), [records, fantasySeasons, rightsFilter, selectedTeamIds]);
+  }), [records, fantasySeasons, prospectRights, rightsFilter, selectedTeamIds]);
 
   return (
     <div>
@@ -97,7 +106,7 @@ export default function GoalieStats() {
               {[...filteredRecords].sort((a, b) => getGoalieScore(b) - getGoalieScore(a)).map((record) => {
                 const score = getGoalieScore(record);
                 return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
+                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.goalieFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
                   {[record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.savePct === null ? '—' : record.savePct.toFixed(3)}</td>
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(record.goalsAgainstAverage, 2)}</td>
