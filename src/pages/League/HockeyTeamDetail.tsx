@@ -29,6 +29,10 @@ import { fetchAwards, fetchPlayerAwards, mapAwardsByPlayer, type Award, type Pla
 import PlayerAwardBadges from "./PlayerAwardBadges";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import TeamIdentityCard from "./TeamIdentityCard";
+import { fetchTradeBlockListings } from "../../lib/tradeMarket";
+import TradeBlockBadge from "./TradeBlockBadge";
+import PlayerInterestButton from "./PlayerInterestButton";
+import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 
 const ROSTER_LIMIT = 23;
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
@@ -82,14 +86,20 @@ function nhlSkaterPosition(code: string | undefined) {
   return code || "—";
 }
 
-function PlayerName({ season, nhlTeam, awards = [] }: { season: PlayerSeasonWithRelations; nhlTeam?: string; awards?: PlayerAward[] }) {
+function PlayerName({ season, nhlTeam, awards = [], onTradeBlock = false, interestAction }: { season: PlayerSeasonWithRelations; nhlTeam?: string; awards?: PlayerAward[]; onTradeBlock?: boolean; interestAction?: React.ReactNode }) {
   const isExpiring = season.term_end_year === season.season_year;
-  return <div className="min-w-44 text-left">
-    <p className="font-medium text-gray-800 dark:text-white/90">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(season)}</Link> : playerName(season)}<PlayerAwardBadges awards={awards} /></p>
-    <p className={`mt-0.5 text-[11px] ${isExpiring ? "font-semibold text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
-      {[nhlTeam || "—", money.format(season.salary || 0), season.term_end_year || "No term"].join(" | ")}
-      {isExpiring && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">Expiring</span>}
-    </p>
+  const nhlTeamAbbreviation = nhlTeam?.split(",")[0]?.trim();
+  return <div className="flex min-w-56 items-center gap-2 text-left">
+    {interestAction}
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
+      {nhlTeamAbbreviation ? <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlTeamAbbreviation}_light.svg`} alt={`${nhlTeamAbbreviation} NHL club logo`} title={nhlTeamAbbreviation} className="h-full w-full object-contain p-0.5" /> : <span className="text-[10px] font-semibold text-gray-500">NHL</span>}
+    </div>
+    <div><p className="font-medium text-gray-800 dark:text-white/90">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(season)}</Link> : playerName(season)}<PlayerAwardBadges awards={awards} />{onTradeBlock && <TradeBlockBadge className="ml-2 align-middle" />}</p>
+      <p className={`mt-0.5 text-[11px] ${isExpiring ? "font-semibold text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
+        {[nhlTeam || "—", money.format(season.salary || 0), season.term_end_year || "No term"].join(" | ")}
+        {isExpiring && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">Expiring</span>}
+      </p>
+    </div>
   </div>;
 }
 
@@ -193,7 +203,7 @@ function TrophyCase({
   </section>;
 }
 
-function SkaterTable({ code, label, players, stats, awardsByPlayer }: { code: string; label: string; players: PlayerSeasonWithRelations[]; stats: Map<string, NhlSkaterRecord>; awardsByPlayer: Map<number, PlayerAward[]> }) {
+function SkaterTable({ code, label, players, stats, awardsByPlayer, tradeBlockIds, renderInterest }: { code: string; label: string; players: PlayerSeasonWithRelations[]; stats: Map<string, NhlSkaterRecord>; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   const rows = [...players].sort((a, b) => getSkaterScore(stats.get(playerApiId(b)) || emptySkater) - getSkaterScore(stats.get(playerApiId(a)) || emptySkater));
   return <RosterSection code={code} label={label} count={players.length}>
     <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
@@ -206,7 +216,7 @@ function SkaterTable({ code, label, players, stats, awardsByPlayer }: { code: st
           const score = record ? getSkaterScore(record) : 0;
           const values = record ? [record.goals, record.assists, record.plusMinus, record.penaltyMinutes, record.ppGoals, record.ppPoints-record.ppGoals, record.shGoals, record.shPoints-record.shGoals, record.gameWinningGoals, record.shots, record.blockedShots, record.hits, record.totalFaceoffWins] : Array(13).fill(null);
           return <tr key={season.id} className="text-center text-gray-600 dark:text-gray-300">
-            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
+            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} /></td>
             <td className="px-2 py-2">{nhlSkaterPosition(record?.positionCode)}</td>
             {values.map((value, index) => <td key={index} className="px-2 py-2">{formatNhlStat(value)}</td>)}
             <td className="px-2 py-2 font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>
@@ -218,7 +228,7 @@ function SkaterTable({ code, label, players, stats, awardsByPlayer }: { code: st
   </RosterSection>;
 }
 
-function GoalieTable({ players, stats, awardsByPlayer }: { players: PlayerSeasonWithRelations[]; stats: Map<string, NhlGoalieRecord>; awardsByPlayer: Map<number, PlayerAward[]> }) {
+function GoalieTable({ players, stats, awardsByPlayer, tradeBlockIds, renderInterest }: { players: PlayerSeasonWithRelations[]; stats: Map<string, NhlGoalieRecord>; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   const rows = [...players].sort((a, b) => getGoalieScore(stats.get(playerApiId(b)) || emptyGoalie) - getGoalieScore(stats.get(playerApiId(a)) || emptyGoalie));
   return <RosterSection code="G" label="Goalies" count={players.length}>
     <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
@@ -231,7 +241,7 @@ function GoalieTable({ players, stats, awardsByPlayer }: { players: PlayerSeason
           const score = record ? getGoalieScore(record) : 0;
           const values = record ? [record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists] : Array(11).fill(null);
           return <tr key={season.id} className="text-center text-gray-600 dark:text-gray-300">
-            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
+            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} /></td>
             <td className="px-2 py-2">G</td>
             {values.map((value, index) => <td key={index} className="px-2 py-2">{formatNhlStat(value)}</td>)}
             <td className="px-2 py-2">{record?.savePct == null ? "—" : record.savePct.toFixed(3)}</td>
@@ -245,7 +255,7 @@ function GoalieTable({ players, stats, awardsByPlayer }: { players: PlayerSeason
   </RosterSection>;
 }
 
-function CompactTable({ code, label, players, skaters, goalies, note, awardsByPlayer }: { code: string; label: string; players: PlayerSeasonWithRelations[]; skaters: Map<string, NhlSkaterRecord>; goalies: Map<string, NhlGoalieRecord>; note: string; awardsByPlayer: Map<number, PlayerAward[]> }) {
+function CompactTable({ code, label, players, skaters, goalies, note, awardsByPlayer, tradeBlockIds, renderInterest }: { code: string; label: string; players: PlayerSeasonWithRelations[]; skaters: Map<string, NhlSkaterRecord>; goalies: Map<string, NhlGoalieRecord>; note: string; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   return <RosterSection code={code} label={label} count={players.length} note={note}>
     <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
       <thead><tr className="text-left font-semibold uppercase text-gray-500 dark:text-gray-400">
@@ -257,7 +267,7 @@ function CompactTable({ code, label, players, skaters, goalies, note, awardsByPl
           const goalie = goalies.get(playerApiId(season));
           const apiPosition = goalie ? "G" : nhlSkaterPosition(skater?.positionCode);
           return <tr key={season.id} className="text-gray-600 dark:text-gray-300">
-            <td className="px-2 py-2 font-medium text-gray-800 dark:text-white/90">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(season)}</Link> : playerName(season)}<PlayerAwardBadges awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} /></td>
+            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={skater?.teamAbbrevs || goalie?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} /></td>
             <td className="px-2 py-2">{skater?.teamAbbrevs || goalie?.teamAbbrevs || "—"}</td>
             <td className="px-2 py-2">{apiPosition || "—"}</td>
             <td className="px-2 py-2">{season.salary == null ? "—" : money.format(season.salary)}</td>
@@ -388,6 +398,8 @@ export default function HockeyTeamDetail() {
   );
   const [viewMode, setViewMode] = useState<"single" | "multi">("single");
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
+  const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
+  const tradeInterest = usePlayerTradeInterest(selectedSeason);
   const [multiYearRosters, setMultiYearRosters] = useState<Record<number, PlayerSeasonWithRelations[]>>({});
   const [skaters, setSkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalies, setGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
@@ -438,6 +450,10 @@ export default function HockeyTeamDetail() {
         setError("");
       })
       .catch((err: Error) => setError(err.message));
+
+    fetchTradeBlockListings(selectedSeason)
+      .then((rows) => setTradeBlockIds(new Set(rows.map((row) => row.player_season_id))))
+      .catch(() => setTradeBlockIds(new Set()));
 
     Promise.all([
       fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
@@ -496,6 +512,7 @@ export default function HockeyTeamDetail() {
     .filter((finish) => finish.placement === placement)
     .map((finish) => finish.season_year)
     .sort((a, b) => b - a);
+  const renderInterest = (season: PlayerSeasonWithRelations) => tradeInterest.canExpressInterest(season) ? <PlayerInterestButton interested={tradeInterest.isInterested(season.id)} busy={tradeInterest.busyPlayerSeasonId === season.id} onClick={() => void tradeInterest.toggleInterest(season)} /> : null;
 
   return <div>
     <PageMeta title="Great Lakes Dynasty Hockey League" description="GLDHL team roster and payroll" />
@@ -517,9 +534,9 @@ export default function HockeyTeamDetail() {
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
           {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} skaters={skaters} goalies={goalies} awardsByPlayer={awardsByPlayer} /> : <div className="mt-5 space-y-4">
-            {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={goalies} awardsByPlayer={awardsByPlayer} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={skaters} awardsByPlayer={awardsByPlayer} />)}
-            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Non-Rostered Players</h3><div className="space-y-4">{nonRosterSections.map((section) => <CompactTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} skaters={skaters} goalies={goalies} note={section.cap ? "Counts toward cap only" : "Excluded from cap and roster"} awardsByPlayer={awardsByPlayer} />)}</div></div>
-            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Acquired Prospects</h3><CompactTable code="AP" label="Acquired Prospects" players={prospects} skaters={skaters} goalies={goalies} note="Excluded from cap and roster" awardsByPlayer={awardsByPlayer} /></div>
+            {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={goalies} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={skaters} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} renderInterest={renderInterest} />)}
+            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Non-Rostered Players</h3><div className="space-y-4">{nonRosterSections.map((section) => <CompactTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} skaters={skaters} goalies={goalies} note={section.cap ? "Counts toward cap only" : "Excluded from cap and roster"} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} renderInterest={renderInterest} />)}</div></div>
+            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Acquired Prospects</h3><CompactTable code="AP" label="Acquired Prospects" players={prospects} skaters={skaters} goalies={goalies} note="Excluded from cap and roster" awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} renderInterest={renderInterest} /></div>
           </div>}
         </div>
       </div>

@@ -14,6 +14,10 @@ import { fetchPlayerAwards, mapAwardsByPlayer, type PlayerAward } from "../../li
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import StatsRightsFilters, { type RightsFilter } from "./StatsRightsFilters";
 import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "../../lib/prospectRights";
+import { fetchTradeBlockListings } from "../../lib/tradeMarket";
+import TradeBlockBadge from "./TradeBlockBadge";
+import PlayerInterestButton from "./PlayerInterestButton";
+import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 
 const statsSeasons = [2026, 2027];
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
@@ -29,6 +33,8 @@ export default function GoalieStats() {
   const [rightsFilter, setRightsFilter] = useState<RightsFilter>("all");
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
+  const tradeInterest = usePlayerTradeInterest(selectedSeason);
 
   useEffect(() => {
     let active = true;
@@ -57,6 +63,10 @@ export default function GoalieStats() {
       .catch(() => {
         // NHL stats should remain usable when optional fantasy roster metadata fails.
       });
+
+    fetchTradeBlockListings(selectedSeason)
+      .then((rows) => { if (active) setTradeBlockIds(new Set(rows.map((row) => row.player_season_id))); })
+      .catch(() => { if (active) setTradeBlockIds(new Set()); });
 
     fetchPlayerAwards()
       .then((rows) => { if (active) setAwardsByPlayer(mapAwardsByPlayer(rows)); })
@@ -106,7 +116,7 @@ export default function GoalieStats() {
               {[...filteredRecords].sort((a, b) => getGoalieScore(b) - getGoalieScore(a)).map((record) => {
                 const score = getGoalieScore(record);
                 return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.goalieFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} /></td>
+                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.goalieFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
                   {[record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.savePct === null ? '—' : record.savePct.toFixed(3)}</td>
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(record.goalsAgainstAverage, 2)}</td>

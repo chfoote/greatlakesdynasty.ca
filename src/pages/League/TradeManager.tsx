@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import Checkbox from "../../components/form/input/Checkbox";
@@ -740,13 +740,19 @@ function TeamColumn({
 }
 
 export default function TradeManager() {
+  const [searchParams] = useSearchParams();
   const { user, isAdmin } = useAuth();
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
-  const [team1Id, setTeam1Id] = useState("");
-  const [team2Id, setTeam2Id] = useState("");
+  const [team1Id, setTeam1Id] = useState(() => searchParams.get("fromTeam") || "");
+  const [team2Id, setTeam2Id] = useState(() => searchParams.get("toTeam") || "");
   const [threeTeamMode, setThreeTeamMode] = useState(false);
   const [team3Id, setTeam3Id] = useState("");
-  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
+  const [selectedSeason, setSelectedSeason] = useState(() => {
+    const requestedSeason = Number(searchParams.get("season"));
+    return Number.isInteger(requestedSeason) && requestedSeason >= 2026
+      ? requestedSeason
+      : CURRENT_LEAGUE_SEASON;
+  });
   const [team1Roster, setTeam1Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [team2Roster, setTeam2Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [team3Roster, setTeam3Roster] = useState<PlayerSeasonWithRelations[]>([]);
@@ -784,6 +790,7 @@ export default function TradeManager() {
   const [respondingOfferId, setRespondingOfferId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [marketPrefillApplied, setMarketPrefillApplied] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -825,7 +832,7 @@ export default function TradeManager() {
         if (!active || !assignment?.fantasy_team_id) return;
 
         const assignedTeamId = String(assignment.fantasy_team_id);
-        setTeam1Id(assignedTeamId);
+        setTeam1Id((currentTeam1Id) => searchParams.get("fromTeam") || currentTeam1Id || assignedTeamId);
         setTeam2Id((currentTeam2Id) =>
           currentTeam2Id === assignedTeamId ? "" : currentTeam2Id,
         );
@@ -839,7 +846,7 @@ export default function TradeManager() {
     return () => {
       active = false;
     };
-  }, [selectedSeason, user]);
+  }, [searchParams, selectedSeason, user]);
 
   useEffect(() => {
     let active = true;
@@ -1026,6 +1033,22 @@ export default function TradeManager() {
     setTeam2SelectedIds(new Set(pendingCounterSelection.team2PlayerSeasonIds));
     setPendingCounterSelection(null);
   }, [pendingCounterSelection, team1Id, team2Id]);
+
+  useEffect(() => {
+    if (marketPrefillApplied) return;
+    const requestedPlayerSeasonId = Number(searchParams.get("playerSeason"));
+    if (!Number.isInteger(requestedPlayerSeasonId) || !team1Id || !team2Id) return;
+
+    if (team1Roster.some((season) => season.id === requestedPlayerSeasonId)) {
+      setTeam1SelectedIds(new Set([requestedPlayerSeasonId]));
+      setMarketPrefillApplied(true);
+      setSuccess("Trade Market player selected. Add another player or notes, then send the offer.");
+    } else if (team2Roster.some((season) => season.id === requestedPlayerSeasonId)) {
+      setTeam2SelectedIds(new Set([requestedPlayerSeasonId]));
+      setMarketPrefillApplied(true);
+      setSuccess("Trade Market player selected. Add another player or notes, then send the offer.");
+    }
+  }, [marketPrefillApplied, searchParams, team1Id, team1Roster, team2Id, team2Roster]);
 
   const team1OutgoingPlayers = useMemo(
     () =>

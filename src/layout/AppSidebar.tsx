@@ -57,6 +57,11 @@ const leagueToolItems: NavItem[] = [
   },
   {
     icon: <TableIcon />,
+    name: "Trade Market",
+    path: "/trade-market",
+  },
+  {
+    icon: <TableIcon />,
     name: "Trade Manager",
     path: "/trade-manager",
   },

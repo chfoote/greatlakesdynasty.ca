@@ -36,6 +36,7 @@ import TradeAdmin from "./pages/League/TradeAdmin";
 import AwardAdmin from "./pages/League/AwardAdmin";
 import LeagueDashboard from "./pages/League/LeagueDashboard";
 import FarmSystems from "./pages/League/FarmSystems";
+import TradeMarket from "./pages/League/TradeMarket";
 
 export default function App() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
               <Route path="/pitcher-stats" element={<GoalieStats />} />
               <Route path="/player-profile" element={<PlayerProfile />} />
               <Route path="/trade-manager" element={<TradeManager />} />
+              <Route path="/trade-market" element={<TradeMarket />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/admin/trade-manager" element={<TradeManager />} />
 

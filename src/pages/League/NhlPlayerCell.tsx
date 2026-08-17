@@ -18,6 +18,7 @@ export default function NhlPlayerCell({
   prospectRight,
   showNhlTeam = true,
   awards = [],
+  leadingAction,
 }: {
   playerName: string;
   playerId?: string | number;
@@ -26,6 +27,7 @@ export default function NhlPlayerCell({
   prospectRight?: ProspectRight;
   showNhlTeam?: boolean;
   awards?: PlayerAward[];
+  leadingAction?: React.ReactNode;
 }) {
   const salary = fantasySeason?.salary;
   const profilePlayerId = fantasySeason?.player?.player_api_id || playerId;
@@ -39,6 +41,7 @@ export default function NhlPlayerCell({
 
   return (
     <div className="flex min-w-52 items-center gap-2">
+      {leadingAction}
       <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
         {displayedTeam?.logo ? (
           <img
