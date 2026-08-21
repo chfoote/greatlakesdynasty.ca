@@ -16,10 +16,18 @@ import {
   type PlayerTradeInterest,
   type TradeBlockListing,
 } from "../../lib/tradeMarket";
+import { fetchNhlGoalieStats, fetchNhlSkaterStats, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
 
 const seasons = Array.from({ length: 10 }, (_, index) => 2026 + index);
 const tradeablePositions = new Set(["C", "LW", "RW", "D", "G", "RFA", "PROSPECT", "AP"]);
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
+const rosterSections = [
+  { code: "C", label: "Centers" }, { code: "LW", label: "Left Wings" },
+  { code: "RW", label: "Right Wings" }, { code: "D", label: "Defence" },
+  { code: "G", label: "Goalies" }, { code: "RFA", label: "RFA Rights" },
+  { code: "PROSPECT", label: "Prospects" }, { code: "AP", label: "Acquired Prospects" },
+];
+function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
 function playerName(season: PlayerSeasonWithRelations | null) {
   const player = season?.player;
@@ -43,6 +51,8 @@ export default function TradeMarket() {
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [listings, setListings] = useState<TradeBlockListing[]>([]);
   const [interests, setInterests] = useState<PlayerTradeInterest[]>([]);
+  const [skaters, setSkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
+  const [goalies, setGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
@@ -68,10 +78,16 @@ export default function TradeMarket() {
           return;
         }
 
-        const [rosterResult, listingsResult, interestsResult] = await Promise.allSettled([
+        const [rosterResult, listingsResult, interestsResult, statsResult] = await Promise.allSettled([
           fetchPlayerSeasonsByTeamAndSeason(assignedTeamId, season),
           fetchTradeBlockListings(season),
           fetchPlayerTradeInterests(season),
+          Promise.all([
+            fetchNhlSkaterStats(nhlSeasonId(season)).catch(() => [] as NhlSkaterRecord[]),
+            fetchNhlGoalieStats(nhlSeasonId(season)).catch(() => [] as NhlGoalieRecord[]),
+            fetchNhlSkaterStats(nhlSeasonId(season - 1)).catch(() => [] as NhlSkaterRecord[]),
+            fetchNhlGoalieStats(nhlSeasonId(season - 1)).catch(() => [] as NhlGoalieRecord[]),
+          ]),
         ]);
         if (!active) return;
 
@@ -84,6 +100,14 @@ export default function TradeMarket() {
         else setListings([]);
         if (interestsResult.status === "fulfilled") setInterests(interestsResult.value);
         else setInterests([]);
+        if (statsResult.status === "fulfilled") {
+          const [currentSkaters, currentGoalies, previousSkaters, previousGoalies] = statsResult.value;
+          const nextSkaters = new Map(previousSkaters.map((row) => [String(row.playerId), row]));
+          const nextGoalies = new Map(previousGoalies.map((row) => [String(row.playerId), row]));
+          currentSkaters.forEach((row) => nextSkaters.set(String(row.playerId), row));
+          currentGoalies.forEach((row) => nextGoalies.set(String(row.playerId), row));
+          setSkaters(nextSkaters); setGoalies(nextGoalies);
+        } else { setSkaters(new Map()); setGoalies(new Map()); }
 
         const failedResult = [rosterResult, listingsResult, interestsResult].find((result) => result.status === "rejected");
         if (failedResult?.status === "rejected") setError(errorMessage(failedResult.reason));
@@ -102,6 +126,18 @@ export default function TradeMarket() {
   const myListings = listings.filter((listing) => listing.fantasy_team_id === teamId);
   const leagueListings = listings.filter((listing) => listing.fantasy_team_id !== teamId);
   const receivedInterests = interests.filter((interest) => interest.owner_team_id === teamId);
+  const rosterByPosition = useMemo(() => roster.reduce<Record<string, PlayerSeasonWithRelations[]>>((groups, row) => {
+    const code = (row.position || "UNASSIGNED").toUpperCase();
+    (groups[code] ||= []).push(row);
+    return groups;
+  }, {}), [roster]);
+
+  function playerStats(row: PlayerSeasonWithRelations) {
+    const apiId = row.player?.player_api_id || "";
+    const record = (row.position || "").toUpperCase() === "G" ? goalies.get(apiId) : skaters.get(apiId);
+    const score = record ? ((row.position || "").toUpperCase() === "G" ? getGoalieScore(record as NhlGoalieRecord) : getSkaterScore(record as NhlSkaterRecord)) : 0;
+    return { record, score, ppg: record?.gamesPlayed ? score / record.gamesPlayed : null };
+  }
 
   async function toggleListing(seasonRow: PlayerSeasonWithRelations) {
     if (!user || !teamId) return;
@@ -157,13 +193,25 @@ export default function TradeMarket() {
       {loading ? <div className="rounded-2xl border border-gray-200 p-10 text-center text-sm text-gray-500">Loading Trade Market…</div> : !teamId ? <div className="rounded-2xl border border-warning-200 bg-warning-50 p-5 text-sm text-warning-700">Your account is not assigned to a team for this season. Ask an administrator to add the assignment.</div> : <>
         <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:p-6">
           <div className="mb-4 flex items-end justify-between gap-4"><div><h2 className="text-lg font-semibold text-gray-900 dark:text-white">My Trade Block</h2><p className="text-sm text-gray-500">Choose which {teamName} players the league should see as available.</p></div><span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">{myListings.length} listed</span></div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{roster.map((row) => {
-            const listed = listingByPlayerSeason.has(row.id);
-            const interestedTeams = receivedInterests.filter((interest) => interest.player_season_id === row.id);
-            return <div key={row.id} className={`rounded-xl border p-4 ${listed ? "border-brand-300 bg-brand-50/50" : "border-gray-200 dark:border-gray-800"}`}>
-              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><Link to={`/player-profile?playerId=${row.player?.player_api_id}`} className="font-semibold text-brand-500 hover:underline">{playerName(row)}</Link><p className="mt-1 text-xs text-gray-500">{(row.position || "—").toUpperCase()} · {row.salary == null ? "No salary" : money.format(row.salary)}</p></div><button type="button" disabled={busyKey === `listing-${row.id}`} onClick={() => toggleListing(row)} className={`rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${listed ? "border border-error-200 text-error-600 hover:bg-error-50" : "bg-brand-500 text-white hover:bg-brand-600"}`}>{listed ? "Remove" : "List player"}</button></div>
-              {interestedTeams.length > 0 && <div className="mt-3 border-t border-gray-200 pt-3"><p className="text-xs font-semibold text-gray-700">Interested teams</p>{interestedTeams.map((interest) => <div key={interest.id} className="mt-2 flex items-center justify-between gap-2 text-xs"><span>{interest.interested_team?.team_name || "Another team"}</span><Link to={`/trade-manager?fromTeam=${teamId}&toTeam=${interest.interested_team_id}&playerSeason=${row.id}&season=${season}`} className="font-semibold text-brand-500 hover:underline">Start Offer</Link></div>)}</div>}
-            </div>;
+          <div className="space-y-4">{rosterSections.map((section) => {
+            const rows = [...(rosterByPosition[section.code] || [])].sort((a, b) => playerStats(b).score - playerStats(a).score);
+            if (!rows.length) return null;
+            return <section key={section.code} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
+              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-800 dark:bg-white/[0.03]"><h3 className="text-sm font-semibold text-gray-800 dark:text-white">{section.code} <span className="font-normal text-gray-500">({section.label})</span></h3><span className="text-xs text-gray-500">{rows.length} players</span></div>
+              <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr className="border-b border-gray-100 text-xs uppercase text-gray-500 dark:border-gray-800"><th className="px-3 py-2 text-left">Player</th><th className="px-3 py-2 text-center">Salary</th><th className="px-3 py-2 text-center">Term</th><th className="px-3 py-2 text-center">Fantasy Points</th><th className="px-3 py-2 text-center">FPPG</th><th className="px-3 py-2 text-left">Interest</th><th className="px-3 py-2 text-right">Trade Block</th></tr></thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.map((row) => {
+                  const listed = listingByPlayerSeason.has(row.id);
+                  const interestedTeams = receivedInterests.filter((interest) => interest.player_season_id === row.id);
+                  const { record, score, ppg } = playerStats(row);
+                  const nhlTeam = record?.teamAbbrevs?.split(",")[0];
+                  return <tr key={row.id} className={listed ? "bg-brand-50/50 dark:bg-brand-500/5" : ""}>
+                    <td className="px-3 py-3"><div className="flex min-w-52 items-center gap-2"><div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">{nhlTeam ? <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlTeam}_light.svg`} alt={`${nhlTeam} logo`} className="h-full w-full object-contain p-0.5" /> : <span className="text-[10px] font-semibold text-gray-500">NHL</span>}</div><div><Link to={`/player-profile?playerId=${row.player?.player_api_id}`} className="font-semibold text-brand-500 hover:underline">{playerName(row)}</Link><p className="text-[11px] text-gray-500">{nhlTeam || "NHL team unavailable"}</p></div></div></td>
+                    <td className="whitespace-nowrap px-3 py-3 text-center text-gray-600 dark:text-gray-300">{row.salary == null ? "—" : money.format(row.salary)}</td><td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{row.term_end_year || "—"}</td><td className="px-3 py-3 text-center font-semibold text-gray-800 dark:text-white">{record ? formatFantasyPoints(score) : "—"}</td><td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{ppg == null ? "—" : formatFantasyPoints(ppg)}</td>
+                    <td className="px-3 py-3">{interestedTeams.length ? <div className="space-y-1">{interestedTeams.map((interest) => <div key={interest.id} className="flex min-w-40 items-center justify-between gap-2 text-xs"><span>{interest.interested_team?.abbreviation || interest.interested_team?.team_name || "Team"}</span><Link to={`/trade-manager?fromTeam=${teamId}&toTeam=${interest.interested_team_id}&playerSeason=${row.id}&season=${season}`} className="font-semibold text-brand-500 hover:underline">Start Offer</Link></div>)}</div> : <span className="text-xs text-gray-400">None</span>}</td>
+                    <td className="px-3 py-3 text-right"><button type="button" disabled={busyKey === `listing-${row.id}`} onClick={() => toggleListing(row)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${listed ? "border border-error-200 text-error-600 hover:bg-error-50" : "bg-brand-500 text-white hover:bg-brand-600"}`}>{listed ? "Remove" : "List player"}</button></td>
+                  </tr>;
+                })}</tbody></table></div>
+            </section>;
           })}</div>
         </section>
 

@@ -27,6 +27,10 @@ const skaterSlots = [
 ];
 const goalieSlots = Array.from({ length: 2 }, (_, index) => ({ key: `G${index + 1}`, position: "G", label: `G${index + 1}`, slotIndex: index }));
 const standingsSlots = [...skaterSlots, ...goalieSlots];
+const positionGroups = ["C", "LW", "RW", "D", "G"].map((position) => ({
+  position,
+  slots: standingsSlots.filter((slot) => slot.position === position),
+}));
 
 type StandingsRow = {
   team: FantasyTeam;
@@ -109,11 +113,11 @@ function podiumRankClass(rank: number) {
 
 function TeamCell({ row, season }: { row: StandingsRow; season: number }) {
   return (
-    <div className="flex min-w-64 items-center gap-3.5">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold ${podiumRankClass(row.rank)}`}>
+    <div className="flex min-w-0 items-center gap-2">
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold ${podiumRankClass(row.rank)}`}>
         {row.rank}
       </span>
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
         {row.team.logo ? (
           <img
             src={row.team.logo}
@@ -126,11 +130,11 @@ function TeamCell({ row, season }: { row: StandingsRow; season: number }) {
           </span>
         )}
       </div>
-      <div>
-        <Link to={`/teams/${row.team.id}?season=${season}`} className="font-medium text-brand-500 hover:text-brand-600 hover:underline">
+      <div className="min-w-0">
+        <Link to={`/teams/${row.team.id}?season=${season}`} title={row.team.team_name} className="block truncate text-xs font-semibold text-brand-500 hover:text-brand-600 hover:underline">
           {row.team.team_name}
         </Link>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-[10px] text-gray-500 dark:text-gray-400">
           {row.team.abbreviation}
         </p>
       </div>
@@ -145,6 +149,7 @@ export default function Standings() {
   const [skaterStats, setSkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalieStats, setGoalieStats] = useState<Map<string, NhlGoalieRecord>>(new Map());
   const [showHeatMap, setShowHeatMap] = useState(false);
+  const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set(["C", "LW", "RW", "D", "G"]));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -250,23 +255,32 @@ export default function Standings() {
     };
   }, [standings]);
 
-  const heatMapValues = useMemo(
-    () => Object.fromEntries(standingsSlots.map((slot) => [
-      slot.key,
-      standings.map((row) => row.slotScores[slot.key] || 0),
-    ])),
-    [standings],
-  );
+  const groupScore = (row: StandingsRow, position: string) => positionGroups
+    .find((group) => group.position === position)?.slots
+    .reduce((total, slot) => total + (row.slotScores[slot.key] || 0), 0) || 0;
+  const groupHeatMapValues = Object.fromEntries(positionGroups.map((group) => [
+    group.position,
+    standings.map((row) => groupScore(row, group.position)),
+  ]));
+  const heatMapValues = Object.fromEntries(standingsSlots.map((slot) => [
+    slot.key,
+    standings.map((row) => row.slotScores[slot.key] || 0),
+  ]));
+  const togglePosition = (position: string) => setExpandedPositions((current) => {
+    const next = new Set(current);
+    if (next.has(position)) next.delete(position); else next.add(position);
+    return next;
+  });
 
   return (
-    <div className="xl:-mx-10">
+    <div>
       <PageMeta
         title="Great Lakes Dynasty Hockey League"
         description="Great Lakes Dynasty Hockey League standings"
       />
       <PageBreadcrumb pageTitle="Standings" />
 
-      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 dark:border-gray-800 dark:bg-white/[0.03] xl:px-6">
+      <div className="rounded-2xl border border-gray-200 bg-white px-2 py-4 dark:border-gray-800 dark:bg-white/[0.03] sm:px-3 xl:px-4">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90">
@@ -327,27 +341,31 @@ export default function Standings() {
 
         {!loading && !error && standings.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+            <table className="w-full min-w-[1080px] table-fixed divide-y divide-gray-200 text-[11px] dark:divide-gray-800">
+              <colgroup>
+                <col className="w-[170px]" />
+                {positionGroups.flatMap((group) => expandedPositions.has(group.position) ? group.slots.map((slot) => <col key={slot.key} className="w-[46px]" />) : [<col key={group.position} className="w-[54px]" />])}
+                <col className="w-[68px]" /><col className="w-[68px]" />
+              </colgroup>
               <thead className="bg-gray-50 dark:bg-white/[0.03]">
                 <tr>
-                  <th className="sticky left-0 z-10 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                  <th rowSpan={2} className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left font-semibold text-gray-700 dark:bg-gray-900 dark:text-gray-200">
                     Team
                   </th>
-                  {standingsSlots.map((slot) => (
-                    <th
-                      key={slot.key}
-                      className="px-3 py-3 text-center font-semibold text-gray-700 dark:text-gray-200"
-                    >
-                      {slot.label}
-                    </th>
-                  ))}
-                  <th className="px-4 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">
+                  {positionGroups.map((group) => {
+                    const expanded = expandedPositions.has(group.position);
+                    return <th key={group.position} rowSpan={expanded ? 1 : 2} colSpan={expanded ? group.slots.length : 1} className="border-l border-gray-200 px-1 py-1 text-center font-semibold text-gray-700 dark:border-gray-800 dark:text-gray-200">
+                      <button type="button" onClick={() => togglePosition(group.position)} aria-expanded={expanded} className="inline-flex items-center justify-center gap-1 rounded px-1.5 py-0.5 hover:bg-gray-200/70 dark:hover:bg-gray-800" title={`${expanded ? "Collapse" : "Expand"} ${group.position} scoring`}><span>{group.position}</span><span className={`text-[8px] text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}>▼</span></button>
+                    </th>;
+                  })}
+                  <th rowSpan={2} className="border-l border-gray-200 px-1 py-2 text-center font-bold text-gray-900 dark:border-gray-800 dark:text-white">
                     Points
                   </th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">
+                  <th rowSpan={2} className="px-1 py-2 text-center font-semibold text-gray-700 dark:text-gray-200">
                     Behind
                   </th>
                 </tr>
+                <tr>{positionGroups.flatMap((group) => expandedPositions.has(group.position) ? group.slots.map((slot) => <th key={slot.key} className="border-l border-t border-gray-200 px-0.5 py-1.5 text-center text-[10px] font-semibold text-gray-500 dark:border-gray-800">{slot.label}</th>) : [])}</tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {standings.map((row) => (
@@ -355,21 +373,14 @@ export default function Standings() {
                     key={row.team.id}
                     className="hover:bg-gray-50 dark:hover:bg-white/[0.03]"
                   >
-                    <td className="sticky left-0 z-10 bg-white px-3 py-3 dark:bg-gray-900">
+                    <td className="sticky left-0 z-10 bg-white px-2 py-2 dark:bg-gray-900">
                       <TeamCell row={row} season={selectedSeason} />
                     </td>
-                    {standingsSlots.map((slot) => (
-                      <td
-                        key={slot.key}
-                        className={`whitespace-nowrap px-3 py-4 text-center font-medium tabular-nums text-gray-700 transition-colors dark:text-gray-300 ${showHeatMap ? heatMapClass(row.slotScores[slot.key] || 0, heatMapValues[slot.key]) : ""}`}
-                      >
-                        {formatPoints(row.slotScores[slot.key] || 0)}
-                      </td>
-                    ))}
-                    <td className="px-4 py-4 text-center font-semibold text-gray-900 dark:text-white">
+                    {positionGroups.flatMap((group) => expandedPositions.has(group.position) ? group.slots.map((slot) => <td key={slot.key} className={`whitespace-nowrap border-l border-gray-100 px-0.5 py-3 text-center font-semibold tabular-nums text-gray-700 transition-colors dark:border-gray-800 dark:text-gray-300 ${showHeatMap ? heatMapClass(row.slotScores[slot.key] || 0, heatMapValues[slot.key]) : ""}`}>{formatPoints(row.slotScores[slot.key] || 0)}</td>) : [<td key={group.position} className={`whitespace-nowrap border-l border-gray-100 px-1 py-3 text-center font-bold tabular-nums text-gray-800 transition-colors dark:border-gray-800 dark:text-gray-200 ${showHeatMap ? heatMapClass(groupScore(row, group.position), groupHeatMapValues[group.position]) : ""}`}>{formatPoints(groupScore(row, group.position))}</td>])}
+                    <td className="border-l border-gray-100 px-1 py-3 text-center text-xs font-bold text-gray-900 dark:border-gray-800 dark:text-white">
                       {formatPoints(row.points)}
                     </td>
-                    <td className="px-4 py-4 text-center text-gray-600 dark:text-gray-300">
+                    <td className="px-1 py-3 text-center text-gray-600 dark:text-gray-300">
                       {row.pointsBehind === 0 ? "-" : formatPoints(row.pointsBehind)}
                     </td>
                   </tr>
@@ -379,14 +390,7 @@ export default function Standings() {
                   <td className="sticky left-0 z-10 bg-gray-50 px-3 py-3 text-gray-700 dark:bg-gray-900 dark:text-gray-300">
                     Average
                   </td>
-                  {standingsSlots.map((slot) => (
-                    <td
-                      key={slot.key}
-                      className="whitespace-nowrap px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300"
-                    >
-                      {formatPoints(averageRow.slotScores[slot.key] || 0)}
-                    </td>
-                  ))}
+                  {positionGroups.flatMap((group) => expandedPositions.has(group.position) ? group.slots.map((slot) => <td key={slot.key} className="whitespace-nowrap border-l border-gray-200 px-2 py-3 text-center tabular-nums text-gray-600 dark:border-gray-800 dark:text-gray-300">{formatPoints(averageRow.slotScores[slot.key] || 0)}</td>) : [<td key={group.position} className="whitespace-nowrap border-l border-gray-200 px-3 py-3 text-center font-semibold tabular-nums text-gray-700 dark:border-gray-800 dark:text-gray-200">{formatPoints(average(standings.map((row) => groupScore(row, group.position))))}</td>])}
                   <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-200">
                     {formatPoints(averageRow.points)}
                   </td>
@@ -397,14 +401,7 @@ export default function Standings() {
                   <td className="sticky left-0 z-10 bg-gray-50 px-3 py-3 text-gray-700 dark:bg-gray-900 dark:text-gray-300">
                     Median
                   </td>
-                  {standingsSlots.map((slot) => (
-                    <td
-                      key={slot.key}
-                      className="whitespace-nowrap px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300"
-                    >
-                      {formatPoints(medianRow.slotScores[slot.key] || 0)}
-                    </td>
-                  ))}
+                  {positionGroups.flatMap((group) => expandedPositions.has(group.position) ? group.slots.map((slot) => <td key={slot.key} className="whitespace-nowrap border-l border-gray-200 px-2 py-3 text-center tabular-nums text-gray-600 dark:border-gray-800 dark:text-gray-300">{formatPoints(medianRow.slotScores[slot.key] || 0)}</td>) : [<td key={group.position} className="whitespace-nowrap border-l border-gray-200 px-3 py-3 text-center font-semibold tabular-nums text-gray-700 dark:border-gray-800 dark:text-gray-200">{formatPoints(median(standings.map((row) => groupScore(row, group.position))))}</td>])}
                   <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-200">
                     {formatPoints(medianRow.points)}
                   </td>
