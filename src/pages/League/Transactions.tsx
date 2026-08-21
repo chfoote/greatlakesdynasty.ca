@@ -84,7 +84,7 @@ function getTransactionSentence(transaction: LeagueTransaction, fallbackPosition
   const contractValue = contractYears && transaction.salary !== null
     ? contractYears * transaction.salary
     : null;
-  const showsContractTerms = transaction.action === "signed" || transaction.action === "called_up";
+  const showsContractTerms = transaction.action === "signed" || transaction.action === "called_up" || transaction.action === "matched_rfa_offer";
   const signingTerms = showsContractTerms && contractYears && transaction.salary !== null
     ? ` for ${contractYears} ${contractYears === 1 ? "Year" : "Years"} at ${money.format(transaction.salary)}${transaction.term_end_year ? ` (${transaction.term_end_year})` : ""}`
     : "";

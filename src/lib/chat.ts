@@ -10,6 +10,7 @@ export type ChatMessage = {
   team_abbreviation: string | null;
   team_logo: string | null;
   is_system: boolean;
+  system_label: string | null;
   link: string | null;
   created_at: string;
 };

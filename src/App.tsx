@@ -66,11 +66,11 @@ export default function App() {
               <Route path="/player-profile" element={<PlayerProfile />} />
               <Route path="/trade-manager" element={<TradeManager />} />
               <Route path="/trade-market" element={<TradeMarket />} />
+              <Route path="/auction-house" element={<AuctionHouse />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/admin/trade-manager" element={<TradeManager />} />
 
               <Route element={<AdminRoute />}>
-                <Route path="/auction-house" element={<AuctionHouse />} />
                 <Route path="/admin/auction-house" element={<AuctionHouse />} />
                 <Route path="/admin/teams" element={<TeamAdmin />} />
                 <Route path="/admin/players" element={<PlayerAdmin />} />

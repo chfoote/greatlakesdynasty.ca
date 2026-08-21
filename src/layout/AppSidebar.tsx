@@ -57,6 +57,11 @@ const leagueToolItems: NavItem[] = [
   },
   {
     icon: <TableIcon />,
+    name: "Auction House",
+    path: "/auction-house",
+  },
+  {
+    icon: <TableIcon />,
     name: "Trade Market",
     path: "/trade-market",
   },
@@ -68,11 +73,6 @@ const leagueToolItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
-  {
-    icon: <TableIcon />,
-    name: "Auction House",
-    path: "/admin/auction-house",
-  },
   {
     icon: <TableIcon />,
     name: "Manage Teams",
