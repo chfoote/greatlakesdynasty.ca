@@ -116,6 +116,70 @@ function getActionLabel(transaction: LeagueTransaction) {
   }[transaction.action] || "Transaction";
 }
 
+function getTransactionAnchor(transaction: LeagueTransaction) {
+  return transaction.trade_offer_id
+    ? `trade-${transaction.trade_offer_id}`
+    : `transaction-${transaction.id}`;
+}
+
+function getFallbackPosition(transaction: LeagueTransaction, transactions: LeagueTransaction[]) {
+  return transactions.find((candidate) =>
+    candidate.id !== transaction.id
+    && candidate.player_id === transaction.player_id
+    && candidate.season_year === transaction.season_year
+    && Boolean(candidate.position),
+  )?.position;
+}
+
+function getWhatsAppMessage(transaction: LeagueTransaction, transactions: LeagueTransaction[]) {
+  const heading = transaction.trade_offer_id ? "GLDHL TRADE" : "GLDHL TRANSACTION";
+  const lines = [`🏒 *${heading}*`, ""];
+
+  if (transaction.trade_offer_id && transaction.trade_offer) {
+    const trade = transaction.trade_offer;
+    const teams = [trade.from_team, trade.to_team, trade.third_team].filter(
+      (team): team is NonNullable<typeof team> => Boolean(team),
+    );
+
+    teams.forEach((team, index) => {
+      if (index > 0) lines.push("");
+      lines.push(`*${team.team_name} receive:*`);
+      const acquired = trade.trade_offer_players.filter((move) => move.to_team_id === team.id);
+      if (acquired.length === 0) {
+        lines.push("• No players listed");
+      } else {
+        acquired.forEach((move) => {
+          const player = move.player_season?.player;
+          const playerName = player?.full_name
+            || [player?.first_name, player?.last_name].filter(Boolean).join(" ")
+            || "Unknown player";
+          const position = move.player_season?.position?.toUpperCase();
+          lines.push(`• ${position ? `${position} ` : ""}${playerName}`);
+        });
+      }
+    });
+
+    if (transaction.notes) lines.push("", transaction.notes);
+  } else {
+    const sentence = getTransactionSentence(
+      transaction,
+      getFallbackPosition(transaction, transactions),
+    );
+    lines.push(
+      `${sentence.prefix} ${sentence.position ? `${sentence.position} ` : ""}${getPlayerName(transaction)}${sentence.suffix}`,
+    );
+    if (sentence.contractDetail) lines.push(sentence.contractDetail);
+    if (transaction.notes) lines.push("", transaction.notes);
+  }
+
+  const transactionUrl = new URL(
+    `/transactions#${getTransactionAnchor(transaction)}`,
+    window.location.origin,
+  ).toString();
+  lines.push("", `View transaction: ${transactionUrl}`);
+  return lines.join("\n");
+}
+
 function findRelatedTradeId(
   transaction: LeagueTransaction,
   transactions: LeagueTransaction[],
@@ -278,6 +342,15 @@ export default function Transactions() {
     });
   }
 
+  function handleWhatsAppShare(transaction: LeagueTransaction) {
+    const message = getWhatsAppMessage(transaction, transactions);
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(message)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
   return (
     <div>
       <PageMeta title="Great Lakes Dynasty Hockey League" description="Great Lakes Dynasty Hockey League transactions" />
@@ -320,7 +393,7 @@ export default function Transactions() {
             {filteredTransactions.map((transaction) => (
               <article
                 key={transaction.id}
-                id={transaction.trade_offer_id ? `trade-${transaction.trade_offer_id}` : undefined}
+                id={getTransactionAnchor(transaction)}
                 className="relative overflow-hidden rounded-xl border border-gray-200 bg-white p-4 shadow-theme-xs transition hover:border-brand-200 hover:shadow-theme-sm dark:border-gray-800 dark:bg-gray-900 dark:hover:border-brand-500/40 sm:p-5"
               >
                 <div
@@ -371,12 +444,7 @@ export default function Transactions() {
                       </span>
                     </div>
                     {(() => {
-                      const fallbackPosition = transactions.find((candidate) =>
-                        candidate.id !== transaction.id
-                        && candidate.player_id === transaction.player_id
-                        && candidate.season_year === transaction.season_year
-                        && Boolean(candidate.position),
-                      )?.position;
+                      const fallbackPosition = getFallbackPosition(transaction, transactions);
                       const sentence = getTransactionSentence(transaction, fallbackPosition);
                       const apiId = transaction.player?.player_api_id;
                       const relatedTradeId = findRelatedTradeId(transaction, transactions);
@@ -427,6 +495,19 @@ export default function Transactions() {
                     )}
                   </div>
                 </div>}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleWhatsAppShare(transaction)}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#25D366] px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs transition hover:bg-[#1ebe5d] focus:outline-none focus:ring-2 focus:ring-[#25D366]/40"
+                    aria-label={`Share ${getActionLabel(transaction).toLowerCase()} on WhatsApp`}
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4 fill-current">
+                      <path d="M12.04 2a9.84 9.84 0 0 0-8.52 14.77L2 22l5.38-1.41A9.91 9.91 0 1 0 12.04 2Zm0 17.92a8.03 8.03 0 0 1-4.1-1.12l-.3-.18-3.2.84.86-3.11-.2-.32a8.03 8.03 0 1 1 6.94 3.89Zm4.4-6.02c-.24-.12-1.43-.71-1.65-.79-.22-.08-.38-.12-.54.12-.16.24-.62.79-.76.95-.14.16-.28.18-.52.06-.24-.12-1.02-.38-1.94-1.2a7.25 7.25 0 0 1-1.34-1.67c-.14-.24-.02-.37.1-.49.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.19-.47-.39-.41-.54-.42h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2 0 1.18.86 2.32.98 2.48.12.16 1.69 2.58 4.1 3.62.57.25 1.02.4 1.37.51.58.18 1.1.16 1.51.1.46-.07 1.43-.59 1.63-1.15.2-.57.2-1.05.14-1.15-.06-.1-.22-.16-.46-.28Z" />
+                    </svg>
+                    Share on WhatsApp
+                  </button>
+                )}
               </article>
             ))}
           </div>
