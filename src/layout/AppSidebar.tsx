@@ -99,6 +99,11 @@ const adminItems: NavItem[] = [
     path: "/admin/auction-report",
   },
   {
+    icon: <TableIcon />,
+    name: "Buyout Admin",
+    path: "/admin/buyouts",
+  },
+  {
     icon: <UserCircleIcon />,
     name: "Manage Awards",
     path: "/admin/awards",

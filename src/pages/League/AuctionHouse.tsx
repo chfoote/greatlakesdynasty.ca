@@ -18,6 +18,7 @@ import {
   type PlayerSeasonWithRelations,
 } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
+import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
 import {
   fetchLatestUserTeamAssignment,
   fetchUserTeamAssignment,
@@ -460,6 +461,7 @@ export default function AuctionHouse() {
   const [assignment, setAssignment] =
     useState<TeamUserAssignmentWithTeam | null>(null);
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
+  const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [leagueTeams, setLeagueTeams] = useState<FantasyTeam[]>([]);
   const [activeTeamIds, setActiveTeamIds] = useState<Set<number>>(new Set());
@@ -491,10 +493,13 @@ export default function AuctionHouse() {
       const assigned =
         (await fetchUserTeamAssignment(user.id, season)) ||
         (await fetchLatestUserTeamAssignment(user.id));
-      const [rows, teamRoster] = await Promise.all([
+      const [rows, teamRoster, penaltyRows] = await Promise.all([
         fetchAuctions(season),
         assigned?.fantasy_team_id
           ? fetchPlayerSeasonsByTeamAndSeason(assigned.fantasy_team_id, season)
+          : Promise.resolve([]),
+        assigned?.fantasy_team_id
+          ? fetchBuyoutPenalties(season, assigned.fantasy_team_id)
           : Promise.resolve([]),
       ]);
       const apiIds = Array.from(
@@ -526,6 +531,7 @@ export default function AuctionHouse() {
       setAssignment(assigned);
       setAuctions(rows);
       setRoster(teamRoster);
+      setBuyoutPenalties(penaltyRows);
       setLandings(Object.fromEntries(landingRows));
       setSkaters(
         Object.fromEntries(skaterRows.map((row) => [row.playerId, row])),
@@ -679,7 +685,8 @@ export default function AuctionHouse() {
     });
   }, [auctions]);
   const teamId = assignment?.fantasy_team_id;
-  const salary = roster.reduce((sum, row) => sum + (row.salary || 0), 0);
+  const salary = roster.reduce((sum, row) => sum + (row.salary || 0), 0)
+    + buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0);
   const rosterCount = roster.filter((row) =>
     activePositions.has((row.position || "").toUpperCase()),
   ).length;

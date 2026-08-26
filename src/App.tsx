@@ -38,6 +38,7 @@ import AwardAdmin from "./pages/League/AwardAdmin";
 import LeagueDashboard from "./pages/League/LeagueDashboard";
 import FarmSystems from "./pages/League/FarmSystems";
 import TradeMarket from "./pages/League/TradeMarket";
+import BuyoutAdmin from "./pages/League/BuyoutAdmin";
 
 export default function App() {
   return (
@@ -78,6 +79,7 @@ export default function App() {
                 <Route path="/admin/trades" element={<TradeAdmin />} />
                 <Route path="/admin/auction-admin" element={<AuctionAdmin />} />
                 <Route path="/admin/auction-report" element={<AuctionReport />} />
+                <Route path="/admin/buyouts" element={<BuyoutAdmin />} />
                 <Route path="/admin/awards" element={<AwardAdmin />} />
               </Route>
 

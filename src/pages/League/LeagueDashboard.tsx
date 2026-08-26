@@ -5,6 +5,7 @@ import PageMeta from "../../components/common/PageMeta";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON, dashboardSeasons } from "../../lib/leagueSeasons";
+import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
 
 const seasonOptions = dashboardSeasons;
 const rosterLimit = 23;
@@ -33,6 +34,7 @@ export default function LeagueDashboard() {
   const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [seasons, setSeasons] = useState<PlayerSeasonWithRelations[]>([]);
+  const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const salaryCap = salaryCapForSeason(selectedSeason);
@@ -41,11 +43,12 @@ export default function LeagueDashboard() {
     let active = true;
     setLoading(true);
     setError("");
-    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason)])
-      .then(([teamRows, brandingRows, seasonRows]) => {
+    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason), fetchBuyoutPenalties(selectedSeason)])
+      .then(([teamRows, brandingRows, seasonRows, penaltyRows]) => {
         if (!active) return;
         setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
         setSeasons(seasonRows);
+        setBuyoutPenalties(penaltyRows);
       })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "Unable to load dashboard."); })
       .finally(() => { if (active) setLoading(false); });
@@ -57,7 +60,8 @@ export default function LeagueDashboard() {
       const roster = seasons.filter((season) => season.fantasy_team_id === team.id);
       const salarySpent = roster
         .filter((season) => capPositions.has(position(season)))
-        .reduce((total, season) => total + (season.salary || 0), 0);
+        .reduce((total, season) => total + (season.salary || 0), 0)
+        + buyoutPenalties.filter((penalty) => penalty.fantasy_team_id === team.id).reduce((total, penalty) => total + penalty.amount, 0);
       const counts = Object.fromEntries(Object.keys(positionMinimums).map((code) => [
         code,
         roster.filter((season) => position(season) === code).length,
@@ -70,7 +74,7 @@ export default function LeagueDashboard() {
         counts,
       };
     })
-    .sort((a, b) => a.team.id - b.team.id), [teams, seasons, salaryCap]);
+    .sort((a, b) => a.team.id - b.team.id), [teams, seasons, salaryCap, buyoutPenalties]);
 
   return <div>
     <PageMeta title="Great Lakes Dynasty Hockey League" description="GLDHL league roster and salary dashboard" />
