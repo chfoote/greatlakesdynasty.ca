@@ -17,6 +17,7 @@ const money = new Intl.NumberFormat("en-CA", {
   currency: "CAD",
   maximumFractionDigits: 0,
 });
+const positionOrder = ["C", "LW", "RW", "D", "G"];
 
 function name(row: PlayerSeasonWithRelations) {
   return row.player?.full_name || "Unknown Player";
@@ -90,6 +91,31 @@ export default function BuyoutAdmin() {
     () => contracts.find((row) => row.id === Number(selectedId)) || null,
     [contracts, selectedId],
   );
+  const contractsByTeam = useMemo(() => {
+    const groups = new Map<string, PlayerSeasonWithRelations[]>();
+    contracts.forEach((contract) => {
+      const teamName = contract.fantasy_team?.team_name || "Unassigned";
+      const group = groups.get(teamName) || [];
+      group.push(contract);
+      groups.set(teamName, group);
+    });
+    return [...groups.entries()]
+      .sort(([teamA], [teamB]) => teamA.localeCompare(teamB))
+      .map(([teamName, rows]) => ({
+        teamName,
+        rows: rows.sort((a, b) => {
+          const aPosition = (a.position || "").toUpperCase();
+          const bPosition = (b.position || "").toUpperCase();
+          const aRank = positionOrder.includes(aPosition)
+            ? positionOrder.indexOf(aPosition)
+            : positionOrder.length;
+          const bRank = positionOrder.includes(bPosition)
+            ? positionOrder.indexOf(bPosition)
+            : positionOrder.length;
+          return aRank - bRank || name(a).localeCompare(name(b));
+        }),
+      }));
+  }, [contracts]);
 
   function selectContract(value: string) {
     setSelectedId(value);
@@ -168,7 +194,7 @@ export default function BuyoutAdmin() {
               <label className="text-sm font-semibold">Player contract
                 <select value={selectedId} onChange={(event) => selectContract(event.target.value)} className="mt-1 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 dark:border-gray-700 dark:bg-gray-900" disabled={loading}>
                   <option value="">Choose player and contract</option>
-                  {contracts.map((row) => <option key={row.id} value={row.id}>{name(row)} — {row.fantasy_team?.team_name} — {row.season_year} — {money.format(row.salary || 0)} through {row.term_end_year}</option>)}
+                  {contractsByTeam.map((group) => <optgroup key={group.teamName} label={group.teamName}>{group.rows.map((row) => <option key={row.id} value={row.id}>[{(row.position || "—").toUpperCase()}] {name(row)} — {money.format(row.salary || 0)} through {row.term_end_year}</option>)}</optgroup>)}
                 </select>
               </label>
               <label className="text-sm font-semibold">Buyout date

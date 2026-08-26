@@ -3,14 +3,27 @@ import { Link, useLocation } from "react-router";
 
 // Assume these icons are imported from an icon library
 import {
-  CalenderIcon,
   ChevronDownIcon,
-  GridIcon,
   HorizontaLDots,
   PlugInIcon,
-  TableIcon,
-  UserCircleIcon,
 } from "../icons";
+import {
+  AdminTradeIcon,
+  AuctionIcon,
+  AwardsIcon,
+  BuyoutIcon,
+  DashboardIcon,
+  GoalieIcon,
+  MarketIcon,
+  PlayerAdminIcon,
+  ReportIcon,
+  SkaterIcon,
+  StandingsIcon,
+  TeamAdminIcon,
+  TeamsIcon,
+  TradeIcon,
+  TransactionsIcon,
+} from "../icons/league";
 import { useSidebar } from "../context/SidebarContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -23,27 +36,27 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   {
-    icon: <GridIcon />,
+    icon: <StandingsIcon />,
     name: "Standings",
     path: "/standings",
   },
   {
-    icon: <GridIcon />,
+    icon: <TeamsIcon />,
     name: "Teams",
     path: "/teams",
   },
   {
-    icon: <CalenderIcon />,
+    icon: <TransactionsIcon />,
     name: "Transactions",
     path: "/transactions",
   },
   {
-    icon: <UserCircleIcon />,
+    icon: <SkaterIcon />,
     name: "Skater Stats",
     path: "/skater-stats",
   },
   {
-    icon: <TableIcon />,
+    icon: <GoalieIcon />,
     name: "Goalie Stats",
     path: "/goalie-stats",
   },
@@ -51,22 +64,22 @@ const navItems: NavItem[] = [
 
 const leagueToolItems: NavItem[] = [
   {
-    icon: <GridIcon />,
+    icon: <DashboardIcon />,
     name: "Dashboard",
     path: "/league-dashboard",
   },
   {
-    icon: <TableIcon />,
+    icon: <AuctionIcon />,
     name: "Auction House",
     path: "/auction-house",
   },
   {
-    icon: <TableIcon />,
+    icon: <MarketIcon />,
     name: "Trade Market",
     path: "/trade-market",
   },
   {
-    icon: <TableIcon />,
+    icon: <TradeIcon />,
     name: "Trade Manager",
     path: "/trade-manager",
   },
@@ -74,37 +87,37 @@ const leagueToolItems: NavItem[] = [
 
 const adminItems: NavItem[] = [
   {
-    icon: <TableIcon />,
+    icon: <TeamAdminIcon />,
     name: "Manage Teams",
     path: "/admin/teams",
   },
   {
-    icon: <UserCircleIcon />,
+    icon: <PlayerAdminIcon />,
     name: "Manage Players",
     path: "/admin/players",
   },
   {
-    icon: <TableIcon />,
+    icon: <AdminTradeIcon />,
     name: "Trade Admin",
     path: "/admin/trades",
   },
   {
-    icon: <UserCircleIcon />,
+    icon: <AuctionIcon />,
     name: "Auction Admin",
     path: "/admin/auction-admin",
   },
   {
-    icon: <TableIcon />,
+    icon: <ReportIcon />,
     name: "Bidding Report",
     path: "/admin/auction-report",
   },
   {
-    icon: <TableIcon />,
+    icon: <BuyoutIcon />,
     name: "Buyout Admin",
     path: "/admin/buyouts",
   },
   {
-    icon: <UserCircleIcon />,
+    icon: <AwardsIcon />,
     name: "Manage Awards",
     path: "/admin/awards",
   },
@@ -123,7 +136,7 @@ const othersItems: NavItem[] = [
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const location = useLocation();
 
   const [openSubmenu, setOpenSubmenu] = useState<{
@@ -410,7 +423,7 @@ const AppSidebar: React.FC = () => {
                 {renderMenuItems(adminItems, "admin")}
               </div>
             )}
-            <div className="">
+            {!user && <div>
               <h2
                 className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
                   !isExpanded && !isHovered
@@ -425,7 +438,7 @@ const AppSidebar: React.FC = () => {
                 )}
               </h2>
               {renderMenuItems(othersItems, "others")}
-            </div>
+            </div>}
           </div>
         </nav>
       </div>
