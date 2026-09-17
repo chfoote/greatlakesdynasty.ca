@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
@@ -43,6 +43,16 @@ export default function HockeyHome() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const didScrollInitiallyRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (loading || didScrollInitiallyRef.current || messages.length === 0) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    didScrollInitiallyRef.current = true;
+  }, [loading, messages]);
 
   useEffect(() => {
     let active = true;
@@ -51,7 +61,6 @@ export default function HockeyHome() {
         if (!active) return;
         setMessages([...rows].reverse());
         setHasOlder(rows.length === PAGE_SIZE);
-        requestAnimationFrame(() => messagesEndRef.current?.scrollIntoView());
       })
       .catch((err: Error) => active && setError(err.message))
       .finally(() => active && setLoading(false));
@@ -134,7 +143,7 @@ export default function HockeyHome() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Talk hockey, trades, and league business with the other managers.</p>
         </div>
 
-        <div className="flex min-h-[460px] max-h-[62vh] flex-col overflow-y-auto bg-gray-50/60 px-4 py-5 dark:bg-gray-950/20 sm:px-6">
+        <div ref={messagesContainerRef} className="flex min-h-[460px] max-h-[62vh] flex-col overflow-y-auto bg-gray-50/60 px-4 py-5 dark:bg-gray-950/20 sm:px-6">
           {hasOlder && <button type="button" onClick={loadOlder} disabled={loadingOlder} className="mx-auto mb-5 rounded-full border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-600 hover:border-brand-300 hover:text-brand-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">{loadingOlder ? "Loading…" : "Load older messages"}</button>}
           {loading ? <p className="m-auto text-sm text-gray-500">Loading league chat…</p> : messages.length === 0 ? <div className="m-auto text-center"><p className="text-base font-medium text-gray-700 dark:text-gray-300">No messages yet.</p><p className="mt-1 text-sm text-gray-500">Start the conversation!</p></div> : <div className="space-y-4">{messages.map((message) => <article key={message.id} className="flex items-start gap-3">
             {message.team_logo ? <Link to={message.fantasy_team_id ? `/teams/${message.fantasy_team_id}` : "/teams"} className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900"><img src={message.team_logo} alt={`${message.team_name || "Team"} logo`} className="h-full w-full object-contain" /></Link> : <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">{initials(message.author_name)}</div>}
