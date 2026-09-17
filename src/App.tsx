@@ -35,6 +35,7 @@ import AuctionAdmin from "./pages/League/AuctionAdmin";
 import AuctionReport from "./pages/League/AuctionReport";
 import TradeAdmin from "./pages/League/TradeAdmin";
 import AwardAdmin from "./pages/League/AwardAdmin";
+import Awards from "./pages/League/Awards";
 import LeagueDashboard from "./pages/League/LeagueDashboard";
 import FarmSystems from "./pages/League/FarmSystems";
 import TradeMarket from "./pages/League/TradeMarket";
@@ -60,6 +61,7 @@ export default function App() {
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/blank" element={<Blank />} />
               <Route path="/standings" element={<Standings />} />
+              <Route path="/awards" element={<Awards />} />
               <Route path="/transactions" element={<Transactions />} />
               <Route path="/skater-stats" element={<SkaterStats />} />
               <Route path="/goalie-stats" element={<GoalieStats />} />

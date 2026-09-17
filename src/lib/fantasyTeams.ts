@@ -211,6 +211,15 @@ export async function fetchTeamFinishes(teamId: number) {
   return (data ?? []) as FantasyTeamFinish[];
 }
 
+export async function fetchAllTeamFinishes() {
+  const { data, error } = await supabase
+    .from("fantasy_team_finishes")
+    .select("*")
+    .order("season_year", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as FantasyTeamFinish[];
+}
+
 export async function createTeamFinish(input: Omit<FantasyTeamFinish, "id">) {
   const { data, error } = await supabase
     .from("fantasy_team_finishes")
