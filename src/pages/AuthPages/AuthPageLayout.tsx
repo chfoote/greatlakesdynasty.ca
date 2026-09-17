@@ -12,21 +12,26 @@ export default function AuthLayout({
     <div className="relative p-6 bg-white z-1 dark:bg-gray-900 sm:p-0">
       <div className="relative flex flex-col justify-center w-full h-screen lg:flex-row dark:bg-gray-900 sm:p-0">
         {children}
-        <div className="items-center hidden w-full h-full lg:w-1/2 bg-brand-950 dark:bg-white/5 lg:grid">
+        <div className="items-center hidden w-full h-full overflow-hidden lg:w-1/2 bg-brand-950 dark:bg-gray-950 lg:grid">
           <div className="relative flex items-center justify-center z-1">
             {/* <!-- ===== Common Grid Shape Start ===== --> */}
             <GridShape />
-            <div className="flex flex-col items-center max-w-xs">
-              <Link to="/" className="block mb-4">
+            <div className="flex flex-col items-center max-w-lg px-10">
+              <Link
+                to="/"
+                className="block rounded-3xl bg-white p-5 shadow-2xl shadow-black/30"
+                aria-label="Great Lakes Dynasty Hockey League home"
+              >
                 <img
-                  width={231}
-                  height={48}
-                  src="/images/logo/auth-logo.svg"
-                  alt="Logo"
+                  width={380}
+                  height={380}
+                  src="/images/logo/great-lakes-dynasty-logo.png"
+                  alt="Great Lakes Dynasty Hockey League"
+                  className="h-auto w-full max-w-[380px]"
                 />
               </Link>
-              <p className="text-center text-gray-400 dark:text-white/60">
-                Free and Open-Source Tailwind CSS Admin Dashboard Template
+              <p className="mt-6 text-center text-lg font-medium text-white/80">
+                Welcome to the Great Lakes Dynasty Hockey League
               </p>
             </div>
           </div>

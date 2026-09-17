@@ -359,13 +359,15 @@ const AppSidebar: React.FC = () => {
           !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
         }`}
       >
-        <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500 text-sm font-semibold text-white">
-            GL
-          </div>
+        <Link to="/" className="flex items-center gap-3" aria-label="Great Lakes Dynasty Hockey League home">
+          <img
+            src="/images/logo/great-lakes-dynasty-logo.png"
+            alt="Great Lakes Dynasty Hockey League"
+            className="h-12 w-12 shrink-0 rounded-lg bg-white object-contain"
+          />
           {(isExpanded || isHovered || isMobileOpen) && (
-            <span className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">
-              GLDHL
+            <span className="max-w-[175px] text-base font-semibold leading-tight tracking-tight text-gray-900 dark:text-white">
+              Great Lakes Dynasty
             </span>
           )}
         </Link>

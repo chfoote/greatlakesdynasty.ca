@@ -155,9 +155,18 @@ const AppHeader: React.FC = () => {
             {/* Cross Icon */}
           </button>
 
-          <Link to="/" className="lg:hidden">
-            <span className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">
-              GLDHL
+          <Link
+            to="/"
+            className="flex items-center gap-2 lg:hidden"
+            aria-label="Great Lakes Dynasty Hockey League home"
+          >
+            <img
+              src="/images/logo/great-lakes-dynasty-logo.png"
+              alt="Great Lakes Dynasty Hockey League"
+              className="h-10 w-10 rounded-md bg-white object-contain"
+            />
+            <span className="hidden text-sm font-semibold tracking-tight text-gray-900 xsm:inline dark:text-white">
+              Great Lakes Dynasty
             </span>
           </Link>
 

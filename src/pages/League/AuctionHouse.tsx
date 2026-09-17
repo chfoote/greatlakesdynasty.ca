@@ -51,6 +51,11 @@ const money = new Intl.NumberFormat("en-CA", {
 });
 const activePositions = new Set(["C", "LW", "RW", "D", "G"]);
 
+function BidSnipeBadge({ seconds }: { seconds: number | null | undefined }) {
+  if (seconds === null || seconds === undefined || seconds > 7) return null;
+  return <span className="inline-flex rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white shadow-sm">🎯 Snipe · {seconds}s</span>;
+}
+
 function OpenBidLeaderboard({
   bids,
   endsAt,
@@ -94,6 +99,7 @@ function OpenBidLeaderboard({
             <span className="text-xs font-bold uppercase tracking-wide text-amber-300">
               #1 Overall
             </span>
+            <BidSnipeBadge seconds={top.submitted_seconds_remaining} />
           </div>
           <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center">
             <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-white p-1.5 shadow-md">
@@ -184,6 +190,7 @@ function OpenBidLeaderboard({
                   <p className="font-bold text-gray-900 dark:text-white">
                     {bid.fantasy_team?.team_name || "Unknown team"}
                   </p>
+                  <BidSnipeBadge seconds={bid.submitted_seconds_remaining} />
                   <p className="text-sm text-gray-600 dark:text-gray-300">
                     {money.format(bid.aav)} for {bid.years}{" "}
                     {bid.years === 1 ? "year" : "years"}
@@ -801,8 +808,13 @@ export default function AuctionHouse() {
     setError("");
     setSuccess("");
     try {
-      await placeAuctionBid(a.id, Number(form.aav), Number(form.years));
-      setSuccess(`Bid submitted for ${name(a)}.`);
+      const submittedBid = await placeAuctionBid(a.id, Number(form.aav), Number(form.years));
+      const seconds = submittedBid.submitted_seconds_remaining;
+      setSuccess(seconds !== null && seconds !== undefined
+        ? seconds <= 7
+          ? `🎯 SNIPE! Bid submitted for ${name(a)} with ${seconds}s remaining.`
+          : `Bid submitted for ${name(a)} with ${seconds}s remaining.`
+        : `Bid submitted for ${name(a)}.`);
       await load();
     } catch (e) {
       setError(message(e));

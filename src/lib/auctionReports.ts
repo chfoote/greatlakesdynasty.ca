@@ -13,6 +13,7 @@ export type AuctionBidHistory = {
   is_qualifying_bid: boolean;
   event_type: "submitted" | "updated" | "backfilled";
   recorded_at: string;
+  seconds_remaining: number | null;
   fantasy_team: FantasyTeam | null;
 };
 
@@ -29,4 +30,3 @@ export async function fetchAuctionBidHistory(auctionIds: number[]) {
   if (error) throw error;
   return (data ?? []) as AuctionBidHistory[];
 }
-
