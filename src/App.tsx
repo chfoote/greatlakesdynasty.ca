@@ -29,6 +29,7 @@ import PlayerProfile from "./pages/League/PlayerProfile";
 import TeamAdmin from "./pages/League/TeamAdmin";
 import HockeyTeamDetail from "./pages/League/HockeyTeamDetail";
 import PlayerAdmin from "./pages/League/PlayerAdmin";
+import PlayerChangeLog from "./pages/League/PlayerChangeLog";
 import TradeManager from "./pages/League/TradeManager";
 import AuctionHouse from "./pages/League/AuctionHouse";
 import AuctionAdmin from "./pages/League/AuctionAdmin";
@@ -78,6 +79,7 @@ export default function App() {
                 <Route path="/admin/auction-house" element={<AuctionHouse />} />
                 <Route path="/admin/teams" element={<TeamAdmin />} />
                 <Route path="/admin/players" element={<PlayerAdmin />} />
+                <Route path="/admin/player-changes" element={<PlayerChangeLog />} />
                 <Route path="/admin/trades" element={<TradeAdmin />} />
                 <Route path="/admin/auction-admin" element={<AuctionAdmin />} />
                 <Route path="/admin/auction-report" element={<AuctionReport />} />

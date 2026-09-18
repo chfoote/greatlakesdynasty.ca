@@ -17,6 +17,17 @@ import {
 
 const categories = ["MVP", "Rookie of the Year", "Top C", "Top LW", "Top RW", "Top D", "Top G"] as const;
 type PlayerScore = { total: number; perGame: number | null };
+const headshotCacheKey = "award-headshots-v1";
+const headshotCacheAge = 24 * 60 * 60 * 1000;
+type CachedHeadshot = { url: string; savedAt: number };
+
+function readHeadshotCache(): Record<string, CachedHeadshot> {
+  try {
+    return JSON.parse(localStorage.getItem(headshotCacheKey) || "{}") as Record<string, CachedHeadshot>;
+  } catch {
+    return {};
+  }
+}
 
 function nhlSeasonId(year: number) {
   return (year - 1) * 10000 + year;
@@ -60,7 +71,7 @@ export default function Awards() {
       fetchAllTeamFinishes(),
       fetchFantasyTeams(true),
       fetchTeamBrandingHistory(),
-    ]).then(async ([awardRows, awardDefinitions, finishRows, teamRows, brandingRows]) => {
+    ]).then(([awardRows, awardDefinitions, finishRows, teamRows, brandingRows]) => {
       if (!active) return;
       setAssignments(awardRows);
       setDefinitions(awardDefinitions);
@@ -70,26 +81,36 @@ export default function Awards() {
       setLoading(false);
       const years = [...new Set(awardRows.map((row) => row.season_year))];
       const ids = [...new Set(awardRows.map((row) => row.player?.player_api_id).filter((id): id is string => Boolean(id)))];
-      const seasonResultsPromise = Promise.all(years.map(async (year) => ({ year, rows: await fetchPlayerSeasonsBySeason(year).catch(() => [] as PlayerSeasonWithRelations[]) })))
+      const cache = readHeadshotCache();
+      const cachedUrls = ids.filter((id) => cache[id]?.url && Date.now() - cache[id].savedAt < headshotCacheAge).map((id) => [id, cache[id].url] as const);
+      if (cachedUrls.length) setHeadshots(new Map(cachedUrls));
+      for (const id of ids) {
+        if (cache[id]?.url && Date.now() - cache[id].savedAt < headshotCacheAge) continue;
+        void fetchNhlPlayerLanding(Number(id)).then((landing) => {
+          if (!active || !landing.headshot) return;
+          setHeadshots((current) => new Map(current).set(id, landing.headshot!));
+          try {
+            const latest = readHeadshotCache();
+            latest[id] = { url: landing.headshot, savedAt: Date.now() };
+            localStorage.setItem(headshotCacheKey, JSON.stringify(latest));
+          } catch { /* Images still appear if browser storage is unavailable. */ }
+        }).catch(() => {});
+      }
+      void Promise.all(years.map(async (year) => ({ year, rows: await fetchPlayerSeasonsBySeason(year).catch(() => [] as PlayerSeasonWithRelations[]) })))
         .then((results) => {
           if (active) {
             setPlayerSeasons(new Map(results.flatMap(({ year, rows }) => rows.map((row) => [`${year}:${row.player_id}`, row] as const))));
             setLoadingRosters(false);
           }
         });
-      const [, statResults, headshotResults] = await Promise.all([
-        seasonResultsPromise,
-        Promise.all(years.map(async (year) => {
+      void Promise.all(years.map(async (year) => {
           const [skaters, goalies] = await Promise.all([
             fetchNhlSkaterStats(nhlSeasonId(year)).catch(() => [] as NhlSkaterRecord[]),
             fetchNhlGoalieStats(nhlSeasonId(year)).catch(() => [] as NhlGoalieRecord[]),
           ]);
           return { year, skaters, goalies };
-        })),
-        Promise.all(ids.map(async (id) => ({ id, headshot: await fetchNhlPlayerLanding(Number(id)).then((row) => row.headshot || "").catch(() => "") }))),
-      ]);
+        })).then((statResults) => {
       if (!active) return;
-      setHeadshots(new Map(headshotResults.map(({ id, headshot }) => [id, headshot])));
       const scoreRows: [string, PlayerScore][] = [];
       for (const { year, skaters, goalies } of statResults) {
         for (const record of skaters) {
@@ -102,6 +123,7 @@ export default function Awards() {
         }
       }
       setScores(new Map(scoreRows));
+      });
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : "Unable to load awards.");
     }).finally(() => { if (active) { setLoading(false); setLoadingRosters(false); } });
@@ -186,7 +208,7 @@ export default function Awards() {
                 return <li key={assignment.id} className="flex flex-wrap items-center gap-3 py-4 first:pt-0 last:pb-0 sm:flex-nowrap">
                   <span className="w-12 shrink-0 text-sm font-bold text-amber-700 dark:text-amber-300">{assignment.season_year}</span>
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-                    {headshot ? <img src={headshot} alt="" className="h-full w-full object-cover" loading="lazy" /> : <span aria-hidden="true" className="text-xl text-gray-400">●</span>}
+                    {headshot ? <img src={headshot} alt="" className="h-full w-full object-cover" /> : <span aria-hidden="true" className="text-xl text-gray-400">●</span>}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">

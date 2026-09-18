@@ -49,7 +49,9 @@ const money = new Intl.NumberFormat("en-CA", {
   currency: "CAD",
   maximumFractionDigits: 0,
 });
-const activePositions = new Set(["C", "LW", "RW", "D", "G"]);
+const requiredRoster = { C: 3, LW: 3, RW: 3, D: 6, G: 2 } as const;
+const minimumSalaryPerOpening = 750_000;
+type RosterPosition = keyof typeof requiredRoster;
 
 function BidSnipeBadge({ seconds }: { seconds: number | null | undefined }) {
   if (seconds === null || seconds === undefined || seconds > 7) return null;
@@ -694,9 +696,14 @@ export default function AuctionHouse() {
   const teamId = assignment?.fantasy_team_id;
   const salary = roster.reduce((sum, row) => sum + (row.salary || 0), 0)
     + buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0);
-  const rosterCount = roster.filter((row) =>
-    activePositions.has((row.position || "").toUpperCase()),
-  ).length;
+  const missingByPosition = Object.fromEntries(
+    (Object.keys(requiredRoster) as RosterPosition[]).map((position) => [
+      position,
+      Math.max(requiredRoster[position] - roster.filter((row) => (row.position || "").toUpperCase() === position).length, 0),
+    ]),
+  ) as Record<RosterPosition, number>;
+  const missingCount = Object.values(missingByPosition).reduce((sum, count) => sum + count, 0);
+  const rosterReserve = missingCount * minimumSalaryPerOpening;
   const cap = season <= 2026 ? 45_000_000 : 50_000_000;
   const active = auctions.filter(
     (a) => !["completed", "cancelled"].includes(a.status),
@@ -795,10 +802,7 @@ export default function AuctionHouse() {
     0,
   );
   const capSpace = cap - salary - reservedBids;
-  const budget = Math.max(
-    cap - salary - Math.max(23 - rosterCount, 0) * 250_000 - reservedBids,
-    0,
-  );
+  const budget = Math.max(capSpace - rosterReserve, 0);
   async function bid(a: Auction) {
     const form = bidForms[a.id] || {
       aav: String(a.minimum_aav || 500_000),
@@ -979,9 +983,15 @@ export default function AuctionHouse() {
                 </div>
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
                   <p className="text-xs uppercase text-gray-500">
-                    Safe Bid Budget
+                    Available After Roster Reserve
                   </p>
                   <p className="mt-1 font-semibold">{money.format(budget)}</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {money.format(rosterReserve)} reserved for {missingCount} required {missingCount === 1 ? "spot" : "spots"} at {money.format(minimumSalaryPerOpening)} each
+                  </p>
+                  {missingCount > 0 && <p className="mt-1 text-xs text-gray-500">
+                    {(Object.keys(requiredRoster) as RosterPosition[]).filter((position) => missingByPosition[position] > 0).map((position) => `${position} ${missingByPosition[position]}`).join(" · ")} still needed
+                  </p>}
                 </div>
               </section>
               <section>
@@ -1023,8 +1033,12 @@ export default function AuctionHouse() {
                             : mine?.years || 1,
                         ),
                       };
-                      const auctionBudget =
-                        budget + (reservedByAuction.get(a.id) || 0);
+                      const auctionPosition = a.roster_position.toUpperCase() as RosterPosition;
+                      const fillsRequiredSpot = (missingByPosition[auctionPosition] || 0) > 0;
+                      const auctionBudget = Math.max(
+                        capSpace + (reservedByAuction.get(a.id) || 0) - rosterReserve + (fillsRequiredSpot ? minimumSalaryPerOpening : 0),
+                        0,
+                      );
                       const apiId = Number(
                         a.player_season?.player?.player_api_id,
                       );
@@ -1247,8 +1261,11 @@ export default function AuctionHouse() {
                                   {a.paused_at
                                     ? "Bidding is disabled while the timer is paused."
                                     : Number(form.aav) <= auctionBudget
-                                      ? "Fits your safe bid budget."
-                                      : "Exceeds your safe bid budget."}
+                                      ? "Fits your roster reserve budget."
+                                      : "Exceeds your roster reserve budget."}
+                                </p>
+                                <p className="mt-1 text-xs text-gray-500">
+                                  Maximum AAV for this auction: {money.format(auctionBudget)}{fillsRequiredSpot ? ` · fills a required ${auctionPosition} spot` : ""}
                                 </p>
                                 <button
                                   disabled={

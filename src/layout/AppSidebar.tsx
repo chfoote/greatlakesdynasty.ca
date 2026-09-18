@@ -102,6 +102,11 @@ const adminItems: NavItem[] = [
     path: "/admin/players",
   },
   {
+    icon: <ReportIcon />,
+    name: "Player Change Log",
+    path: "/admin/player-changes",
+  },
+  {
     icon: <AdminTradeIcon />,
     name: "Trade Admin",
     path: "/admin/trades",
