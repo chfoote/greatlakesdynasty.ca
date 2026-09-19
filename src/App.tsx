@@ -42,6 +42,7 @@ import FarmSystems from "./pages/League/FarmSystems";
 import TradeMarket from "./pages/League/TradeMarket";
 import BuyoutAdmin from "./pages/League/BuyoutAdmin";
 import ManagerCommandCenter from "./pages/League/ManagerCommandCenter";
+import PowerRankings from "./pages/League/PowerRankings";
 
 export default function App() {
   return (
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="/trade-market" element={<TradeMarket />} />
               <Route path="/auction-house" element={<AuctionHouse />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
+              <Route path="/power-rankings" element={<PowerRankings />} />
               <Route path="/admin/trade-manager" element={<TradeManager />} />
 
               <Route element={<AdminRoute />}>

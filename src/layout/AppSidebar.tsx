@@ -47,16 +47,6 @@ const navItems: NavItem[] = [
     path: "/teams",
   },
   {
-    icon: <AwardsIcon />,
-    name: "Awards",
-    path: "/awards",
-  },
-  {
-    icon: <TransactionsIcon />,
-    name: "Transactions",
-    path: "/transactions",
-  },
-  {
     icon: <SkaterIcon />,
     name: "Skater Stats",
     path: "/skater-stats",
@@ -65,6 +55,21 @@ const navItems: NavItem[] = [
     icon: <GoalieIcon />,
     name: "Goalie Stats",
     path: "/goalie-stats",
+  },
+  {
+    icon: <StandingsIcon />,
+    name: "Power Rankings",
+    path: "/power-rankings",
+  },
+  {
+    icon: <AwardsIcon />,
+    name: "Awards",
+    path: "/awards",
+  },
+  {
+    icon: <TransactionsIcon />,
+    name: "Transactions",
+    path: "/transactions",
   },
 ];
 

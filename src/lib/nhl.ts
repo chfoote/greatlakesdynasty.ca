@@ -8,6 +8,9 @@ type NhlStatsResponse<T> = {
 const statsCacheTtlMs = 60_000;
 const skaterStatsCache = new Map<number, { expiresAt: number; request: Promise<NhlSkaterRecord[]> }>();
 const goalieStatsCache = new Map<number, { expiresAt: number; request: Promise<NhlGoalieRecord[]> }>();
+const skaterPeriodCache = new Map<string, { expiresAt: number; request: Promise<NhlSkaterRecord[]> }>();
+const goaliePeriodCache = new Map<string, { expiresAt: number; request: Promise<NhlGoalieRecord[]> }>();
+const playerBiosCache = new Map<string, { expiresAt: number; request: Promise<NhlPlayerBio[]> }>();
 
 type NhlSkaterSummary = {
   playerId: number;
@@ -157,6 +160,15 @@ function reportUrl(position: "skater" | "goalie", report: string, seasonId: numb
   return `/nhl-api/${position}/${report}?${params}`;
 }
 
+function periodReportUrl(position: "skater" | "goalie", report: string, seasonId: number, startDate: string, endDate: string) {
+  const params = new URLSearchParams({
+    limit: "-1",
+    isAggregate: "true",
+    cayenneExp: `seasonId=${seasonId} and gameTypeId=2 and gameDate>="${startDate}" and gameDate<="${endDate}"`,
+  });
+  return `/nhl-api/${position}/${report}?${params}`;
+}
+
 async function fetchReport<T>(url: string, label: string): Promise<T[]> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -165,6 +177,15 @@ async function fetchReport<T>(url: string, label: string): Promise<T[]> {
 
   const payload = (await response.json()) as NhlStatsResponse<T>;
   return payload.data ?? [];
+}
+
+function fetchPlayerBios(position: "skater" | "goalie", seasonId: number) {
+  const key = `${position}:${seasonId}`;
+  const cached = playerBiosCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+  const request = fetchReport<NhlPlayerBio>(reportUrl(position, "bios", seasonId), `${position} bios`).catch(() => []);
+  playerBiosCache.set(key, { expiresAt: Date.now() + statsCacheTtlMs, request });
+  return request;
 }
 
 export async function fetchNhlSkaterStats(
@@ -177,7 +198,7 @@ export async function fetchNhlSkaterStats(
       fetchReport<NhlSkaterSummary>(reportUrl("skater", "summary", seasonId), "skater summary"),
       fetchReport<NhlSkaterRealtime>(reportUrl("skater", "realtime", seasonId), "skater realtime stats"),
       fetchReport<NhlSkaterFaceoffs>(reportUrl("skater", "faceoffwins", seasonId), "skater faceoff stats"),
-      fetchReport<NhlPlayerBio>(reportUrl("skater", "bios", seasonId), "skater bios").catch(() => []),
+      fetchPlayerBios("skater", seasonId),
     ])
     .then(([summary, realtime, faceoffs, bios]) => {
       const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
@@ -228,7 +249,7 @@ export async function fetchNhlGoalieStats(
 
   const request = Promise.all([
       fetchReport<NhlGoalieRecord>(reportUrl("goalie", "summary", seasonId), "goalie stats"),
-      fetchReport<NhlPlayerBio>(reportUrl("goalie", "bios", seasonId), "goalie bios").catch(() => []),
+      fetchPlayerBios("goalie", seasonId),
     ])
     .then(([summary, bios]) => {
       const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
@@ -239,6 +260,59 @@ export async function fetchNhlGoalieStats(
       throw error;
     });
   goalieStatsCache.set(seasonId, { expiresAt: Date.now() + statsCacheTtlMs, request });
+  return request;
+}
+
+export async function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+  const key = `${seasonId}:${startDate}:${endDate}`;
+  const cached = skaterPeriodCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+
+  const request = Promise.all([
+      fetchReport<NhlSkaterSummary>(periodReportUrl("skater", "summary", seasonId, startDate, endDate), "weekly skater summary"),
+      fetchReport<NhlSkaterRealtime>(periodReportUrl("skater", "realtime", seasonId, startDate, endDate), "weekly skater realtime stats"),
+      fetchReport<NhlSkaterFaceoffs>(periodReportUrl("skater", "faceoffwins", seasonId, startDate, endDate), "weekly skater faceoff stats"),
+      fetchPlayerBios("skater", seasonId),
+    ])
+    .then(([summary, realtime, faceoffs, bios]) => {
+      const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
+      const faceoffsByPlayer = new Map(faceoffs.map((row) => [row.playerId, row]));
+      const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
+      return summary.map((row) => ({
+        ...row,
+        teamAbbrevs: row.teamAbbrevs || "",
+        blockedShots: realtimeByPlayer.get(row.playerId)?.blockedShots ?? 0,
+        hits: realtimeByPlayer.get(row.playerId)?.hits ?? 0,
+        totalFaceoffWins: faceoffsByPlayer.get(row.playerId)?.totalFaceoffWins ?? 0,
+        birthDate: biosByPlayer.get(row.playerId)?.birthDate,
+      }));
+    })
+    .catch((error) => {
+      skaterPeriodCache.delete(key);
+      throw error;
+    });
+  skaterPeriodCache.set(key, { expiresAt: Date.now() + statsCacheTtlMs, request });
+  return request;
+}
+
+export async function fetchNhlGoalieStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+  const key = `${seasonId}:${startDate}:${endDate}`;
+  const cached = goaliePeriodCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+
+  const request = Promise.all([
+    fetchReport<NhlGoalieRecord>(periodReportUrl("goalie", "summary", seasonId, startDate, endDate), "weekly goalie stats"),
+    fetchPlayerBios("goalie", seasonId),
+  ])
+    .then(([rows, bios]) => {
+      const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
+      return rows.map((row) => ({ ...row, teamAbbrevs: row.teamAbbrevs || "", birthDate: biosByPlayer.get(row.playerId)?.birthDate }));
+    })
+    .catch((error) => {
+      goaliePeriodCache.delete(key);
+      throw error;
+    });
+  goaliePeriodCache.set(key, { expiresAt: Date.now() + statsCacheTtlMs, request });
   return request;
 }
 
