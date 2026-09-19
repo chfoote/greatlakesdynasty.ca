@@ -41,6 +41,7 @@ import LeagueDashboard from "./pages/League/LeagueDashboard";
 import FarmSystems from "./pages/League/FarmSystems";
 import TradeMarket from "./pages/League/TradeMarket";
 import BuyoutAdmin from "./pages/League/BuyoutAdmin";
+import ManagerCommandCenter from "./pages/League/ManagerCommandCenter";
 
 export default function App() {
   return (
@@ -55,7 +56,8 @@ export default function App() {
 
             {/* Protected Dashboard Layout — requires login */}
             <Route element={<ProtectedRoute />}>
-              <Route index path="/" element={<HockeyHome />} />
+              <Route index path="/" element={<ManagerCommandCenter />} />
+              <Route path="/league-chat" element={<HockeyHome />} />
 
               {/* Others Page */}
               <Route path="/profile" element={<UserProfiles />} />

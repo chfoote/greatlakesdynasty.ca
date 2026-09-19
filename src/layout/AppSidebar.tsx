@@ -12,6 +12,7 @@ import {
   AuctionIcon,
   AwardsIcon,
   BuyoutIcon,
+  ChatIcon,
   DashboardIcon,
   GoalieIcon,
   MarketIcon,
@@ -70,8 +71,18 @@ const navItems: NavItem[] = [
 const leagueToolItems: NavItem[] = [
   {
     icon: <DashboardIcon />,
-    name: "Dashboard",
+    name: "Command Centre",
+    path: "/",
+  },
+  {
+    icon: <DashboardIcon />,
+    name: "League Overview",
     path: "/league-dashboard",
+  },
+  {
+    icon: <ChatIcon />,
+    name: "League Chat",
+    path: "/league-chat",
   },
   {
     icon: <AuctionIcon />,

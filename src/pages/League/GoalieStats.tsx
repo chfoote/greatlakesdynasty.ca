@@ -61,21 +61,30 @@ export default function GoalieStats() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
-      fetchProspectRights(selectedSeason).catch(() => new Map<string, ProspectRight>()),
-    ])
-      .then(async ([data, rights]) => {
-        const eligibleRights = await removeAgedOutProspectRights(rights, data.map((record) => ({ playerId: record.playerId, playerName: record.goalieFullName })));
+    setProspectRights(new Map());
+    const statsRequest = fetchNhlGoalieStats(nhlSeasonId(selectedSeason));
+    statsRequest
+      .then((data) => {
         if (!active) return;
         setRecords(data);
-        setProspectRights(eligibleRights);
         setError(null);
       })
       .catch((err: unknown) => {
         if (active) setError(err instanceof Error ? err.message : "Unable to load goalie stats");
       })
       .finally(() => { if (active) setLoading(false); });
+
+    Promise.all([
+      statsRequest,
+      fetchProspectRights(selectedSeason),
+    ])
+      .then(async ([data, rights]) => removeAgedOutProspectRights(rights, data.map((record) => ({
+        playerId: record.playerId,
+        playerName: record.goalieFullName,
+        birthDate: record.birthDate,
+      }))))
+      .then((eligibleRights) => { if (active) setProspectRights(eligibleRights); })
+      .catch(() => { if (active) setProspectRights(new Map()); });
 
     fetchPlayerSeasonsBySeason(selectedSeason)
       .then((seasonRows) => {

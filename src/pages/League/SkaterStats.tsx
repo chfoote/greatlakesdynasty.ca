@@ -70,15 +70,12 @@ export default function SkaterStats() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
-      fetchProspectRights(selectedSeason).catch(() => new Map<string, ProspectRight>()),
-    ])
-      .then(async ([data, rights]) => {
-        const eligibleRights = await removeAgedOutProspectRights(rights, data.map((record) => ({ playerId: record.playerId, playerName: record.skaterFullName })));
+    setProspectRights(new Map());
+    const statsRequest = fetchNhlSkaterStats(nhlSeasonId(selectedSeason));
+    statsRequest
+      .then((data) => {
         if (!active) return;
         setRecords(data);
-        setProspectRights(eligibleRights);
         setError(null);
       })
       .catch((err: unknown) => {
@@ -87,6 +84,18 @@ export default function SkaterStats() {
       .finally(() => {
         if (active) setLoading(false);
       });
+
+    Promise.all([
+      statsRequest,
+      fetchProspectRights(selectedSeason),
+    ])
+      .then(async ([data, rights]) => removeAgedOutProspectRights(rights, data.map((record) => ({
+        playerId: record.playerId,
+        playerName: record.skaterFullName,
+        birthDate: record.birthDate,
+      }))))
+      .then((eligibleRights) => { if (active) setProspectRights(eligibleRights); })
+      .catch(() => { if (active) setProspectRights(new Map()); });
 
     fetchPlayerSeasonsBySeason(selectedSeason)
       .then((seasonRows) => {

@@ -77,14 +77,14 @@ function ageFromBirthDate(birthDate?: string) {
 
 export async function removeAgedOutProspectRights(
   rights: Map<string, ProspectRight>,
-  players: Array<{ playerId: number; playerName: string }>,
+  players: Array<{ playerId: number; playerName: string; birthDate?: string }>,
 ) {
   const filtered = new Map(rights);
-  await Promise.all(players.map(async ({ playerId, playerName }) => {
+  await Promise.all(players.map(async ({ playerId, playerName, birthDate }) => {
     if (!getProspectRight(rights, playerId, playerName)) return;
     try {
-      const landing = await playerLanding(playerId);
-      const age = ageFromBirthDate(landing.birthDate);
+      const resolvedBirthDate = birthDate || (await playerLanding(playerId)).birthDate;
+      const age = ageFromBirthDate(resolvedBirthDate);
       if (age !== null && age >= 25) {
         filtered.delete(String(playerId));
         filtered.delete(nameKey(playerName));

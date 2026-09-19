@@ -30,6 +30,10 @@ export function DashboardIcon(props: IconProps) {
   return <Icon {...props}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="10" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></Icon>;
 }
 
+export function ChatIcon(props: IconProps) {
+  return <Icon {...props}><path d="M4 5h16v11H8l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></Icon>;
+}
+
 export function AuctionIcon(props: IconProps) {
   return <Icon {...props}><path d="m13 6 5 5M11 8l5 5M5 16l8-8M3 20h10M16 15l5 5"/></Icon>;
 }
@@ -65,4 +69,3 @@ export function BuyoutIcon(props: IconProps) {
 export function AwardsIcon(props: IconProps) {
   return <Icon {...props}><circle cx="12" cy="9" r="5"/><path d="m8.5 13-2 8 5.5-3 5.5 3-2-8M10 9l1.3 1.3L14 7.5"/></Icon>;
 }
-
