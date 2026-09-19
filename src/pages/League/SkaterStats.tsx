@@ -25,6 +25,32 @@ import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 const statsSeasons = [2026, 2027];
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
+type SkaterSortKey = "player" | "position" | "goals" | "assists" | "plusMinus" | "penaltyMinutes" | "ppGoals" | "ppAssists" | "shGoals" | "shAssists" | "gameWinningGoals" | "shots" | "blockedShots" | "hits" | "faceoffWins" | "score" | "fantasyPointsPerGame";
+type SortDirection = "asc" | "desc";
+
+const skaterColumns: { label: string; key: SkaterSortKey }[] = [
+  { label: "PLAYER", key: "player" }, { label: "POS", key: "position" },
+  { label: "G", key: "goals" }, { label: "A", key: "assists" },
+  { label: "+/-", key: "plusMinus" }, { label: "PIMs", key: "penaltyMinutes" },
+  { label: "PPG", key: "ppGoals" }, { label: "PPA", key: "ppAssists" },
+  { label: "SHG", key: "shGoals" }, { label: "SHA", key: "shAssists" },
+  { label: "GWG", key: "gameWinningGoals" }, { label: "S", key: "shots" },
+  { label: "B", key: "blockedShots" }, { label: "H", key: "hits" },
+  { label: "FOW", key: "faceoffWins" }, { label: "SCORE", key: "score" },
+  { label: "PPG", key: "fantasyPointsPerGame" },
+];
+
+function skaterSortValue(record: NhlSkaterRecord, key: SkaterSortKey) {
+  if (key === "player") return record.skaterFullName;
+  if (key === "position") return record.positionCode === "L" ? "LW" : record.positionCode === "R" ? "RW" : record.positionCode;
+  if (key === "ppAssists") return record.ppPoints - record.ppGoals;
+  if (key === "shAssists") return record.shPoints - record.shGoals;
+  if (key === "faceoffWins") return record.totalFaceoffWins;
+  if (key === "score") return getSkaterScore(record);
+  if (key === "fantasyPointsPerGame") return record.gamesPlayed ? getSkaterScore(record) / record.gamesPlayed : 0;
+  return record[key];
+}
+
 export default function SkaterStats() {
   const [records, setRecords] = useState<NhlSkaterRecord[]>([]);
   const [fantasySeasons, setFantasySeasons] = useState<Map<string, PlayerSeasonWithRelations>>(new Map());
@@ -38,6 +64,7 @@ export default function SkaterStats() {
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [selectedSeason, setSelectedSeason] = useState(2026);
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
+  const [sort, setSort] = useState<{ key: SkaterSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
 
   useEffect(() => {
@@ -98,6 +125,20 @@ export default function SkaterStats() {
     return true;
   }), [records, fantasySeasons, prospectRights, positionFilter, rightsFilter, selectedTeamIds]);
 
+  const sortedRecords = useMemo(() => [...filteredRecords].sort((a, b) => {
+    const aValue = skaterSortValue(a, sort.key);
+    const bValue = skaterSortValue(b, sort.key);
+    const comparison = typeof aValue === "string"
+      ? aValue.localeCompare(String(bValue), undefined, { sensitivity: "base" })
+      : aValue - Number(bValue);
+    return sort.direction === "asc" ? comparison : -comparison;
+  }), [filteredRecords, sort]);
+
+  const changeSort = (key: SkaterSortKey) => setSort((current) => ({
+    key,
+    direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
+  }));
+
   return (
     <div>
       <PageMeta title="Great Lakes Dynasty Hockey League" description="NHL skater fantasy statistics for GLDHL" />
@@ -124,15 +165,17 @@ export default function SkaterStats() {
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-left text-sm dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-white/[0.03]"><tr>
-                {['PLAYER','POS','G','A','+/-','PIMs','PPG','PPA','SHG','SHA','GWG','S','B','H','FOW','SCORE','PPG'].map((label, index) => (
-                  <th key={`${label}-${index}`} className="whitespace-nowrap px-3 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">{label}</th>
+                {skaterColumns.map((column) => (
+                  <th key={column.key} aria-sort={sort.key === column.key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className="whitespace-nowrap p-0 text-center font-semibold text-gray-700 dark:text-gray-200">
+                    <button type="button" onClick={() => changeSort(column.key)} className="w-full cursor-pointer px-3 py-3 font-inherit" title={`Sort by ${column.label}`}>{column.label}</button>
+                  </th>
                 ))}
               </tr></thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {[...filteredRecords].sort((a, b) => getSkaterScore(b) - getSkaterScore(a)).map((record) => {
+                {sortedRecords.map((record) => {
                   const score = getSkaterScore(record);
                   return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                    <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.skaterFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
+                    <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} birthDate={record.birthDate} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.skaterFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
                     <td className="px-3 py-3 text-center">{record.positionCode === 'L' ? 'LW' : record.positionCode === 'R' ? 'RW' : record.positionCode}</td>
                     {[record.goals,record.assists,record.plusMinus,record.penaltyMinutes,record.ppGoals,record.ppPoints-record.ppGoals,record.shGoals,record.shPoints-record.shGoals,record.gameWinningGoals,record.shots,record.blockedShots,record.hits,record.totalFaceoffWins].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                     <td className="px-3 py-3 text-center font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>

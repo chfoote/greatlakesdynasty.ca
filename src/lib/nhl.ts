@@ -34,10 +34,16 @@ type NhlSkaterFaceoffs = {
   totalFaceoffWins: number;
 };
 
+type NhlPlayerBio = {
+  playerId: number;
+  birthDate?: string;
+};
+
 export type NhlSkaterRecord = NhlSkaterSummary & {
   blockedShots: number;
   hits: number;
   totalFaceoffWins: number;
+  birthDate?: string;
 };
 
 export type NhlGoalieRecord = {
@@ -57,6 +63,7 @@ export type NhlGoalieRecord = {
   assists: number;
   savePct: number | null;
   goalsAgainstAverage: number | null;
+  birthDate?: string;
 };
 
 type LocalizedName = { default?: string };
@@ -159,19 +166,22 @@ async function fetchReport<T>(url: string, label: string): Promise<T[]> {
 export async function fetchNhlSkaterStats(
   seasonId = NHL_SEASON_ID,
 ): Promise<NhlSkaterRecord[]> {
-  const [summary, realtime, faceoffs] = await Promise.all([
+  const [summary, realtime, faceoffs, bios] = await Promise.all([
     fetchReport<NhlSkaterSummary>(reportUrl("skater", "summary", seasonId), "skater summary"),
     fetchReport<NhlSkaterRealtime>(reportUrl("skater", "realtime", seasonId), "skater realtime stats"),
     fetchReport<NhlSkaterFaceoffs>(reportUrl("skater", "faceoffwins", seasonId), "skater faceoff stats"),
+    fetchReport<NhlPlayerBio>(reportUrl("skater", "bios", seasonId), "skater bios").catch(() => []),
   ]);
   const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
   const faceoffsByPlayer = new Map(faceoffs.map((row) => [row.playerId, row]));
+  const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
 
   return summary.map((row) => ({
     ...row,
     blockedShots: realtimeByPlayer.get(row.playerId)?.blockedShots ?? 0,
     hits: realtimeByPlayer.get(row.playerId)?.hits ?? 0,
     totalFaceoffWins: faceoffsByPlayer.get(row.playerId)?.totalFaceoffWins ?? 0,
+    birthDate: biosByPlayer.get(row.playerId)?.birthDate,
   }));
 }
 
@@ -199,7 +209,12 @@ export function getSkaterScore(record: NhlSkaterRecord) {
 export async function fetchNhlGoalieStats(
   seasonId = NHL_SEASON_ID,
 ): Promise<NhlGoalieRecord[]> {
-  return fetchReport<NhlGoalieRecord>(reportUrl("goalie", "summary", seasonId), "goalie stats");
+  const [summary, bios] = await Promise.all([
+    fetchReport<NhlGoalieRecord>(reportUrl("goalie", "summary", seasonId), "goalie stats"),
+    fetchReport<NhlPlayerBio>(reportUrl("goalie", "bios", seasonId), "goalie bios").catch(() => []),
+  ]);
+  const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
+  return summary.map((row) => ({ ...row, birthDate: biosByPlayer.get(row.playerId)?.birthDate }));
 }
 
 export function getGoalieScore(record: NhlGoalieRecord) {

@@ -19,6 +19,7 @@ import { closeAuction, compareAuctionBids, deleteAuction, fetchAuctions, nominat
 import { createFantasyPlayer, createPlayerSeason, fetchFantasyPlayers, fetchPlayerSeasonsBySeason, type FantasyPlayer, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
 import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "../../lib/prospectRights";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
 const positionOrder = ["C", "LW", "RW", "D", "G"];
@@ -99,7 +100,7 @@ function getAssignmentUserLabel(assignment: TeamUserAssignmentWithTeam) {
 
 export default function AuctionAdmin() {
   const { user } = useAuth();
-  const [selectedSeason, setSelectedSeason] = useState(2027);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [assignments, setAssignments] = useState<TeamUserAssignmentWithTeam[]>([]);
@@ -132,14 +133,18 @@ export default function AuctionAdmin() {
     setError("");
 
     try {
-      const [profileRows, teamRows, assignmentRows, seasonRows, previousSeasonRows, playerRows, auctionRows, skaterRows, goalieRows, rights] = await Promise.all([
+      // Load auctions first so a failure in unrelated admin/roster data cannot
+      // hide records that remain visible in the manager-facing Auction House.
+      const auctionRows = await fetchAuctions(selectedSeason);
+      setAuctions(auctionRows);
+
+      const [profileRows, teamRows, assignmentRows, seasonRows, previousSeasonRows, playerRows, skaterRows, goalieRows, rights] = await Promise.all([
         fetchProfiles(),
         fetchFantasyTeams(),
         fetchTeamUserAssignments(selectedSeason),
         fetchPlayerSeasonsBySeason(selectedSeason),
         fetchPlayerSeasonsBySeason(selectedSeason - 1),
         fetchFantasyPlayers(),
-        fetchAuctions(selectedSeason),
         Promise.all([
           fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
           fetchNhlSkaterStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlSkaterRecord[]),
@@ -176,7 +181,6 @@ export default function AuctionAdmin() {
       setPlayers(playerRows);
       setNhlNominees(nominees);
       setProspectRights(eligibleRights);
-      setAuctions(auctionRows);
       setEditingAssignmentId(null);
       setSelectedProfileId("");
       setSelectedTeamId("");

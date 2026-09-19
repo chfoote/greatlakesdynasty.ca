@@ -10,10 +10,21 @@ const currencyFormatter = new Intl.NumberFormat("en-CA", {
   maximumFractionDigits: 0,
 });
 
+function ageFromBirthDate(birthDate?: string) {
+  if (!birthDate) return null;
+  const [year, month, day] = birthDate.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) age -= 1;
+  return age;
+}
+
 export default function NhlPlayerCell({
   playerName,
   playerId,
   teamAbbreviation,
+  birthDate,
   fantasySeason,
   prospectRight,
   showNhlTeam = true,
@@ -23,6 +34,7 @@ export default function NhlPlayerCell({
   playerName: string;
   playerId?: string | number;
   teamAbbreviation: string;
+  birthDate?: string;
   fantasySeason?: PlayerSeasonWithRelations;
   prospectRight?: ProspectRight;
   showNhlTeam?: boolean;
@@ -30,6 +42,7 @@ export default function NhlPlayerCell({
   leadingAction?: React.ReactNode;
 }) {
   const salary = fantasySeason?.salary;
+  const age = ageFromBirthDate(birthDate);
   const profilePlayerId = fantasySeason?.player?.player_api_id || playerId;
   const displayedTeam = fantasySeason?.fantasy_team || prospectRight?.team;
   const isProspectSeason = fantasySeason ? ["PROSPECT", "AP"].includes((fantasySeason.position || "").toUpperCase()) : false;
@@ -62,6 +75,7 @@ export default function NhlPlayerCell({
         <p className={`mt-0.5 text-[11px] font-medium ${isExpiring ? "text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
           {[
             showNhlTeam ? teamAbbreviation : null,
+            age === null ? null : `AGE ${age}`,
             displaysProspectRights
               ? `${displayedTeam?.abbreviation || prospectRight?.team.abbreviation} PROSPECT`
               : salary === null || salary === undefined

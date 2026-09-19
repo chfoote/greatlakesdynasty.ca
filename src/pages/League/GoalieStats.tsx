@@ -22,6 +22,27 @@ import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 const statsSeasons = [2026, 2027];
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
+type GoalieSortKey = "player" | "gamesPlayed" | "gamesStarted" | "wins" | "losses" | "otLosses" | "goalsAgainst" | "saves" | "shutouts" | "penaltyMinutes" | "goals" | "assists" | "savePct" | "goalsAgainstAverage" | "score" | "fantasyPointsPerGame";
+type SortDirection = "asc" | "desc";
+
+const goalieColumns: { label: string; key: GoalieSortKey }[] = [
+  { label: "PLAYER", key: "player" }, { label: "GP", key: "gamesPlayed" },
+  { label: "GS", key: "gamesStarted" }, { label: "W", key: "wins" },
+  { label: "L", key: "losses" }, { label: "OTL", key: "otLosses" },
+  { label: "GA", key: "goalsAgainst" }, { label: "SV", key: "saves" },
+  { label: "SO", key: "shutouts" }, { label: "PIM", key: "penaltyMinutes" },
+  { label: "G", key: "goals" }, { label: "A", key: "assists" },
+  { label: "SV%", key: "savePct" }, { label: "GAA", key: "goalsAgainstAverage" },
+  { label: "SCORE", key: "score" }, { label: "FPPG", key: "fantasyPointsPerGame" },
+];
+
+function goalieSortValue(record: NhlGoalieRecord, key: GoalieSortKey) {
+  if (key === "player") return record.goalieFullName;
+  if (key === "score") return getGoalieScore(record);
+  if (key === "fantasyPointsPerGame") return record.gamesPlayed ? getGoalieScore(record) / record.gamesPlayed : 0;
+  return record[key] ?? Number.NEGATIVE_INFINITY;
+}
+
 export default function GoalieStats() {
   const [records, setRecords] = useState<NhlGoalieRecord[]>([]);
   const [fantasySeasons, setFantasySeasons] = useState<Map<string, PlayerSeasonWithRelations>>(new Map());
@@ -34,6 +55,7 @@ export default function GoalieStats() {
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [selectedSeason, setSelectedSeason] = useState(2026);
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
+  const [sort, setSort] = useState<{ key: GoalieSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
 
   useEffect(() => {
@@ -88,6 +110,20 @@ export default function GoalieStats() {
     return true;
   }), [records, fantasySeasons, prospectRights, rightsFilter, selectedTeamIds]);
 
+  const sortedRecords = useMemo(() => [...filteredRecords].sort((a, b) => {
+    const aValue = goalieSortValue(a, sort.key);
+    const bValue = goalieSortValue(b, sort.key);
+    const comparison = typeof aValue === "string"
+      ? aValue.localeCompare(String(bValue), undefined, { sensitivity: "base" })
+      : aValue - Number(bValue);
+    return sort.direction === "asc" ? comparison : -comparison;
+  }), [filteredRecords, sort]);
+
+  const changeSort = (key: GoalieSortKey) => setSort((current) => ({
+    key,
+    direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
+  }));
+
   return (
     <div>
       <PageMeta title="Great Lakes Dynasty Hockey League" description="NHL goalie fantasy statistics for GLDHL" />
@@ -110,13 +146,13 @@ export default function GoalieStats() {
         {!loading && !error && <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-left text-sm dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-white/[0.03]"><tr>
-              {['PLAYER','GP','GS','W','L','OTL','GA','SV','SO','PIM','G','A','SV%','GAA','SCORE','FPPG'].map((label) => <th key={label} className="whitespace-nowrap px-3 py-3 text-center font-semibold text-gray-700 dark:text-gray-200">{label}</th>)}
+              {goalieColumns.map((column) => <th key={column.key} aria-sort={sort.key === column.key ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className="whitespace-nowrap p-0 text-center font-semibold text-gray-700 dark:text-gray-200"><button type="button" onClick={() => changeSort(column.key)} className="w-full cursor-pointer px-3 py-3 font-inherit" title={`Sort by ${column.label}`}>{column.label}</button></th>)}
             </tr></thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {[...filteredRecords].sort((a, b) => getGoalieScore(b) - getGoalieScore(a)).map((record) => {
+              {sortedRecords.map((record) => {
                 const score = getGoalieScore(record);
                 return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
-                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.goalieFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
+                  <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} birthDate={record.birthDate} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.goalieFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
                   {[record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.savePct === null ? '—' : record.savePct.toFixed(3)}</td>
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(record.goalsAgainstAverage, 2)}</td>
