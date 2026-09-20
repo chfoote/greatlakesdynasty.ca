@@ -4,6 +4,7 @@ import { applyTeamBranding, fetchTeamBrandingHistory, type FantasyTeam } from ".
 
 type TransactionTradePlayer = {
   id: number;
+  from_team_id: number;
   to_team_id: number;
   to_team: FantasyTeam | null;
   player_season: PlayerSeasonWithRelations | null;
@@ -70,6 +71,7 @@ export async function fetchLeagueTransactions() {
         third_team:fantasy_teams!trade_offers_third_team_id_fkey(*),
         trade_offer_players(
           id,
+          from_team_id,
           to_team_id,
           to_team:fantasy_teams!trade_offer_players_to_team_id_fkey(*),
           player_season:player_seasons(*, player:players(*))

@@ -99,7 +99,7 @@ export default function GoalieStats() {
       .then((rows) => { if (active) setTradeBlockIds(new Set(rows.map((row) => row.player_season_id))); })
       .catch(() => { if (active) setTradeBlockIds(new Set()); });
 
-    fetchPlayerAwards()
+    fetchPlayerAwards(undefined, false)
       .then((rows) => { if (active) setAwardsByPlayer(mapAwardsByPlayer(rows)); })
       .catch(() => {});
     Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory()])

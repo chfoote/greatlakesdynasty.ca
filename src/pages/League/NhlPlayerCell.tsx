@@ -71,7 +71,7 @@ export default function NhlPlayerCell({
       </div>
       <div className="text-left">
         {profilePlayerId ? <Link to={`/player-profile?playerId=${profilePlayerId}`} className="font-medium text-brand-500 hover:text-brand-600 hover:underline">{playerName}</Link> : <span className="font-medium text-gray-800 dark:text-white/90">{playerName}</span>}
-        <PlayerAwardBadges awards={awards} />
+        <PlayerAwardBadges awards={awards} includeMonthly={false} />
         <p className={`mt-0.5 text-[11px] font-medium ${isExpiring ? "text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
           {[
             showNhlTeam ? teamAbbreviation : null,

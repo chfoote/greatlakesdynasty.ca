@@ -14,6 +14,7 @@ import {
   type FantasyTeamBranding,
   type FantasyTeamFinish,
 } from "../../lib/fantasyTeams";
+import MonthlyHonours from "./MonthlyHonours";
 
 const categories = ["MVP", "Rookie of the Year", "Top C", "Top LW", "Top RW", "Top D", "Top G"] as const;
 type PlayerScore = { total: number; perGame: number | null };
@@ -49,6 +50,7 @@ function AwardImage({ award, size = "h-12 w-12" }: { award?: Award | null; size?
 }
 
 export default function Awards() {
+  const [view, setView] = useState<"season" | "monthly">("season");
   const [assignments, setAssignments] = useState<PlayerAward[]>([]);
   const [definitions, setDefinitions] = useState<Award[]>([]);
   const [finishes, setFinishes] = useState<FantasyTeamFinish[]>([]);
@@ -66,7 +68,7 @@ export default function Awards() {
   useEffect(() => {
     let active = true;
     Promise.all([
-      fetchPlayerAwards(),
+      fetchPlayerAwards(undefined, false),
       fetchAwards(true),
       fetchAllTeamFinishes(),
       fetchFantasyTeams(true),
@@ -153,9 +155,13 @@ export default function Awards() {
       <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">Every recorded champion and individual award winner, season by season.</p>
     </div>
 
-    {loading && <p role="status" className="text-sm text-gray-500 dark:text-gray-400">Loading awards…</p>}
-    {error && <p role="alert" className="rounded-lg bg-error-50 p-4 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-400">{error}</p>}
-    {!loading && !error && <div className="space-y-8">
+    <div className="mb-6 inline-flex rounded-xl border border-gray-300 bg-white p-1 dark:border-gray-700 dark:bg-gray-900"><button type="button" onClick={() => setView("season")} className={`rounded-lg px-5 py-2.5 text-sm font-bold ${view === "season" ? "bg-amber-500 text-white" : "text-gray-600 dark:text-gray-300"}`}>Season Awards</button><button type="button" onClick={() => setView("monthly")} className={`rounded-lg px-5 py-2.5 text-sm font-bold ${view === "monthly" ? "bg-amber-500 text-white" : "text-gray-600 dark:text-gray-300"}`}>Monthly Honours</button></div>
+
+    {view === "monthly" && <MonthlyHonours />}
+
+    {view === "season" && loading && <p role="status" className="text-sm text-gray-500 dark:text-gray-400">Loading awards…</p>}
+    {view === "season" && error && <p role="alert" className="rounded-lg bg-error-50 p-4 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-400">{error}</p>}
+    {view === "season" && !loading && !error && <div className="space-y-8">
       <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03] sm:p-5">
         <label className="flex min-w-40 flex-col gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Season
           <select value={selectedSeason} onChange={(event) => setSelectedSeason(event.target.value)} className="h-11 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">

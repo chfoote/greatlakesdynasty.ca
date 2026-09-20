@@ -4,9 +4,11 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
+import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
 import {
   fetchNhlGoalieStats,
   fetchNhlGoalieStatsForPeriod,
+  fetchNhlPlayerLanding,
   fetchNhlSkaterStats,
   fetchNhlSkaterStatsForPeriod,
   formatFantasyPoints,
@@ -30,6 +32,17 @@ const periodStartBySeason: Record<number, string> = { 2026: "2025-10-06", 2027: 
 const periodsPerSeason = 14;
 const monthNames = ["October", "November", "December", "January", "February", "March", "April"];
 const currencyFormatter = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
+const headshotCacheKey = "award-headshots-v1";
+const headshotCacheAge = 24 * 60 * 60 * 1000;
+type CachedHeadshot = { url: string; savedAt: number };
+
+function readHeadshotCache(): Record<string, CachedHeadshot> {
+  try {
+    return JSON.parse(localStorage.getItem(headshotCacheKey) || "{}") as Record<string, CachedHeadshot>;
+  } catch {
+    return {};
+  }
+}
 
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 function normalizePosition(value?: string | null): Position | null {
@@ -90,6 +103,17 @@ function rangeLabel(start: string, end: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", { month: "short", day: "numeric", year: "numeric" });
   return `${formatter.format(parseDate(start))} – ${formatter.format(parseDate(end))}`;
 }
+function historicalTeamId(row: PlayerSeasonWithRelations, transactions: LeagueTransaction[], asOfDate: string) {
+  let teamId = row.fantasy_team_id;
+  transactions
+    .filter((transaction) => transaction.season_year === row.season_year && transaction.transaction_type === "trade" && transaction.transaction_date > asOfDate)
+    .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date) || b.created_at.localeCompare(a.created_at))
+    .forEach((transaction) => {
+      const move = transaction.trade_offer?.trade_offer_players.find((candidate) => candidate.player_season?.player_id === row.player_id);
+      if (move) teamId = move.from_team_id;
+    });
+  return teamId;
+}
 function scoreForPlayer(row: PlayerSeasonWithRelations, skaters: Map<string, NhlSkaterRecord>, goalies: Map<string, NhlGoalieRecord>) {
   const id = row.player?.player_api_id || "";
   const goalie = goalies.get(id);
@@ -105,6 +129,15 @@ function movementLabel(value: number | null) {
   if (value > 0) return <span className="font-bold text-success-600">↑ {value}</span>;
   if (value < 0) return <span className="font-bold text-error-500">↓ {Math.abs(value)}</span>;
   return <span className="text-gray-400">—</span>;
+}
+
+function categoryWinners(rows: PlayerRanking[]) {
+  const best = (eligible: PlayerRanking[]) => [...eligible].sort((a, b) => b.points - a.points || b.gamesPlayed - a.gamesPlayed)[0];
+  return [
+    { label: "Top Forward", icon: "🏒", row: best(rows.filter((row) => row.gamesPlayed > 0 && ["C", "LW", "RW"].includes(row.position))) },
+    { label: "Top Defenceman", icon: "🛡️", row: best(rows.filter((row) => row.gamesPlayed > 0 && row.position === "D")) },
+    { label: "Top Goalie", icon: "🥅", row: best(rows.filter((row) => row.gamesPlayed > 0 && row.position === "G")) },
+  ].filter((winner): winner is { label: string; icon: string; row: PlayerRanking } => Boolean(winner.row));
 }
 
 function TeamMark({ team, size = "small" }: { team: FantasyTeam; size?: "small" | "large" }) {
@@ -130,15 +163,23 @@ function SpotlightPlayer({ row, badge }: { row: PlayerRanking; badge?: string })
   return <div className="flex min-w-0 items-center gap-3"><Link to={`/teams/${row.team.id}`}><TeamMark team={row.team} size="large" /></Link><div className="min-w-0"><div className="flex items-center gap-2">{badge && <span className="text-lg">{badge}</span>}<Link to={`/player-profile?playerId=${row.season.player?.player_api_id}`} className="truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row.season)}</Link></div><p className="truncate text-[11px] text-gray-500">{row.team.abbreviation} · {row.position} · {row.gamesPlayed} GP · {formatFantasyPoints(row.points)} FPTS</p></div></div>;
 }
 
-function PlayerHighlights({ rows, mode, tandem }: { rows: PlayerRanking[]; mode: PeriodMode; tandem?: GoalieTandem }) {
+function PlayerHighlights({ rows, mode, tandem, headshots }: { rows: PlayerRanking[]; mode: PeriodMode; tandem?: GoalieTandem; headshots: Map<string, string> }) {
   const played = rows.filter((row) => row.gamesPlayed > 0);
-  const podium = [...played].sort((a, b) => b.points - a.points || b.gamesPlayed - a.gamesPlayed).slice(0, 3);
+  const winners = categoryWinners(rows);
   const biggestRiser = [...played].filter((row) => (row.movement || 0) > 0).sort((a, b) => (b.movement || 0) - (a.movement || 0) || b.points - a.points)[0];
   const cold = positions.map((position) => [...played].filter((row) => row.position === position).sort((a, b) => a.points - b.points || b.gamesPlayed - a.gamesPlayed)[0]).filter(Boolean) as PlayerRanking[];
   if (!played.length) return null;
-  const medals = ["🥇", "🥈", "🥉"];
   return <div className="space-y-5">
-    <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 text-white shadow-lg"><div className="border-b border-white/10 px-5 py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-300">{mode === "month" ? "Monthly honours" : mode === "period" ? "Scoring-period podium" : "Season leaders"}</p><h2 className="mt-1 text-xl font-black">{mode === "month" ? "Player of the Month" : mode === "period" ? "Period MVPs" : "Season Podium"}</h2></div><div className="grid gap-px bg-white/10 md:grid-cols-3">{podium.map((row, index) => <div key={row.season.id} className={`bg-slate-950/80 p-5 ${index === 0 ? "md:order-2" : index === 1 ? "md:order-1" : "md:order-3"}`}><p className="mb-3 text-3xl">{medals[index]}</p><Link to={`/player-profile?playerId=${row.season.player?.player_api_id}`} className="text-lg font-black hover:text-violet-300">{playerName(row.season)}</Link><p className="mt-1 text-xs text-gray-400">{row.team.abbreviation} · {row.position} · {row.gamesPlayed} GP</p><p className="mt-3 text-2xl font-black text-violet-300">{formatFantasyPoints(row.points)} <span className="text-xs font-bold text-gray-400">FPTS</span></p></div>)}</div></section>
+    <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 text-white shadow-lg"><div className="border-b border-white/10 px-5 py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-300">{mode === "month" ? "Monthly honours" : mode === "period" ? "Scoring-period honours" : "Season honours"}</p><h2 className="mt-1 text-xl font-black">{mode === "month" ? "Monthly Position Winners" : mode === "period" ? "Period Position Winners" : "Season Position Winners"}</h2></div><div className="grid gap-px bg-white/10 md:grid-cols-3">{winners.map(({ row, label, icon }) => {
+      const apiId = row.season.player?.player_api_id || "";
+      const headshot = headshots.get(apiId);
+      return <div key={label} className="relative overflow-hidden bg-slate-950/80 px-5 pt-5">
+        <div className="absolute left-4 top-4 z-10 rounded-full border border-white/15 bg-black/30 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-violet-200 shadow-lg"><span className="mr-1.5">{icon}</span>{label}</div>
+        <Link to={`/teams/${row.team.id}`} title={row.team.team_name} className="absolute right-4 top-4 z-10 flex h-12 w-12 items-center justify-center rounded-xl border border-white/20 bg-white/95 p-1 shadow-lg">{row.team.logo ? <img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-[10px] font-black text-gray-700">{row.team.abbreviation}</span>}</Link>
+        <Link to={`/player-profile?playerId=${apiId}`} className="mx-auto flex h-40 w-40 items-end justify-center overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-violet-400/20 ring-1 ring-white/10">{headshot ? <img src={headshot} alt={`${playerName(row.season)} headshot`} className="h-full w-full object-contain object-bottom" /> : <span className="mb-10 text-5xl font-black text-white/20">{playerName(row.season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}</Link>
+        <div className="relative -mx-5 mt-2 bg-gradient-to-t from-black/60 to-transparent px-5 pb-5 pt-5 text-center"><Link to={`/player-profile?playerId=${apiId}`} className="text-lg font-black hover:text-violet-300">{playerName(row.season)}</Link><p className="mt-1 text-xs text-gray-400">{row.team.abbreviation} · {row.position} · {row.gamesPlayed} GP</p><p className="mt-3 text-2xl font-black text-violet-300">{formatFantasyPoints(row.points)} <span className="text-xs font-bold text-gray-400">FPTS</span></p></div>
+      </div>;
+    })}</div></section>
     <div className="grid gap-5 lg:grid-cols-2">
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 dark:border-emerald-500/20 dark:bg-emerald-500/10"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">📈 Biggest Riser</p>{biggestRiser ? <div className="mt-3"><SpotlightPlayer row={biggestRiser} /><p className="mt-3 text-sm font-bold text-emerald-800 dark:text-emerald-200">Climbed {biggestRiser.movement} positional ranking spot{biggestRiser.movement === 1 ? "" : "s"}</p></div> : <p className="mt-3 text-sm text-emerald-800/70 dark:text-emerald-200/70">No previous ranking is available for comparison.</p>}</section>
       <section className="rounded-2xl border border-sky-200 bg-sky-50 p-5 dark:border-sky-500/20 dark:bg-sky-500/10"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">🥅 Best Goalie Tandem</p>{tandem ? <div className="mt-3"><Link to={`/teams/${tandem.team.id}`} className="flex items-center gap-3"><TeamMark team={tandem.team} size="large" /><span><span className="block font-black text-gray-900 dark:text-white">{tandem.team.team_name}</span><span className="text-xs text-gray-500">{tandem.goalies.map((row) => playerName(row.season)).join(" + ")}</span></span></Link><p className="mt-3 text-sm font-bold text-sky-800 dark:text-sky-200">{tandem.gamesPlayed} GP · {tandem.wins} W · {tandem.saves} SV · {formatFantasyPoints(tandem.points)} FPTS</p></div> : <p className="mt-3 text-sm text-sky-800/70 dark:text-sky-200/70">No team had two goalies appear in this range.</p>}</section>
@@ -168,10 +209,12 @@ export default function PowerRankings() {
   const [month, setMonth] = useState(0);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
+  const [transactions, setTransactions] = useState<LeagueTransaction[]>([]);
   const [currentSkaters, setCurrentSkaters] = useState<NhlSkaterRecord[]>([]);
   const [currentGoalies, setCurrentGoalies] = useState<NhlGoalieRecord[]>([]);
   const [previousSkaters, setPreviousSkaters] = useState<NhlSkaterRecord[]>([]);
   const [previousGoalies, setPreviousGoalies] = useState<NhlGoalieRecord[]>([]);
+  const [headshots, setHeadshots] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -187,20 +230,32 @@ export default function PowerRankings() {
     const previousStart = mode === "month" ? priorMonth?.start : shiftDate(currentStart, -14);
     const previousEnd = mode === "month" ? priorMonth?.end : previousStart ? periodEnd(previousStart) : undefined;
     Promise.all([
-      fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season),
+      fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season), fetchLeagueTransactions(),
       mode === "season" ? fetchNhlSkaterStats(seasonId) : fetchNhlSkaterStatsForPeriod(seasonId, currentStart, currentEnd),
       mode === "season" ? fetchNhlGoalieStats(seasonId) : fetchNhlGoalieStatsForPeriod(seasonId, currentStart, currentEnd),
       mode === "season" || !previousStart || !previousEnd ? Promise.resolve([] as NhlSkaterRecord[]) : fetchNhlSkaterStatsForPeriod(seasonId, previousStart, previousEnd),
       mode === "season" || !previousStart || !previousEnd ? Promise.resolve([] as NhlGoalieRecord[]) : fetchNhlGoalieStatsForPeriod(seasonId, previousStart, previousEnd),
-    ]).then(([teamRows, branding, seasonRows, skaters, goalies, priorSkaters, priorGoalies]) => {
+    ]).then(([teamRows, branding, seasonRows, transactionRows, skaters, goalies, priorSkaters, priorGoalies]) => {
       if (!active) return;
       setTeams(teamRows.map((team) => applyTeamBranding(team, branding, season)));
       setPlayerSeasons(seasonRows);
+      setTransactions(transactionRows);
       setCurrentSkaters(skaters); setCurrentGoalies(goalies);
       setPreviousSkaters(priorSkaters); setPreviousGoalies(priorGoalies);
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Unable to load power rankings."); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [mode, month, period, season]);
+
+  const rankingEndDate = mode === "period"
+    ? periodEnd(periodStart(season, period))
+    : mode === "month"
+      ? monthRange(season, month).end
+      : `${season}-04-30`;
+  const previousRankingEndDate = mode === "period"
+    ? shiftDate(periodStart(season, period), -1)
+    : mode === "month" && month > 0
+      ? monthRange(season, month - 1).end
+      : rankingEndDate;
 
   const { playerRankings, teamRankings, goalieTandems } = useMemo(() => {
     const currentSkaterMap = new Map(currentSkaters.map((row) => [String(row.playerId), row]));
@@ -208,7 +263,11 @@ export default function PowerRankings() {
     const previousSkaterMap = new Map(previousSkaters.map((row) => [String(row.playerId), row]));
     const previousGoalieMap = new Map(previousGoalies.map((row) => [String(row.playerId), row]));
     const teamMap = new Map(teams.map((team) => [team.id, team]));
-    const eligible = playerSeasons.filter((row) => Boolean(row.fantasy_team_id && row.player?.player_api_id && normalizePosition(row.position)));
+    const rosterAt = (asOfDate: string) => playerSeasons
+      .map((row) => ({ ...row, fantasy_team_id: historicalTeamId(row, transactions, asOfDate) }))
+      .filter((row) => Boolean(row.fantasy_team_id && row.player?.player_api_id && normalizePosition(row.position)));
+    const eligible = rosterAt(rankingEndDate);
+    const previousEligible = rosterAt(previousRankingEndDate);
     const previousRanks = new Map<number, number>();
     positions.forEach((pos) => eligible.filter((row) => normalizePosition(row.position) === pos).map((row) => ({ row, ...scoreForPlayer(row, previousSkaterMap, previousGoalieMap) })).filter((item) => item.gamesPlayed > 0).sort((a, b) => b.points - a.points).forEach((item, index) => previousRanks.set(item.row.id, index + 1)));
     const players: PlayerRanking[] = [];
@@ -218,18 +277,18 @@ export default function PowerRankings() {
       positional.forEach((item) => { const rank = item.gamesPlayed > 0 ? ++playedRank : 0; const prior = previousRanks.get(item.row.id); players.push({ season: item.row, team: item.team, position: pos, nhlTeam: item.teamAbbrevs, birthDate: item.birthDate, gamesPlayed: item.gamesPlayed, goals: item.goals, assists: item.assists, nhlPoints: item.nhlPoints, wins: item.wins, saves: item.saves, savePct: item.savePct, goalsAgainstAverage: item.goalsAgainstAverage, points: item.points, rank, movement: mode === "season" ? 0 : prior && rank ? prior - rank : null }); });
     });
     const emptyUnits = () => Object.fromEntries(positions.map((pos) => [pos, { gamesPlayed: 0, points: 0 }])) as TeamRanking["units"];
-    const scoringLineup = (teamId: number, skaterMap: Map<string, NhlSkaterRecord>, goalieMap: Map<string, NhlGoalieRecord>) => positions.flatMap((pos) => eligible
+    const scoringLineup = (roster: PlayerSeasonWithRelations[], teamId: number, skaterMap: Map<string, NhlSkaterRecord>, goalieMap: Map<string, NhlGoalieRecord>) => positions.flatMap((pos) => roster
       .filter((row) => row.fantasy_team_id === teamId && normalizePosition(row.position) === pos)
       .map((row) => ({ row, pos, score: scoreForPlayer(row, skaterMap, goalieMap) }))
       .sort((a, b) => b.score.points - a.score.points || b.score.gamesPlayed - a.score.gamesPlayed)
       .slice(0, scoringLimits[pos]));
     const currentTeams = teams.map((team) => {
       const units = emptyUnits();
-      scoringLineup(team.id, currentSkaterMap, currentGoalieMap).forEach(({ pos, score }) => { units[pos].gamesPlayed += score.gamesPlayed; units[pos].points += score.points; });
+      scoringLineup(eligible, team.id, currentSkaterMap, currentGoalieMap).forEach(({ pos, score }) => { units[pos].gamesPlayed += score.gamesPlayed; units[pos].points += score.points; });
       return { team, units, gamesPlayed: positions.reduce((sum, pos) => sum + units[pos].gamesPlayed, 0), points: positions.reduce((sum, pos) => sum + units[pos].points, 0) };
     }).sort((a, b) => b.points - a.points);
     const previousTeamRanks = new Map<number, number>();
-    teams.map((team) => ({ team, points: scoringLineup(team.id, previousSkaterMap, previousGoalieMap).reduce((sum, item) => sum + item.score.points, 0) })).sort((a, b) => b.points - a.points).forEach((row, index) => previousTeamRanks.set(row.team.id, index + 1));
+    teams.map((team) => ({ team, points: scoringLineup(previousEligible, team.id, previousSkaterMap, previousGoalieMap).reduce((sum, item) => sum + item.score.points, 0) })).sort((a, b) => b.points - a.points).forEach((row, index) => previousTeamRanks.set(row.team.id, index + 1));
     const rankedTeams: TeamRanking[] = currentTeams.map((row, index) => ({ ...row, rank: index + 1, movement: mode === "season" ? 0 : (previousTeamRanks.get(row.team.id) || 0) - (index + 1) }));
     const goalieTandems = teams.map((team) => {
       const goalies = players.filter((row) => row.team.id === team.id && row.position === "G" && row.gamesPlayed > 0).sort((a, b) => b.points - a.points).slice(0, scoringLimits.G);
@@ -237,7 +296,31 @@ export default function PowerRankings() {
       return { team, goalies, gamesPlayed: source.reduce((sum, row) => sum + row.gamesPlayed, 0), wins: source.reduce((sum, row) => sum + row.wins, 0), saves: source.reduce((sum, row) => sum + row.saves, 0), goalsAgainst: source.reduce((sum, row) => sum + row.goalsAgainst, 0), points: goalies.reduce((sum, row) => sum + row.points, 0) };
     }).filter((row) => row.goalies.length >= 2).sort((a, b) => b.points - a.points);
     return { playerRankings: players, teamRankings: rankedTeams, goalieTandems };
-  }, [currentGoalies, currentSkaters, mode, playerSeasons, previousGoalies, previousSkaters, teams]);
+  }, [currentGoalies, currentSkaters, mode, playerSeasons, previousGoalies, previousRankingEndDate, previousSkaters, rankingEndDate, teams, transactions]);
+
+  const podiumPlayerIds = useMemo(() => categoryWinners(playerRankings)
+    .map(({ row }) => row.season.player?.player_api_id)
+    .filter((id): id is string => Boolean(id)), [playerRankings]);
+
+  useEffect(() => {
+    let active = true;
+    const cache = readHeadshotCache();
+    const cached = podiumPlayerIds.filter((id) => cache[id]?.url && Date.now() - cache[id].savedAt < headshotCacheAge).map((id) => [id, cache[id].url] as const);
+    if (cached.length) setHeadshots((current) => new Map([...current, ...cached]));
+    podiumPlayerIds.forEach((id) => {
+      if (cache[id]?.url && Date.now() - cache[id].savedAt < headshotCacheAge) return;
+      void fetchNhlPlayerLanding(Number(id)).then((landing) => {
+        if (!active || !landing.headshot) return;
+        setHeadshots((current) => new Map(current).set(id, landing.headshot!));
+        try {
+          const latest = readHeadshotCache();
+          latest[id] = { url: landing.headshot, savedAt: Date.now() };
+          localStorage.setItem(headshotCacheKey, JSON.stringify(latest));
+        } catch { /* Headshots still render if browser storage is unavailable. */ }
+      }).catch(() => {});
+    });
+    return () => { active = false; };
+  }, [podiumPlayerIds]);
 
   const changeSeason = (year: number) => { setSeason(year); setPeriod(latestPeriod(year)); };
 
@@ -260,8 +343,8 @@ export default function PowerRankings() {
         {mode === "period" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">Period {period}: {periodLabel(selectedPeriodStart)} <span className="ml-2 font-normal text-gray-400">· Movement compares the previous two-week period</span></p>}
         {mode === "month" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">{monthNames[month]}: {rangeLabel(selectedMonthRange.start, selectedMonthRange.end)} <span className="ml-2 font-normal text-gray-400">· Movement compares the previous month</span></p>}
       </section>
-      {loading ? <div className="grid animate-pulse gap-5"><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /></div> : error ? <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : tab === "players" ? <div className="space-y-5"><PlayerHighlights rows={playerRankings} mode={mode} tandem={goalieTandems[0]} />{positions.map((pos) => <PlayerPositionCard key={pos} position={pos} rows={playerRankings.filter((row) => row.position === pos)} />)}</div> : <div className="space-y-5"><div><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Overall team rankings</h2><TeamTable rows={teamRankings} /></div><div className="pt-2"><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Positional unit rankings</h2><div className="space-y-5">{positions.map((pos) => <UnitCard key={pos} position={pos} teams={teamRankings} />)}</div></div></div>}
-      {!loading && !error && <p className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400"><strong>How this works:</strong> Team rankings count the highest-scoring 3 C, 3 LW, 3 RW, 6 D and 2 G from each roster for the selected range. Extra roster players remain eligible for individual Player Rankings but do not add to team or positional-unit totals. Team GP is the combined number of NHL appearances by those scoring players, and FPPG is their fantasy points divided by those appearances. Players with zero games are excluded from Bottom 5 lists. Rankings use the recorded fantasy roster for the selected season.</p>}
+      {loading ? <div className="grid animate-pulse gap-5"><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /></div> : error ? <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : tab === "players" ? <div className="space-y-5"><PlayerHighlights rows={playerRankings} mode={mode} tandem={goalieTandems[0]} headshots={headshots} />{positions.map((pos) => <PlayerPositionCard key={pos} position={pos} rows={playerRankings.filter((row) => row.position === pos)} />)}</div> : <div className="space-y-5"><div><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Overall team rankings</h2><TeamTable rows={teamRankings} /></div><div className="pt-2"><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Positional unit rankings</h2><div className="space-y-5">{positions.map((pos) => <UnitCard key={pos} position={pos} teams={teamRankings} />)}</div></div></div>}
+      {!loading && !error && <p className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400"><strong>How this works:</strong> Rankings reconstruct each player’s fantasy team as of the end of the selected period or month using the league transaction history. Team rankings count the highest-scoring 3 C, 3 LW, 3 RW, 6 D and 2 G from that historical roster. Extra roster players remain eligible for individual Player Rankings but do not add to team or positional-unit totals. Team GP is the combined number of NHL appearances by those scoring players, and FPPG is their fantasy points divided by those appearances. Players with zero games are excluded from Bottom 5 lists.</p>}
     </div>
   </div>;
 }

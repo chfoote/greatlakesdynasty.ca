@@ -35,7 +35,7 @@ export default function AwardAdmin() {
 
   async function loadData() {
     const [awardRows, assignmentRows, playerRows] = await Promise.all([
-      fetchAwards(true), fetchPlayerAwards(), fetchFantasyPlayers(),
+      fetchAwards(true), fetchPlayerAwards(undefined, false), fetchFantasyPlayers(),
     ]);
     setAwards(awardRows);
     setAssignments(assignmentRows);

@@ -94,7 +94,7 @@ function PlayerName({ season, nhlTeam, awards = [], onTradeBlock = false, intere
     <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
       {nhlTeamAbbreviation ? <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlTeamAbbreviation}_light.svg`} alt={`${nhlTeamAbbreviation} NHL club logo`} title={nhlTeamAbbreviation} className="h-full w-full object-contain p-0.5" /> : <span className="text-[10px] font-semibold text-gray-500">NHL</span>}
     </div>
-    <div><p className="font-medium text-gray-800 dark:text-white/90">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(season)}</Link> : playerName(season)}<PlayerAwardBadges awards={awards} />{onTradeBlock && <TradeBlockBadge className="ml-2 align-middle" />}</p>
+    <div><p className="font-medium text-gray-800 dark:text-white/90">{season.player?.player_api_id ? <Link to={`/player-profile?playerId=${season.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(season)}</Link> : playerName(season)}<PlayerAwardBadges awards={awards} includeMonthly={false} />{onTradeBlock && <TradeBlockBadge className="ml-2 align-middle" />}</p>
       <p className={`mt-0.5 text-[11px] ${isExpiring ? "font-semibold text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
         {[nhlTeam || "—", money.format(season.salary || 0), season.term_end_year || "No term"].join(" | ")}
         {isExpiring && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">Expiring</span>}
@@ -124,6 +124,7 @@ function Medal({ icon, value, label, years, tone }: { icon: string; value: numbe
 }
 
 const featuredAwardOrder = ["Championship", "MVP", "Rookie of the Year", "Top C", "Top LW", "Top RW", "Top D"];
+const honourMonths = ["October", "November", "December", "January", "February", "March", "April"];
 
 function normalizedAwardName(name: string) {
   return name.trim().toLowerCase();
@@ -150,12 +151,16 @@ function TrophyCase({
   teamSeasons: PlayerSeasonWithRelations[];
   awards: Award[];
 }) {
+  const [view, setView] = useState<"seasonal" | "monthly">("seasonal");
   const championshipAward = awards.find((award) => normalizedAwardName(award.name) === "championship");
   const playerSeasonKeys = new Set(teamSeasons.map((season) => `${season.player_id}:${season.season_year}`));
-  const individualTrophies = playerAwards
+  const seasonalPlayerTrophies = playerAwards
+    .filter((assignment) => !assignment.is_monthly)
     .filter((assignment) => assignment.award && normalizedAwardName(assignment.award.name) !== "championship")
     .filter((assignment) => playerSeasonKeys.has(`${assignment.player_id}:${assignment.season_year}`));
-  const trophies = [
+  const monthlyPlayerTrophies = playerAwards
+    .filter((assignment) => assignment.is_monthly && assignment.fantasy_team_id === team.id);
+  const seasonalTrophies = [
     ...finishes
       .filter((finish) => finish.placement === 1)
       .map((finish) => ({
@@ -164,13 +169,15 @@ function TrophyCase({
         year: finish.season_year,
         award: championshipAward,
         player: null as PlayerAward["player"],
+        monthIndex: undefined as number | undefined,
       })),
-    ...individualTrophies.map((assignment) => ({
+    ...seasonalPlayerTrophies.map((assignment) => ({
       key: `player-award-${assignment.id}`,
       name: assignment.award?.name || "Award",
       year: assignment.season_year,
       award: assignment.award,
       player: assignment.player,
+      monthIndex: undefined as number | undefined,
     })),
   ].sort((a, b) => {
     const order = (name: string) => {
@@ -179,12 +186,17 @@ function TrophyCase({
     };
     return order(a.name) - order(b.name) || b.year - a.year;
   });
+  const monthlyTrophies = monthlyPlayerTrophies.map((assignment) => ({ key: `monthly-honour-${assignment.id}`, name: assignment.award?.name || "Monthly Honour", year: assignment.season_year, award: assignment.award, player: assignment.player, monthIndex: assignment.month_index })).sort((a, b) => b.year - a.year || (b.monthIndex ?? -1) - (a.monthIndex ?? -1));
+  const trophies = view === "seasonal" ? seasonalTrophies : monthlyTrophies;
 
   return <section id="trophy-case" className="mt-6 scroll-mt-24 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent sm:p-6">
-    <div>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
       <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Club honours</p>
       <h3 className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">Trophy Case</h3>
       <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Championships and individual awards won while representing the {team.team_name}.</p>
+      </div>
+      <div className="inline-flex shrink-0 rounded-lg border border-amber-300/70 bg-white/70 p-1 dark:border-amber-500/30 dark:bg-gray-900/60"><button type="button" onClick={() => setView("seasonal")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${view === "seasonal" ? "bg-amber-500 text-white" : "text-gray-500"}`}>Seasonal Awards</button><button type="button" onClick={() => setView("monthly")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${view === "monthly" ? "bg-amber-500 text-white" : "text-gray-500"}`}>Monthly Honours</button></div>
     </div>
     {trophies.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {trophies.map((trophy) => {
@@ -193,13 +205,13 @@ function TrophyCase({
         return <article key={trophy.key} className="flex min-h-36 items-center gap-4 rounded-xl border border-amber-200 bg-white/90 p-4 shadow-sm dark:border-amber-500/20 dark:bg-gray-900/80">
           <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-500/10"><TrophyImage award={trophy.award} name={trophy.name} /></div>
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">{trophy.year}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">{trophy.monthIndex !== undefined ? `${honourMonths[trophy.monthIndex]} · ` : ""}{trophy.year}</p>
             <h4 className="mt-1 text-base font-bold text-gray-900 dark:text-white">{trophy.name}</h4>
             {apiId ? <Link to={`/player-profile?playerId=${apiId}`} className="mt-1 block truncate text-sm font-medium text-brand-500 hover:underline">{winnerName}</Link> : <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{winnerName}</p>}
           </div>
         </article>;
       })}
-    </div> : <p className="mt-5 rounded-lg border border-dashed border-amber-300 p-5 text-center text-sm text-gray-500 dark:border-amber-500/30 dark:text-gray-400">No trophies have been recorded for this team yet.</p>}
+    </div> : <p className="mt-5 rounded-lg border border-dashed border-amber-300 p-5 text-center text-sm text-gray-500 dark:border-amber-500/30 dark:text-gray-400">{view === "monthly" ? "No monthly honours have been recorded for this team yet." : "No seasonal trophies have been recorded for this team yet."}</p>}
   </section>;
 }
 
@@ -355,7 +367,7 @@ function MultiYearView({
           const gamesPlayed = isGoalie ? goalie?.gamesPlayed : skater?.gamesPlayed;
           const apiPosition = isGoalie ? "G" : nhlSkaterPosition(skater?.positionCode) || code;
           return <tr key={representative.player?.id || representative.id} className="text-center text-gray-600 dark:text-gray-300">
-            <td className="px-3 py-3 text-left"><span className="font-medium text-gray-800 dark:text-white/90">{representative.player?.player_api_id ? <Link to={`/player-profile?playerId=${representative.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(representative)}</Link> : playerName(representative)}</span><PlayerAwardBadges awards={representative.player?.id ? awardsByPlayer.get(representative.player.id) || [] : []} /></td>
+            <td className="px-3 py-3 text-left"><span className="font-medium text-gray-800 dark:text-white/90">{representative.player?.player_api_id ? <Link to={`/player-profile?playerId=${representative.player.player_api_id}`} className="text-brand-500 hover:underline">{playerName(representative)}</Link> : playerName(representative)}</span><PlayerAwardBadges awards={representative.player?.id ? awardsByPlayer.get(representative.player.id) || [] : []} includeMonthly={false} /></td>
             <td className="px-3 py-3">{skater?.teamAbbrevs || goalie?.teamAbbrevs || "—"}</td>
             <td className="px-3 py-3">{apiPosition}</td>
             {years.map((year) => {
