@@ -82,10 +82,10 @@ export default function LeagueDashboard() {
 
   return <div>
     <PageMeta title="Great Lakes Dynasty Hockey League" description="GLDHL league roster and salary dashboard" />
-    <PageBreadcrumb pageTitle="League Dashboard" />
+    <PageBreadcrumb pageTitle="Cap & Roster Overview" />
     <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 dark:border-gray-800 dark:bg-white/[0.03] xl:px-6">
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div><h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">League Dashboard</h1><p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Salary-cap and active-roster overview for every GLDHL team.</p></div>
+        <div><h1 className="text-xl font-semibold text-gray-800 dark:text-white/90">Cap & Roster Overview</h1><p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Salary-cap and active-roster overview for every GLDHL team.</p></div>
         <div className="w-full sm:w-44"><label htmlFor="dashboard-season" className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">Season</label><select id="dashboard-season" value={selectedSeason} onChange={(event) => setSelectedSeason(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div>
       </div>
       <div className="mb-4 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400"><span className="rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800">Cap: {money.format(salaryCap)}</span><span className="rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800">Roster limit: {rosterLimit}</span></div>

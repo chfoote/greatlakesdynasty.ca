@@ -80,7 +80,16 @@ export async function fetchAllTeamUserAssignments() {
   tenures.forEach((tenure) => {
     const team = teams.find((candidate) => candidate.id === tenure.fantasy_team_id);
     if (!team) return;
-    const firstSeason = Math.max(tenure.start_season, FIRST_LEAGUE_SEASON);
+    // Teams 2–10 are the original franchises and had the same manager in both
+    // 2026 and 2027. Some databases still contain the old 2027 start date from
+    // manager_since, so normalize that legacy seed until the corrective
+    // migration has been applied. Team 1 intentionally has separate managers.
+    const isLegacyOriginalManager = tenure.fantasy_team_id >= 2
+      && tenure.fantasy_team_id <= 10
+      && tenure.start_season === 2027;
+    const firstSeason = isLegacyOriginalManager
+      ? FIRST_LEAGUE_SEASON
+      : Math.max(tenure.start_season, FIRST_LEAGUE_SEASON);
     const finalSeason = Math.min(tenure.end_season ?? CURRENT_LEAGUE_SEASON, CURRENT_LEAGUE_SEASON);
     for (let seasonYear = firstSeason; seasonYear <= finalSeason; seasonYear += 1) {
       if (assignments.some((assignment) => assignment.fantasy_team_id === tenure.fantasy_team_id && assignment.season_year === seasonYear)) continue;

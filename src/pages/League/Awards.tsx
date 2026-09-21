@@ -147,8 +147,8 @@ export default function Awards() {
   const championshipAward = definitions.find((award) => normalizedName(award.name) === "championship");
 
   return <div>
-    <PageMeta title="Awards | Great Lakes Dynasty Hockey League" description="League champions and player award winners by season" />
-    <PageBreadcrumb pageTitle="Awards" />
+    <PageMeta title="Awards & Honours | Great Lakes Dynasty Hockey League" description="League champions and player award winners by season" />
+    <PageBreadcrumb pageTitle="Awards & Honours" />
     <div className="mb-6 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent sm:p-8">
       <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">League history</p>
       <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">Awards & Champions</h1>

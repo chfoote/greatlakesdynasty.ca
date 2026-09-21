@@ -159,20 +159,20 @@ export default function ManagerCommandCenter() {
   }).slice(0, 5), [teamId, transactions]);
   const managerName = assignment?.profile?.display_name || user?.email?.split("@")[0] || "Manager";
 
-  if (loading) return <div><PageMeta title="Manager Command Centre | Great Lakes Dynasty" description="Your GLDHL manager dashboard" /><div className="grid animate-pulse gap-4"><div className="h-48 rounded-3xl bg-gray-200 dark:bg-gray-800" /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[1,2,3,4].map((item) => <div key={item} className="h-28 rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div></div></div>;
+  if (loading) return <div><PageMeta title="My Front Office | Great Lakes Dynasty" description="Your GLDHL manager dashboard" /><div className="grid animate-pulse gap-4"><div className="h-48 rounded-3xl bg-gray-200 dark:bg-gray-800" /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[1,2,3,4].map((item) => <div key={item} className="h-28 rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div></div></div>;
 
   if (error) return <div className="rounded-2xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div>;
 
   if (!teamId) return <div><PageMeta title="Manager Command Centre | Great Lakes Dynasty" description="Your GLDHL manager dashboard" /><div className="rounded-3xl border border-warning-200 bg-warning-50 p-8 text-center dark:border-warning-500/30 dark:bg-warning-500/10"><h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome to the Command Centre</h1><p className="mx-auto mt-2 max-w-xl text-sm text-gray-600 dark:text-gray-300">Your account is not assigned to a team for Season {season}. Once an administrator assigns your team, your roster, cap, trades, and auctions will appear here.</p><Link to="/league-chat" className="mt-5 inline-flex rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white">Open League Chat</Link></div></div>;
 
   return <div className="space-y-6">
-    <PageMeta title="Manager Command Centre | Great Lakes Dynasty" description="Your GLDHL manager dashboard" />
+    <PageMeta title="My Front Office | Great Lakes Dynasty" description="Your GLDHL manager dashboard" />
     <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-gray-950 via-slate-900 to-brand-950 p-6 text-white shadow-xl sm:p-8">
       <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-brand-500/20 blur-3xl" />
       <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-5">
           <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-white/95 p-1.5 shadow-lg">{team?.logo ? <img src={team.logo} alt={`${team.team_name} logo`} className="h-full w-full object-contain" /> : <span className="font-black text-gray-700">{team?.abbreviation}</span>}</div>
-          <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-brand-300">Season {season} · Manager Command Centre</p><h1 className="mt-2 text-2xl font-black sm:text-3xl">Welcome back, {managerName}</h1><p className="mt-1 text-sm text-gray-300">{team?.team_name || "Your team"} · Here’s what needs your attention.</p></div>
+          <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-brand-300">Season {season} · My Front Office</p><h1 className="mt-2 text-2xl font-black sm:text-3xl">Welcome back, {managerName}</h1><p className="mt-1 text-sm text-gray-300">{team?.team_name || "Your team"} · Here’s what needs your attention.</p></div>
         </div>
         <div className="flex flex-wrap gap-2"><Link to={`/teams/${teamId}`} className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-gray-900 hover:bg-gray-100">View My Team</Link><Link to="/trade-manager" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/15">Make a Trade</Link></div>
       </div>

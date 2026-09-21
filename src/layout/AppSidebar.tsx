@@ -35,7 +35,7 @@ type NavItem = {
   subItems?: { name: string; path: string; pro?: boolean; new?: boolean }[];
 };
 
-const navItems: NavItem[] = [
+const leagueItems: NavItem[] = [
   {
     icon: <StandingsIcon />,
     name: "Standings",
@@ -46,11 +46,7 @@ const navItems: NavItem[] = [
     name: "Teams",
     path: "/teams",
   },
-  {
-    icon: <TeamsIcon />,
-    name: "GM Centre",
-    path: "/gms",
-  },
+  { icon: <DashboardIcon />, name: "Cap & Roster Overview", path: "/league-dashboard" },
   {
     icon: <SkaterIcon />,
     name: "Skater Stats",
@@ -61,6 +57,9 @@ const navItems: NavItem[] = [
     name: "Goalie Stats",
     path: "/goalie-stats",
   },
+];
+
+const leaguePulseItems: NavItem[] = [
   {
     icon: <StandingsIcon />,
     name: "Power Rankings",
@@ -68,7 +67,7 @@ const navItems: NavItem[] = [
   },
   {
     icon: <AwardsIcon />,
-    name: "Awards",
+    name: "Awards & Honours",
     path: "/awards",
   },
   {
@@ -78,21 +77,16 @@ const navItems: NavItem[] = [
   },
 ];
 
-const leagueToolItems: NavItem[] = [
+const gmToolItems: NavItem[] = [
   {
     icon: <DashboardIcon />,
-    name: "Command Centre",
+    name: "My Front Office",
     path: "/",
   },
   {
-    icon: <DashboardIcon />,
-    name: "League Overview",
-    path: "/league-dashboard",
-  },
-  {
-    icon: <ChatIcon />,
-    name: "League Chat",
-    path: "/league-chat",
+    icon: <TeamsIcon />,
+    name: "GM Records",
+    path: "/gms",
   },
   {
     icon: <AuctionIcon />,
@@ -110,6 +104,12 @@ const leagueToolItems: NavItem[] = [
     path: "/trade-manager",
   },
 ];
+
+const communityItems: NavItem[] = [
+  { icon: <ChatIcon />, name: "League Chat", path: "/league-chat" },
+];
+
+type MenuType = "league" | "pulse" | "gmTools" | "community" | "admin" | "others";
 
 const adminItems: NavItem[] = [
   {
@@ -170,13 +170,22 @@ const othersItems: NavItem[] = [
   },
 ];
 
+const menuItems: Record<MenuType, NavItem[]> = {
+  league: leagueItems,
+  pulse: leaguePulseItems,
+  gmTools: gmToolItems,
+  community: communityItems,
+  admin: adminItems,
+  others: othersItems,
+};
+
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const { isAdmin, user } = useAuth();
   const location = useLocation();
 
   const [openSubmenu, setOpenSubmenu] = useState<{
-    type: "main" | "leagueTools" | "admin" | "others";
+    type: MenuType;
     index: number;
   } | null>(null);
   const [subMenuHeight, setSubMenuHeight] = useState<Record<string, number>>(
@@ -192,21 +201,14 @@ const AppSidebar: React.FC = () => {
 
   useEffect(() => {
     let submenuMatched = false;
-    ["main", "leagueTools", "admin", "others"].forEach((menuType) => {
-      const items =
-        menuType === "main"
-          ? navItems
-          : menuType === "leagueTools"
-          ? leagueToolItems
-          : menuType === "admin"
-          ? adminItems
-          : othersItems;
+    (Object.keys(menuItems) as MenuType[]).forEach((menuType) => {
+      const items = menuItems[menuType];
       items.forEach((nav, index) => {
         if (nav.subItems) {
           nav.subItems.forEach((subItem) => {
             if (isActive(subItem.path)) {
               setOpenSubmenu({
-                type: menuType as "main" | "leagueTools" | "admin" | "others",
+                type: menuType,
                 index,
               });
               submenuMatched = true;
@@ -235,7 +237,7 @@ const AppSidebar: React.FC = () => {
 
   const handleSubmenuToggle = (
     index: number,
-    menuType: "main" | "leagueTools" | "admin" | "others",
+    menuType: MenuType,
   ) => {
     setOpenSubmenu((prevOpenSubmenu) => {
       if (
@@ -251,7 +253,7 @@ const AppSidebar: React.FC = () => {
 
   const renderMenuItems = (
     items: NavItem[],
-    menuType: "main" | "leagueTools" | "admin" | "others",
+    menuType: MenuType,
   ) => (
     <ul className="flex flex-col gap-4">
       {items.map((nav, index) => (
@@ -420,12 +422,12 @@ const AppSidebar: React.FC = () => {
                 }`}
               >
                 {isExpanded || isHovered || isMobileOpen ? (
-                  "Menu"
+                  "League"
                 ) : (
                   <HorizontaLDots className="size-6" />
                 )}
               </h2>
-              {renderMenuItems(navItems, "main")}
+              {renderMenuItems(leagueItems, "league")}
             </div>
             <div>
               <h2
@@ -436,12 +438,24 @@ const AppSidebar: React.FC = () => {
                 }`}
               >
                 {isExpanded || isHovered || isMobileOpen ? (
-                  "League Tools"
+                  "League Pulse"
                 ) : (
                   <HorizontaLDots />
                 )}
               </h2>
-              {renderMenuItems(leagueToolItems, "leagueTools")}
+              {renderMenuItems(leaguePulseItems, "pulse")}
+            </div>
+            <div>
+              <h2 className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${!isExpanded && !isHovered ? "lg:justify-center" : "justify-start"}`}>
+                {isExpanded || isHovered || isMobileOpen ? "GM Tools" : <HorizontaLDots />}
+              </h2>
+              {renderMenuItems(gmToolItems, "gmTools")}
+            </div>
+            <div>
+              <h2 className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${!isExpanded && !isHovered ? "lg:justify-center" : "justify-start"}`}>
+                {isExpanded || isHovered || isMobileOpen ? "Community" : <HorizontaLDots />}
+              </h2>
+              {renderMenuItems(communityItems, "community")}
             </div>
             {isAdmin && (
               <div>
