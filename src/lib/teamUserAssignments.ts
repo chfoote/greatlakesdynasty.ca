@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
-import type { FantasyTeam } from "./fantasyTeams";
+import { applyTeamBranding, fetchAllTeamManagerTenures, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "./fantasyTeams";
 import type { Profile } from "./profiles";
+import { CURRENT_LEAGUE_SEASON, FIRST_LEAGUE_SEASON } from "./leagueSeasons";
 
 export type TeamUserAssignment = {
   id: number;
@@ -55,6 +56,57 @@ export async function fetchTeamUserAssignments(seasonYear: number) {
 
   if (error) throw error;
   return (data ?? []) as TeamUserAssignmentWithTeam[];
+}
+
+export async function fetchAllTeamUserAssignments() {
+  const [{ data, error }, branding, tenures, teams] = await Promise.all([
+    supabase
+      .from("team_user_assignments")
+      .select("*, fantasy_team:fantasy_teams(*), profile:profiles(*)")
+      .order("season_year", { ascending: false }),
+    fetchTeamBrandingHistory(),
+    fetchAllTeamManagerTenures(),
+    fetchFantasyTeams(true),
+  ]);
+
+  if (error) throw error;
+  const assignments = ((data ?? []) as TeamUserAssignmentWithTeam[]).map((assignment) => ({
+    ...assignment,
+    fantasy_team: assignment.fantasy_team
+      ? applyTeamBranding(assignment.fantasy_team, branding, assignment.season_year)
+      : null,
+  }));
+  const syntheticAssignments: TeamUserAssignmentWithTeam[] = [];
+  tenures.forEach((tenure) => {
+    const team = teams.find((candidate) => candidate.id === tenure.fantasy_team_id);
+    if (!team) return;
+    const firstSeason = Math.max(tenure.start_season, FIRST_LEAGUE_SEASON);
+    const finalSeason = Math.min(tenure.end_season ?? CURRENT_LEAGUE_SEASON, CURRENT_LEAGUE_SEASON);
+    for (let seasonYear = firstSeason; seasonYear <= finalSeason; seasonYear += 1) {
+      if (assignments.some((assignment) => assignment.fantasy_team_id === tenure.fantasy_team_id && assignment.season_year === seasonYear)) continue;
+      const syntheticUserId = tenure.profile_id || `tenure-${tenure.id}`;
+      syntheticAssignments.push({
+        id: -tenure.id * 10_000 - seasonYear,
+        user_id: syntheticUserId,
+        user_email: null,
+        fantasy_team_id: tenure.fantasy_team_id,
+        season_year: seasonYear,
+        role: "owner",
+        created_at: "",
+        updated_at: "",
+        fantasy_team: applyTeamBranding(team, branding, seasonYear),
+        profile: {
+          id: syntheticUserId,
+          email: null,
+          display_name: tenure.manager_name,
+          is_admin: false,
+          created_at: "",
+          updated_at: "",
+        },
+      });
+    }
+  });
+  return [...assignments, ...syntheticAssignments].sort((a, b) => b.season_year - a.season_year || a.fantasy_team_id - b.fantasy_team_id);
 }
 
 export async function upsertUserTeamAssignment({

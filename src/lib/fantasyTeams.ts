@@ -40,6 +40,7 @@ export type FantasyTeamManagerTenure = {
   id: number;
   fantasy_team_id: number;
   manager_name: string;
+  profile_id: string | null;
   start_season: number;
   end_season: number | null;
 };
@@ -174,6 +175,16 @@ export async function fetchTeamManagerTenures(teamId: number) {
   return (data ?? []) as FantasyTeamManagerTenure[];
 }
 
+export async function fetchAllTeamManagerTenures() {
+  const { data, error } = await supabase
+    .from("fantasy_team_manager_tenures")
+    .select("*")
+    .order("fantasy_team_id", { ascending: true })
+    .order("start_season", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as FantasyTeamManagerTenure[];
+}
+
 export function getManagerForSeason(
   tenures: FantasyTeamManagerTenure[],
   seasonYear: number,
@@ -183,7 +194,7 @@ export function getManagerForSeason(
     .sort((a, b) => b.start_season - a.start_season)[0] ?? null;
 }
 
-export async function createTeamManagerTenure(input: Omit<FantasyTeamManagerTenure, "id">) {
+export async function createTeamManagerTenure(input: Omit<FantasyTeamManagerTenure, "id" | "profile_id"> & { profile_id?: string | null }) {
   const { data, error } = await supabase
     .from("fantasy_team_manager_tenures")
     .insert(input)

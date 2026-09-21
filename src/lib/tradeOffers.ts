@@ -55,6 +55,15 @@ export type TradeOfferDismissal = {
   dismissed_at: string;
 };
 
+export type GmTradeOfferActivity = {
+  created_by: string;
+  from_team_id: number;
+  season_year: number;
+  status: TradeOfferStatus;
+  is_counter: boolean;
+  offer_count: number;
+};
+
 const tradeOfferSelect = `
   *,
   from_team:fantasy_teams!trade_offers_from_team_id_fkey(*),
@@ -77,6 +86,21 @@ export async function fetchTradeOffers(seasonYear: number) {
 
   if (error) throw error;
   return (data ?? []) as TradeOffer[];
+}
+
+export async function fetchAllTradeOffers() {
+  const { data, error } = await supabase
+    .from("trade_offers")
+    .select(tradeOfferSelect)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as TradeOffer[];
+}
+
+export async function fetchGmTradeOfferActivity() {
+  const { data, error } = await supabase.rpc("get_gm_trade_offer_activity");
+  if (error) throw error;
+  return (data ?? []) as GmTradeOfferActivity[];
 }
 
 export async function createTradeOffer({

@@ -41,8 +41,12 @@ import LeagueDashboard from "./pages/League/LeagueDashboard";
 import FarmSystems from "./pages/League/FarmSystems";
 import TradeMarket from "./pages/League/TradeMarket";
 import BuyoutAdmin from "./pages/League/BuyoutAdmin";
+import RetentionAdmin from "./pages/League/RetentionAdmin";
 import ManagerCommandCenter from "./pages/League/ManagerCommandCenter";
 import PowerRankings from "./pages/League/PowerRankings";
+import GmCentre from "./pages/League/GmCentre";
+import GmProfile from "./pages/League/GmProfile";
+import GmTradeNetwork from "./pages/League/GmTradeNetwork";
 
 export default function App() {
   return (
@@ -77,6 +81,9 @@ export default function App() {
               <Route path="/auction-house" element={<AuctionHouse />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/power-rankings" element={<PowerRankings />} />
+              <Route path="/gms" element={<GmCentre />} />
+              <Route path="/gm-trade-network" element={<GmTradeNetwork />} />
+              <Route path="/gms/:managerId" element={<GmProfile />} />
               <Route path="/admin/trade-manager" element={<TradeManager />} />
 
               <Route element={<AdminRoute />}>
@@ -88,6 +95,7 @@ export default function App() {
                 <Route path="/admin/auction-admin" element={<AuctionAdmin />} />
                 <Route path="/admin/auction-report" element={<AuctionReport />} />
                 <Route path="/admin/buyouts" element={<BuyoutAdmin />} />
+                <Route path="/admin/retentions" element={<RetentionAdmin />} />
                 <Route path="/admin/awards" element={<AwardAdmin />} />
               </Route>
 

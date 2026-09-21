@@ -47,6 +47,11 @@ const navItems: NavItem[] = [
     path: "/teams",
   },
   {
+    icon: <TeamsIcon />,
+    name: "GM Centre",
+    path: "/gms",
+  },
+  {
     icon: <SkaterIcon />,
     name: "Skater Stats",
     path: "/skater-stats",
@@ -141,6 +146,11 @@ const adminItems: NavItem[] = [
     icon: <BuyoutIcon />,
     name: "Buyout Admin",
     path: "/admin/buyouts",
+  },
+  {
+    icon: <BuyoutIcon />,
+    name: "Retention Admin",
+    path: "/admin/retentions",
   },
   {
     icon: <AwardsIcon />,

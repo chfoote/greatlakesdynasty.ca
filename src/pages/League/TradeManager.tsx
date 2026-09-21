@@ -34,6 +34,7 @@ import {
 } from "../../lib/tradeOffers";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import { fetchBuyoutPenalties } from "../../lib/buyouts";
+import { fetchRetentionAdjustments } from "../../lib/retentions";
 
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
 const rosterLimit = 23;
@@ -758,6 +759,7 @@ export default function TradeManager() {
   const [team2Roster, setTeam2Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [team3Roster, setTeam3Roster] = useState<PlayerSeasonWithRelations[]>([]);
   const [buyoutPenaltyTotals, setBuyoutPenaltyTotals] = useState<Record<string, number>>({});
+  const [retentionAdjustmentTotals, setRetentionAdjustmentTotals] = useState<Record<string, number>>({});
   const [tradeOffers, setTradeOffers] = useState<TradeOffer[]>([]);
   const [dismissedTradeOfferIds, setDismissedTradeOfferIds] = useState<Set<number>>(
     () => new Set(),
@@ -938,13 +940,15 @@ export default function TradeManager() {
       setError("");
 
       try {
-        const [rows, penalties] = await Promise.all([
+        const [rows, penalties, adjustments] = await Promise.all([
           fetchPlayerSeasonsByTeamAndSeason(Number(team1Id), selectedSeason),
           fetchBuyoutPenalties(selectedSeason, Number(team1Id)),
+          fetchRetentionAdjustments(selectedSeason, Number(team1Id)),
         ]);
         if (active) {
           setTeam1Roster(rows);
           setBuyoutPenaltyTotals((current) => ({ ...current, [team1Id]: penalties.reduce((sum, penalty) => sum + penalty.amount, 0) }));
+          setRetentionAdjustmentTotals((current) => ({ ...current, [team1Id]: adjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0) }));
         }
       } catch (err) {
         if (active) {
@@ -979,13 +983,15 @@ export default function TradeManager() {
       setError("");
 
       try {
-        const [rows, penalties] = await Promise.all([
+        const [rows, penalties, adjustments] = await Promise.all([
           fetchPlayerSeasonsByTeamAndSeason(Number(team2Id), selectedSeason),
           fetchBuyoutPenalties(selectedSeason, Number(team2Id)),
+          fetchRetentionAdjustments(selectedSeason, Number(team2Id)),
         ]);
         if (active) {
           setTeam2Roster(rows);
           setBuyoutPenaltyTotals((current) => ({ ...current, [team2Id]: penalties.reduce((sum, penalty) => sum + penalty.amount, 0) }));
+          setRetentionAdjustmentTotals((current) => ({ ...current, [team2Id]: adjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0) }));
         }
       } catch (err) {
         if (active) {
@@ -1016,13 +1022,15 @@ export default function TradeManager() {
       setLoadingTeam3Roster(true);
       setError("");
       try {
-        const [rows, penalties] = await Promise.all([
+        const [rows, penalties, adjustments] = await Promise.all([
           fetchPlayerSeasonsByTeamAndSeason(Number(team3Id), selectedSeason),
           fetchBuyoutPenalties(selectedSeason, Number(team3Id)),
+          fetchRetentionAdjustments(selectedSeason, Number(team3Id)),
         ]);
         if (active) {
           setTeam3Roster(rows);
           setBuyoutPenaltyTotals((current) => ({ ...current, [team3Id]: penalties.reduce((sum, penalty) => sum + penalty.amount, 0) }));
+          setRetentionAdjustmentTotals((current) => ({ ...current, [team3Id]: adjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0) }));
         }
       } catch (err) {
         if (active) setError(getErrorMessage(err, "Unable to load Team 3 roster."));
@@ -1089,11 +1097,11 @@ export default function TradeManager() {
     ? selectedPlayers.filter((season) => playerDestinations[season.id] === teamId)
     : teamId === team1Id ? team2OutgoingPlayers : team1OutgoingPlayers;
 
-  const team1CurrentSalary = sumSalary(team1Roster) + (buyoutPenaltyTotals[team1Id] || 0);
-  const team2CurrentSalary = sumSalary(team2Roster) + (buyoutPenaltyTotals[team2Id] || 0);
+  const team1CurrentSalary = sumSalary(team1Roster) + (buyoutPenaltyTotals[team1Id] || 0) + (retentionAdjustmentTotals[team1Id] || 0);
+  const team2CurrentSalary = sumSalary(team2Roster) + (buyoutPenaltyTotals[team2Id] || 0) + (retentionAdjustmentTotals[team2Id] || 0);
   const team1CurrentRosterCount = getRosterCount(team1Roster);
   const team2CurrentRosterCount = getRosterCount(team2Roster);
-  const team3CurrentSalary = sumSalary(team3Roster) + (buyoutPenaltyTotals[team3Id] || 0);
+  const team3CurrentSalary = sumSalary(team3Roster) + (buyoutPenaltyTotals[team3Id] || 0) + (retentionAdjustmentTotals[team3Id] || 0);
   const team3CurrentRosterCount = getRosterCount(team3Roster);
   const team1OutgoingSalary = sumSalary(team1OutgoingPlayers);
   const team2OutgoingSalary = sumSalary(team2OutgoingPlayers);

@@ -19,6 +19,7 @@ import {
 } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
+import { fetchRetentionAdjustments, type RetentionAdjustment } from "../../lib/retentions";
 import {
   fetchLatestUserTeamAssignment,
   fetchUserTeamAssignment,
@@ -471,6 +472,7 @@ export default function AuctionHouse() {
     useState<TeamUserAssignmentWithTeam | null>(null);
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
+  const [retentionAdjustments, setRetentionAdjustments] = useState<RetentionAdjustment[]>([]);
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [leagueTeams, setLeagueTeams] = useState<FantasyTeam[]>([]);
   const [activeTeamIds, setActiveTeamIds] = useState<Set<number>>(new Set());
@@ -502,13 +504,16 @@ export default function AuctionHouse() {
       const assigned =
         (await fetchUserTeamAssignment(user.id, season)) ||
         (await fetchLatestUserTeamAssignment(user.id));
-      const [rows, teamRoster, penaltyRows] = await Promise.all([
+      const [rows, teamRoster, penaltyRows, adjustmentRows] = await Promise.all([
         fetchAuctions(season),
         assigned?.fantasy_team_id
           ? fetchPlayerSeasonsByTeamAndSeason(assigned.fantasy_team_id, season)
           : Promise.resolve([]),
         assigned?.fantasy_team_id
           ? fetchBuyoutPenalties(season, assigned.fantasy_team_id)
+          : Promise.resolve([]),
+        assigned?.fantasy_team_id
+          ? fetchRetentionAdjustments(season, assigned.fantasy_team_id)
           : Promise.resolve([]),
       ]);
       const apiIds = Array.from(
@@ -541,6 +546,7 @@ export default function AuctionHouse() {
       setAuctions(rows);
       setRoster(teamRoster);
       setBuyoutPenalties(penaltyRows);
+      setRetentionAdjustments(adjustmentRows);
       setLandings(Object.fromEntries(landingRows));
       setSkaters(
         Object.fromEntries(skaterRows.map((row) => [row.playerId, row])),
@@ -695,7 +701,8 @@ export default function AuctionHouse() {
   }, [auctions]);
   const teamId = assignment?.fantasy_team_id;
   const salary = roster.reduce((sum, row) => sum + (row.salary || 0), 0)
-    + buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0);
+    + buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0)
+    + retentionAdjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0);
   const missingByPosition = Object.fromEntries(
     (Object.keys(requiredRoster) as RosterPosition[]).map((position) => [
       position,

@@ -6,6 +6,7 @@ import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type Fa
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON, dashboardSeasons } from "../../lib/leagueSeasons";
 import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
+import { fetchRetentionAdjustments, type RetentionAdjustment } from "../../lib/retentions";
 
 const seasonOptions = dashboardSeasons;
 const rosterLimit = 23;
@@ -35,6 +36,7 @@ export default function LeagueDashboard() {
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [seasons, setSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
+  const [retentionAdjustments, setRetentionAdjustments] = useState<RetentionAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const salaryCap = salaryCapForSeason(selectedSeason);
@@ -43,12 +45,13 @@ export default function LeagueDashboard() {
     let active = true;
     setLoading(true);
     setError("");
-    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason), fetchBuyoutPenalties(selectedSeason)])
-      .then(([teamRows, brandingRows, seasonRows, penaltyRows]) => {
+    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason), fetchBuyoutPenalties(selectedSeason), fetchRetentionAdjustments(selectedSeason)])
+      .then(([teamRows, brandingRows, seasonRows, penaltyRows, adjustmentRows]) => {
         if (!active) return;
         setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
         setSeasons(seasonRows);
         setBuyoutPenalties(penaltyRows);
+        setRetentionAdjustments(adjustmentRows);
       })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "Unable to load dashboard."); })
       .finally(() => { if (active) setLoading(false); });
@@ -61,7 +64,8 @@ export default function LeagueDashboard() {
       const salarySpent = roster
         .filter((season) => capPositions.has(position(season)))
         .reduce((total, season) => total + (season.salary || 0), 0)
-        + buyoutPenalties.filter((penalty) => penalty.fantasy_team_id === team.id).reduce((total, penalty) => total + penalty.amount, 0);
+        + buyoutPenalties.filter((penalty) => penalty.fantasy_team_id === team.id).reduce((total, penalty) => total + penalty.amount, 0)
+        + retentionAdjustments.filter((adjustment) => adjustment.fantasy_team_id === team.id).reduce((total, adjustment) => total + adjustment.amount, 0);
       const counts = Object.fromEntries(Object.keys(positionMinimums).map((code) => [
         code,
         roster.filter((season) => position(season) === code).length,
@@ -74,7 +78,7 @@ export default function LeagueDashboard() {
         counts,
       };
     })
-    .sort((a, b) => a.team.id - b.team.id), [teams, seasons, salaryCap, buyoutPenalties]);
+    .sort((a, b) => a.team.id - b.team.id), [teams, seasons, salaryCap, buyoutPenalties, retentionAdjustments]);
 
   return <div>
     <PageMeta title="Great Lakes Dynasty Hockey League" description="GLDHL league roster and salary dashboard" />

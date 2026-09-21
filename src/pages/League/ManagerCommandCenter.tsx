@@ -4,6 +4,7 @@ import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
 import { fetchAuctions, type Auction } from "../../lib/auctions";
 import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
+import { fetchRetentionAdjustments, type RetentionAdjustment } from "../../lib/retentions";
 import { fetchPlayerSeasonsBySeason, fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { applyTeamBranding, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
@@ -76,6 +77,7 @@ export default function ManagerCommandCenter() {
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [previousSeasonPlayers, setPreviousSeasonPlayers] = useState<PlayerSeasonWithRelations[]>([]);
   const [penalties, setPenalties] = useState<BuyoutPenalty[]>([]);
+  const [retentionAdjustments, setRetentionAdjustments] = useState<RetentionAdjustment[]>([]);
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [offers, setOffers] = useState<TradeOffer[]>([]);
   const [interests, setInterests] = useState<PlayerTradeInterest[]>([]);
@@ -94,10 +96,11 @@ export default function ManagerCommandCenter() {
         if (!active) return;
         setAssignment(assigned);
         if (!assigned?.fantasy_team_id) return;
-        const [rosterRows, previousSeasonRows, penaltyRows, auctionRows, offerRows, interestRows, transactionRows, branding] = await Promise.all([
+        const [rosterRows, previousSeasonRows, penaltyRows, adjustmentRows, auctionRows, offerRows, interestRows, transactionRows, branding] = await Promise.all([
           fetchPlayerSeasonsByTeamAndSeason(assigned.fantasy_team_id, season),
           fetchPlayerSeasonsBySeason(season - 1).catch(() => []),
           fetchBuyoutPenalties(season, assigned.fantasy_team_id).catch(() => []),
+          fetchRetentionAdjustments(season, assigned.fantasy_team_id).catch(() => []),
           fetchAuctions(season).catch(() => []),
           fetchTradeOffers(season).catch(() => []),
           fetchPlayerTradeInterests(season).catch(() => []),
@@ -109,6 +112,7 @@ export default function ManagerCommandCenter() {
         setRoster(rosterRows);
         setPreviousSeasonPlayers(previousSeasonRows);
         setPenalties(penaltyRows);
+        setRetentionAdjustments(adjustmentRows);
         setAuctions(auctionRows);
         setOffers(offerRows);
         setInterests(interestRows);
@@ -126,7 +130,8 @@ export default function ManagerCommandCenter() {
   const teamId = assignment?.fantasy_team_id;
   const activeRoster = roster.filter((row) => activePositions.has(position(row)));
   const payroll = roster.filter((row) => capPositions.has(position(row))).reduce((sum, row) => sum + (row.salary || 0), 0)
-    + penalties.reduce((sum, row) => sum + row.amount, 0);
+    + penalties.reduce((sum, row) => sum + row.amount, 0)
+    + retentionAdjustments.reduce((sum, row) => sum + row.amount, 0);
   const capSpace = salaryCap(season) - payroll;
   const finalContractYear = roster.filter((row) => row.term_end_year === season && !["RFA", "PROSPECT", "AP"].includes(position(row)));
   const restrictedFreeAgents = roster.filter((row) => position(row) === "RFA").map((row) => {
