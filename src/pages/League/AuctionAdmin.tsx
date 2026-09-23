@@ -249,7 +249,7 @@ export default function AuctionAdmin() {
     }))
     .filter((group) => group.players.length)
     .sort((a, b) => a.team.team_name.localeCompare(b.team.team_name)), [nomineeOptions, teams]);
-  const ufaNomineeGroups = useMemo(() => positionOrder
+  const ufaNomineeGroups = useMemo(() => [...positionOrder, "Unassigned"]
     .map((position) => ({
       position,
       players: nomineeOptions.filter((option) => !option.fantasyTeam && option.position === position),

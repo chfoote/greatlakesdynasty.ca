@@ -59,6 +59,16 @@ function BidSnipeBadge({ seconds }: { seconds: number | null | undefined }) {
   return <span className="inline-flex rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white shadow-sm">🎯 Snipe · {seconds}s</span>;
 }
 
+function nextWinningAav(highBid: AuctionBid | undefined, years: number, minimum: number, increment: number) {
+  if (!highBid) return minimum;
+  const highTotal = highBid.aav * highBid.years;
+  // An equal total wins only when the new contract has a shorter term.
+  const requiredTotal = highTotal + (years < highBid.years ? 0 : 1);
+  const rawAav = Math.ceil(requiredTotal / years);
+  const amountAboveMinimum = Math.max(rawAav - minimum, 0);
+  return minimum + Math.ceil(amountAboveMinimum / increment) * increment;
+}
+
 function OpenBidLeaderboard({
   bids,
   endsAt,
@@ -491,7 +501,7 @@ export default function AuctionHouse() {
   const [skaters, setSkaters] = useState<Record<number, NhlSkaterRecord>>({});
   const [goalies, setGoalies] = useState<Record<number, NhlGoalieRecord>>({});
   const [bidForms, setBidForms] = useState<
-    Record<number, { aav: string; years: string }>
+    Record<number, { aav: string; years: string; aavTouched?: boolean }>
   >({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -688,14 +698,20 @@ export default function AuctionHouse() {
         if (auction.status !== "open" || auction.auction_type !== "ufa")
           continue;
         const high = [...auction.auction_bids].sort(compareAuctionBids)[0];
-        const suggestedAav = high
-          ? high.aav + (auction.bid_increment || 25_000)
-          : auction.minimum_aav || 500_000;
+        const minimum = auction.minimum_aav || 500_000;
+        const increment = auction.bid_increment || 25_000;
         const existing = next[auction.id];
-        if (!existing || Number(existing.aav) <= Number(high?.aav || 0)) {
+        if (!existing) {
+          const years = high?.years || 1;
           next[auction.id] = {
-            aav: String(suggestedAav),
-            years: String(high?.years || 1),
+            aav: String(nextWinningAav(high, years, minimum, increment)),
+            years: String(years),
+            aavTouched: false,
+          };
+        } else if (!existing.aavTouched) {
+          next[auction.id] = {
+            ...existing,
+            aav: String(nextWinningAav(high, Number(existing.years), minimum, increment)),
           };
         }
       }
@@ -867,6 +883,10 @@ export default function AuctionHouse() {
     setSuccess("");
     try {
       const submittedBid = await placeAuctionBid(a.id, Number(form.aav), Number(form.years));
+      setBidForms((current) => ({
+        ...current,
+        [a.id]: { ...form, aavTouched: true },
+      }));
       const seconds = submittedBid.submitted_seconds_remaining;
       setSuccess(seconds !== null && seconds !== undefined
         ? seconds <= 7
@@ -1076,10 +1096,12 @@ export default function AuctionHouse() {
                               a.qualifying_aav || 500_000,
                             )
                           : a.minimum_aav || 500_000;
-                      const suggestedAav =
-                        a.auction_type === "ufa" && high
-                          ? high.aav + increment
-                          : mine?.aav || minimum;
+                      const defaultYears = a.auction_type === "ufa" && high
+                        ? high.years
+                        : mine?.years || 1;
+                      const suggestedAav = a.auction_type === "ufa"
+                        ? nextWinningAav(high, defaultYears, minimum, increment)
+                        : mine?.aav || minimum;
                       const form = bidForms[a.id] || {
                         aav: String(suggestedAav),
                         years: String(
@@ -1250,9 +1272,9 @@ export default function AuctionHouse() {
                                 {a.auction_type === "ufa" && high ? (
                                   <p className="mt-1 text-xs text-gray-500">
                                     Suggested next bid:{" "}
-                                    {money.format(high.aav + increment)} for{" "}
-                                    {high.years} year
-                                    {high.years === 1 ? "" : "s"}
+                                    {money.format(nextWinningAav(high, Number(form.years), minimum, increment))} for{" "}
+                                    {form.years} year
+                                    {Number(form.years) === 1 ? "" : "s"}
                                   </p>
                                 ) : (
                                   <p className="mt-1 text-xs text-gray-500">
@@ -1270,7 +1292,7 @@ export default function AuctionHouse() {
                                   onChange={(e) =>
                                     setBidForms((v) => ({
                                       ...v,
-                                      [a.id]: { ...form, aav: e.target.value },
+                                      [a.id]: { ...form, aav: e.target.value, aavTouched: true },
                                     }))
                                   }
                                   className="mt-1 h-12 w-full rounded-lg border border-gray-300 px-3 text-base dark:border-gray-700 dark:bg-gray-950"
@@ -1284,13 +1306,18 @@ export default function AuctionHouse() {
                                 <select
                                   value={form.years}
                                   onChange={(e) =>
-                                    setBidForms((v) => ({
-                                      ...v,
-                                      [a.id]: {
-                                        ...form,
-                                        years: e.target.value,
-                                      },
-                                    }))
+                                    setBidForms((v) => {
+                                      const years = Number(e.target.value);
+                                      return {
+                                        ...v,
+                                        [a.id]: {
+                                          ...form,
+                                          years: e.target.value,
+                                          aav: String(a.auction_type === "ufa" ? nextWinningAav(high, years, minimum, increment) : mine?.aav || minimum),
+                                          aavTouched: false,
+                                        },
+                                      };
+                                    })
                                   }
                                   className="mt-1 h-12 w-full rounded-lg border border-gray-300 px-3 text-base dark:border-gray-700 dark:bg-gray-950"
                                 >
