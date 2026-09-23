@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -477,12 +477,14 @@ export default function AuctionHouse() {
   const [leagueTeams, setLeagueTeams] = useState<FantasyTeam[]>([]);
   const [activeTeamIds, setActiveTeamIds] = useState<Set<number>>(new Set());
   const [showLobby, setShowLobby] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(
-    () => localStorage.getItem("auction-house-sound") === "on",
-  );
+  // Browsers require audio to be unlocked by a user gesture on every page load,
+  // especially on iOS. Never show sound as enabled before that has happened.
+  const [soundEnabled, setSoundEnabled] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const knownActiveAuctionIds = useRef<Set<number> | null>(null);
+  const soundEnabledRef = useRef(false);
+  const auctionSoundSnapshot = useRef<Map<number, { status: Auction["status"]; bidSignature: string }> | null>(null);
   const lastCountdownTone = useRef("");
+  const completedSoundIds = useRef<Set<number>>(new Set());
   const [landings, setLandings] = useState<Record<number, NhlPlayerLanding>>(
     {},
   );
@@ -719,8 +721,8 @@ export default function AuctionHouse() {
   const history = auctions.filter((a) =>
     ["completed", "cancelled"].includes(a.status),
   );
-  function tone(frequency: number, duration = 0.09, delay = 0) {
-    if (!soundEnabled) return;
+  const tone = useCallback((frequency: number, duration = 0.09, delay = 0) => {
+    if (!soundEnabledRef.current) return;
     const context = audioContextRef.current;
     if (!context || context.state !== "running") return;
     const oscillator = context.createOscillator();
@@ -729,21 +731,39 @@ export default function AuctionHouse() {
     oscillator.type = "sine";
     oscillator.frequency.value = frequency;
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.08, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.16, start + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
     oscillator.connect(gain);
     gain.connect(context.destination);
     oscillator.start(start);
     oscillator.stop(start + duration + 0.02);
-  }
+  }, []);
+  const playCue = useCallback((cue: "nomination" | "bid" | "snipe" | "complete") => {
+    if (cue === "nomination") {
+      tone(523, 0.12);
+      tone(659, 0.12, 0.14);
+      tone(784, 0.18, 0.28);
+    } else if (cue === "bid") {
+      tone(700, 0.1);
+      tone(880, 0.12, 0.12);
+    } else if (cue === "snipe") {
+      tone(980, 0.08);
+      tone(760, 0.08, 0.1);
+      tone(980, 0.16, 0.2);
+    } else {
+      tone(784, 0.14);
+      tone(659, 0.14, 0.16);
+      tone(523, 0.28, 0.32);
+    }
+  }, [tone]);
   async function toggleSound() {
     const next = !soundEnabled;
     if (next) {
       const context = audioContextRef.current || new AudioContext();
       audioContextRef.current = context;
       await context.resume();
+      soundEnabledRef.current = true;
       setSoundEnabled(true);
-      localStorage.setItem("auction-house-sound", "on");
       window.setTimeout(() => {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
@@ -759,24 +779,45 @@ export default function AuctionHouse() {
         oscillator.stop(context.currentTime + 0.13);
       }, 0);
     } else {
+      soundEnabledRef.current = false;
       setSoundEnabled(false);
-      localStorage.setItem("auction-house-sound", "off");
     }
   }
   useEffect(() => {
-    const ids = new Set(
-      active.filter((a) => a.status === "open").map((a) => a.id),
-    );
-    if (knownActiveAuctionIds.current === null) {
-      knownActiveAuctionIds.current = ids;
+    const next = new Map(auctions.map((auction) => [auction.id, {
+      status: auction.status,
+      bidSignature: auction.auction_bids
+        .map((bid) => `${bid.id}:${bid.updated_at}:${bid.aav}:${bid.years}`)
+        .sort()
+        .join("|"),
+    }]));
+    const previous = auctionSoundSnapshot.current;
+    if (previous === null) {
+      auctionSoundSnapshot.current = next;
       return;
     }
-    if ([...ids].some((id) => !knownActiveAuctionIds.current?.has(id))) {
-      tone(660, 0.1);
-      tone(880, 0.14, 0.14);
+
+    for (const auction of auctions) {
+      const before = previous.get(auction.id);
+      if (!before && !["completed", "cancelled"].includes(auction.status)) {
+        playCue("nomination");
+        break;
+      }
+      if (!before) continue;
+      if (before.status === "open" && auction.status !== "open" && auction.status !== "cancelled" && !completedSoundIds.current.has(auction.id)) {
+        completedSoundIds.current.add(auction.id);
+        playCue("complete");
+        break;
+      }
+      const changedBid = before.bidSignature !== next.get(auction.id)?.bidSignature;
+      if (changedBid) {
+        const newestBid = [...auction.auction_bids].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+        playCue((newestBid?.submitted_seconds_remaining ?? Number.MAX_SAFE_INTEGER) <= 7 ? "snipe" : "bid");
+        break;
+      }
     }
-    knownActiveAuctionIds.current = ids;
-  }, [active, soundEnabled]);
+    auctionSoundSnapshot.current = next;
+  }, [auctions, playCue]);
   useEffect(() => {
     const auction = active.find((a) => a.status === "open" && !a.paused_at);
     if (!auction) return;
@@ -784,11 +825,16 @@ export default function AuctionHouse() {
       (new Date(auction.ends_at).getTime() - now) / 1000,
     );
     const key = `${auction.id}-${seconds}`;
+    if (seconds <= 0 && !completedSoundIds.current.has(auction.id)) {
+      completedSoundIds.current.add(auction.id);
+      playCue("complete");
+      return;
+    }
     if (seconds >= 1 && seconds <= 5 && lastCountdownTone.current !== key) {
       lastCountdownTone.current = key;
       tone(seconds === 1 ? 980 : 760, 0.075);
     }
-  }, [active, now, soundEnabled]);
+  }, [active, now, playCue, tone]);
   useEffect(
     () => () => {
       void audioContextRef.current?.close();
@@ -965,7 +1011,7 @@ export default function AuctionHouse() {
               <button
                 type="button"
                 onClick={() => void toggleSound()}
-                className={`${showLobby ? "block" : "hidden"} mt-3 w-full rounded-lg px-2 py-2 text-[10px] font-bold uppercase xl:block ${soundEnabled ? "bg-brand-500 text-white" : "border border-gray-300 text-gray-500 dark:border-gray-700"}`}
+                className={`mt-3 w-full rounded-lg px-2 py-2 text-[10px] font-bold uppercase ${soundEnabled ? "bg-brand-500 text-white" : "border border-gray-300 text-gray-500 dark:border-gray-700"}`}
               >
                 {soundEnabled ? "🔊 On" : "🔇 Sound"}
               </button>
