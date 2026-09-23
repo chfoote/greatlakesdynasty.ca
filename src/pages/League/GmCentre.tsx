@@ -23,6 +23,36 @@ function StatLeader({ label, manager, value }: { label: string; manager?: GmStat
   </div>;
 }
 
+function MobileManagerCard({ manager, allTime }: { manager: GmStats; allTime: boolean }) {
+  const team = manager.teams[0];
+  const stats = [
+    ["Moves", manager.totalMoves],
+    ["Trades", manager.trades],
+    ["Acquired", manager.playersAcquired],
+    ["Call-ups", manager.actions.called_up],
+    ["Claims", manager.actions.claimed],
+    ["Contracts", manager.contractsSigned],
+  ];
+
+  return <article className="p-4">
+    <Link to={`/gms/${manager.userId}`} className="flex items-center gap-3">
+      <span className="w-6 shrink-0 text-center text-xs font-black text-gray-400">#{team?.teamId}</span>
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+        {team?.logo ? <img src={team.logo} alt="" className="h-full w-full object-contain p-1" /> : <span className="text-xs font-black text-gray-500">{team?.abbreviation}</span>}
+      </span>
+      <span className="min-w-0 flex-1"><span className="block truncate font-black text-gray-900 dark:text-white">{manager.displayName}</span><span className="mt-0.5 block truncate text-xs text-gray-500">{team?.teamName}{allTime ? ` · ${formatSeasons(manager.seasons, team?.teamId)}` : ""}</span></span>
+      <span aria-hidden="true" className="text-xl text-gray-300">›</span>
+    </Link>
+    <dl className="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 dark:border-gray-700 dark:bg-gray-700">
+      {stats.map(([label, value]) => <div key={label} className="bg-gray-50 px-2 py-3 text-center dark:bg-gray-900"><dt className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</dt><dd className="mt-1 font-black text-gray-800 dark:text-gray-100">{value}</dd></div>)}
+    </dl>
+    <dl className="mt-3 grid grid-cols-2 gap-3">
+      <div><dt className="text-[10px] font-bold uppercase tracking-wide text-gray-400">AAV committed</dt><dd className="mt-1 text-sm font-bold text-gray-700 dark:text-gray-300">{money.format(manager.totalAavCommitted)}</dd></div>
+      <div className="text-right"><dt className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Total value</dt><dd className="mt-1 text-sm font-black text-brand-600 dark:text-brand-300">{money.format(manager.totalContractValue)}</dd></div>
+    </dl>
+  </article>;
+}
+
 export default function GmCentre() {
   const [assignments, setAssignments] = useState<TeamUserAssignmentWithTeam[]>([]);
   const [transactions, setTransactions] = useState<LeagueTransaction[]>([]);
@@ -73,7 +103,8 @@ export default function GmCentre() {
 
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><h2 className="text-xl font-black text-gray-900 dark:text-white">Manager records</h2><p className="mt-1 text-sm text-gray-500">Activity totals are calculated from official league records.</p></div>
-        <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-white/[0.03]"><tr>{["GM", "Moves", "Trades", "Acquired", "Call-ups", "Claims", "Buyouts", "Contracts", "AAV committed", "Total value"].map((label) => <th key={label} className={`whitespace-nowrap px-4 py-3 font-bold ${label === "GM" ? "text-left" : "text-center"}`}>{label}</th>)}</tr></thead>
+        <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">{managersByTeam.map((gm) => <MobileManagerCard key={gm.userId} manager={gm} allTime={season === "all"} />)}</div>
+        <div className="hidden overflow-x-auto md:block"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500 dark:bg-white/[0.03]"><tr>{["GM", "Moves", "Trades", "Acquired", "Call-ups", "Claims", "Buyouts", "Contracts", "AAV committed", "Total value"].map((label) => <th key={label} className={`whitespace-nowrap px-4 py-3 font-bold ${label === "GM" ? "text-left" : "text-center"}`}>{label}</th>)}</tr></thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{managersByTeam.map((gm) => { const currentTeam = gm.teams[0]; return <tr key={gm.userId} className="transition hover:bg-gray-50 dark:hover:bg-white/[0.03]"><td className="px-4 py-4"><Link to={`/gms/${gm.userId}`} className="flex min-w-56 items-center gap-3"><span className="w-6 shrink-0 text-center text-xs font-black text-gray-400">#{currentTeam?.teamId}</span><div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">{currentTeam?.logo ? <img src={currentTeam.logo} alt="" className="h-full w-full object-contain p-1" /> : <span className="text-xs font-black text-gray-500">{currentTeam?.abbreviation}</span>}</div><div><p className="font-bold text-gray-900 hover:text-brand-500 dark:text-white">{gm.displayName}</p><p className="text-xs text-gray-400">{season === "all" ? `${currentTeam?.teamName} · ${formatSeasons(gm.seasons, currentTeam?.teamId)}` : currentTeam?.teamName}</p></div></Link></td>
             {[gm.totalMoves, gm.trades, gm.playersAcquired, gm.actions.called_up, gm.actions.claimed, gm.actions.bought_out, gm.contractsSigned].map((value, index) => <td key={index} className="px-4 py-4 text-center font-semibold text-gray-700 dark:text-gray-300">{value}</td>)}<td className="whitespace-nowrap px-4 py-4 text-center font-semibold text-gray-700 dark:text-gray-300">{money.format(gm.totalAavCommitted)}</td><td className="whitespace-nowrap px-4 py-4 text-center font-bold text-brand-600 dark:text-brand-300">{money.format(gm.totalContractValue)}</td></tr>; })}</tbody>
         </table></div>

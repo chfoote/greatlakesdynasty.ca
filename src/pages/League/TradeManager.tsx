@@ -577,7 +577,7 @@ function TeamColumn({
         </select>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900">
           <p className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">
             Going Out
@@ -604,7 +604,7 @@ function TeamColumn({
         </div>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <ComplianceItem label="Salary Cap" value={formatCurrency(salaryCap)} />
         <ComplianceItem
           label="Salary Spent"
@@ -1454,7 +1454,8 @@ export default function TradeManager() {
           )}
         </div>
 
-        <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="flex flex-col gap-6">
+        <section className="order-2 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
@@ -1569,7 +1570,7 @@ export default function TradeManager() {
             placeholder="Example: Team 1 also receives non-rostered prospect Roman Anthony."
             className="mt-3 min-h-28 w-full resize-y rounded-lg border border-gray-300 bg-transparent px-4 py-3 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
           />
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="sticky bottom-2 z-20 mt-4 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur sm:static sm:flex-row sm:items-center sm:justify-between sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none dark:border-gray-700 dark:bg-gray-900/95 sm:dark:bg-transparent">
             <p className="text-xs text-gray-500 dark:text-gray-400">
               {isAdmin
                 ? "Admin Trade submits an agreed deal to Trade Admin. Players move only after final approval."
@@ -1601,7 +1602,7 @@ export default function TradeManager() {
           </div>
         </section>
 
-        <div className={`grid gap-6 ${threeTeamMode ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
+        <div className={`order-1 grid gap-6 ${threeTeamMode ? "xl:grid-cols-3" : "xl:grid-cols-2"}`}>
           <TeamColumn
             label="Team 1"
             teams={teams}
@@ -1687,6 +1688,7 @@ export default function TradeManager() {
               onDestinationChange={setDestination}
             />
           )}
+        </div>
         </div>
       </div>
     </>

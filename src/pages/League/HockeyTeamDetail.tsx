@@ -104,6 +104,15 @@ function PlayerName({ season, nhlTeam, awards = [], onTradeBlock = false, intere
   </div>;
 }
 
+function MobileRosterCard({ season, nhlTeam, awards, onTradeBlock, interestAction, details }: { season: PlayerSeasonWithRelations; nhlTeam?: string; awards: PlayerAward[]; onTradeBlock: boolean; interestAction?: React.ReactNode; details: Array<[string, React.ReactNode]> }) {
+  return <article className="p-3">
+    <PlayerName season={season} nhlTeam={nhlTeam} awards={awards} onTradeBlock={onTradeBlock} interestAction={interestAction} />
+    <dl className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-gray-50 p-2 dark:bg-white/[0.03]">
+      {details.map(([label, value]) => <div key={label} className="min-w-0 text-center"><dt className="truncate text-[9px] font-bold uppercase tracking-wide text-gray-400">{label}</dt><dd className="mt-1 truncate text-xs font-semibold text-gray-700 dark:text-gray-200">{value}</dd></div>)}
+    </dl>
+  </article>;
+}
+
 function PayrollCard({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
   return <div className={`rounded-lg border p-4 ${danger ? "border-error-200 bg-error-50 dark:border-error-500/30 dark:bg-error-500/10" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"}`}>
     <p className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">{label}</p>
@@ -219,7 +228,8 @@ function TrophyCase({
 function SkaterTable({ code, label, players, stats, awardsByPlayer, tradeBlockIds, renderInterest }: { code: string; label: string; players: PlayerSeasonWithRelations[]; stats: Map<string, NhlSkaterRecord>; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   const rows = [...players].sort((a, b) => getSkaterScore(stats.get(playerApiId(b)) || emptySkater) - getSkaterScore(stats.get(playerApiId(a)) || emptySkater));
   return <RosterSection code={code} label={label} count={players.length}>
-    <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
+    <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">{rows.length ? rows.map((season) => { const record = stats.get(playerApiId(season)); const score = record ? getSkaterScore(record) : 0; return <MobileRosterCard key={season.id} season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} details={[["GP", record?.gamesPlayed ?? "—"], ["G", record?.goals ?? "—"], ["A", record?.assists ?? "—"], ["Score", record ? formatFantasyPoints(score) : "—"]]} />; }) : <p className="p-4 text-center text-sm text-gray-500">No players.</p>}</div>
+    <table className="hidden min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800 md:table">
       <thead><tr className="text-center font-semibold uppercase text-gray-500 dark:text-gray-400">
         {['Player','Pos','G','A','+/-','PIMs','PPG','PPA','SHG','SHA','GWG','S','B','H','FOW','Score','PPG'].map((heading, index) => <th key={`${heading}-${index}`} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
       </tr></thead>
@@ -244,7 +254,8 @@ function SkaterTable({ code, label, players, stats, awardsByPlayer, tradeBlockId
 function GoalieTable({ players, stats, awardsByPlayer, tradeBlockIds, renderInterest }: { players: PlayerSeasonWithRelations[]; stats: Map<string, NhlGoalieRecord>; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   const rows = [...players].sort((a, b) => getGoalieScore(stats.get(playerApiId(b)) || emptyGoalie) - getGoalieScore(stats.get(playerApiId(a)) || emptyGoalie));
   return <RosterSection code="G" label="Goalies" count={players.length}>
-    <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
+    <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">{rows.length ? rows.map((season) => { const record = stats.get(playerApiId(season)); const score = record ? getGoalieScore(record) : 0; return <MobileRosterCard key={season.id} season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} details={[["GP", record?.gamesPlayed ?? "—"], ["W", record?.wins ?? "—"], ["SV%", record?.savePct?.toFixed(3) ?? "—"], ["Score", record ? formatFantasyPoints(score) : "—"]]} />; }) : <p className="p-4 text-center text-sm text-gray-500">No players.</p>}</div>
+    <table className="hidden min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800 md:table">
       <thead><tr className="text-center font-semibold uppercase text-gray-500 dark:text-gray-400">
         {['Player','Pos','GP','GS','W','L','OTL','GA','SV','SO','PIMs','G','A','SV%','GAA','Score','PPG'].map((heading, index) => <th key={heading} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
       </tr></thead>
@@ -270,7 +281,8 @@ function GoalieTable({ players, stats, awardsByPlayer, tradeBlockIds, renderInte
 
 function CompactTable({ code, label, players, skaters, goalies, note, awardsByPlayer, tradeBlockIds, renderInterest }: { code: string; label: string; players: PlayerSeasonWithRelations[]; skaters: Map<string, NhlSkaterRecord>; goalies: Map<string, NhlGoalieRecord>; note: string; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   return <RosterSection code={code} label={label} count={players.length} note={note}>
-    <table className="min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800">
+    <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">{players.length ? players.map((season) => { const skater = skaters.get(playerApiId(season)); const goalie = goalies.get(playerApiId(season)); const nhlTeam = skater?.teamAbbrevs || goalie?.teamAbbrevs; return <MobileRosterCard key={season.id} season={season} nhlTeam={nhlTeam} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} details={[["NHL", nhlTeam || "—"], ["Pos", goalie ? "G" : nhlSkaterPosition(skater?.positionCode)], ["Salary", season.salary == null ? "—" : money.format(season.salary)], ["Term", season.term_end_year || "—"]]} />; }) : <p className="p-4 text-center text-sm text-gray-500">No players.</p>}</div>
+    <table className="hidden min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800 md:table">
       <thead><tr className="text-left font-semibold uppercase text-gray-500 dark:text-gray-400">
         {['Name','Team','Pos','Salary','Term'].map((heading) => <th key={heading} className="px-2 py-2">{heading}</th>)}
       </tr></thead>

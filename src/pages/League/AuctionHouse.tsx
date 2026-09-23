@@ -254,7 +254,7 @@ function nhlSeasonId(year: number) {
   return (year - 1) * 10000 + year;
 }
 function height(value?: number) {
-  return value ? `${Math.floor(value / 12)}' ${value % 12}\"` : "—";
+  return value ? `${Math.floor(value / 12)}' ${value % 12}"` : "—";
 }
 function birthday(value?: string) {
   return value
@@ -476,6 +476,7 @@ export default function AuctionHouse() {
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [leagueTeams, setLeagueTeams] = useState<FantasyTeam[]>([]);
   const [activeTeamIds, setActiveTeamIds] = useState<Set<number>>(new Set());
+  const [showLobby, setShowLobby] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(
     () => localStorage.getItem("auction-house-sound") === "on",
   );
@@ -914,7 +915,7 @@ export default function AuctionHouse() {
         ) : (
           <div className="grid gap-6 xl:grid-cols-[92px_minmax(0,1fr)] xl:items-start">
             <section className="rounded-2xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] xl:sticky xl:top-4">
-              <div className="mb-3 flex items-center justify-between gap-2 xl:flex-col">
+              <div className="flex items-center justify-between gap-2 xl:mb-3 xl:flex-col">
                 <div className="min-w-0">
                   <h2 className="text-sm font-semibold text-gray-900 dark:text-white xl:text-center">
                     Lobby
@@ -927,8 +928,9 @@ export default function AuctionHouse() {
                 <span className="whitespace-nowrap rounded-full bg-success-50 px-2 py-1 text-[10px] font-bold text-success-700">
                   {activeTeamIds.size}/{leagueTeams.length}
                 </span>
+                <button type="button" onClick={() => setShowLobby((current) => !current)} aria-expanded={showLobby} className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-[10px] font-bold uppercase text-gray-600 dark:border-gray-700 dark:text-gray-300 xl:hidden">{showLobby ? "Hide" : "View"}</button>
               </div>
-              <div className="grid grid-cols-5 gap-2 sm:grid-cols-10 xl:grid-cols-1">
+              <div className={`${showLobby ? "grid" : "hidden"} mt-3 grid-cols-5 gap-2 sm:grid-cols-10 xl:mt-0 xl:grid xl:grid-cols-1`}>
                 {leagueTeams.map((team) => {
                   const online = activeTeamIds.has(team.id);
                   return (
@@ -963,20 +965,20 @@ export default function AuctionHouse() {
               <button
                 type="button"
                 onClick={() => void toggleSound()}
-                className={`mt-3 w-full rounded-lg px-2 py-2 text-[10px] font-bold uppercase ${soundEnabled ? "bg-brand-500 text-white" : "border border-gray-300 text-gray-500 dark:border-gray-700"}`}
+                className={`${showLobby ? "block" : "hidden"} mt-3 w-full rounded-lg px-2 py-2 text-[10px] font-bold uppercase xl:block ${soundEnabled ? "bg-brand-500 text-white" : "border border-gray-300 text-gray-500 dark:border-gray-700"}`}
               >
                 {soundEnabled ? "🔊 On" : "🔇 Sound"}
               </button>
             </section>
             <div className="min-w-0 space-y-6">
-              <section className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="col-span-2 rounded-xl border border-gray-200 bg-white p-3 sm:col-span-1 sm:p-4">
                   <p className="text-xs uppercase text-gray-500">Your Team</p>
                   <p className="mt-1 font-semibold">
                     {assignment.fantasy_team?.team_name}
                   </p>
                 </div>
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
                   <p className="text-xs uppercase text-gray-500">
                     Cap Space After Active Bids
                   </p>
@@ -988,7 +990,7 @@ export default function AuctionHouse() {
                     </p>
                   )}
                 </div>
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4">
                   <p className="text-xs uppercase text-gray-500">
                     Available After Roster Reserve
                   </p>
@@ -1114,6 +1116,12 @@ export default function AuctionHouse() {
                               </div>
                             </div>
                           </div>
+                          <AuctionPlayerCard
+                            auction={a}
+                            landing={landings[apiId]}
+                            skater={skaters[apiId]}
+                            goalie={goalies[apiId]}
+                          />
                           {a.status === "awaiting_qualification" && (
                             <div className="p-5">
                               <h4 className="font-semibold">
@@ -1146,8 +1154,8 @@ export default function AuctionHouse() {
                             </div>
                           )}
                           {a.status === "open" && (
-                            <div className="grid gap-5 p-5 lg:grid-cols-[1fr_320px]">
-                              <div>
+                            <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[1fr_320px]">
+                              <div className="order-2 lg:order-1">
                                 <h4 className="font-semibold">
                                   {a.auction_type === "ufa"
                                     ? "Open bidding"
@@ -1189,7 +1197,7 @@ export default function AuctionHouse() {
                                   </div>
                                 )}
                               </div>
-                              <div className="rounded-xl border border-gray-200 p-4">
+                              <div className="order-1 rounded-xl border-2 border-brand-200 bg-white p-4 shadow-sm dark:border-brand-500/30 dark:bg-gray-900 lg:order-2">
                                 <h4 className="font-semibold">
                                   {mine ? "Update Bid" : "Place Bid"}
                                 </h4>
@@ -1219,7 +1227,7 @@ export default function AuctionHouse() {
                                       [a.id]: { ...form, aav: e.target.value },
                                     }))
                                   }
-                                  className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3"
+                                  className="mt-1 h-12 w-full rounded-lg border border-gray-300 px-3 text-base dark:border-gray-700 dark:bg-gray-950"
                                 />
                                 <p className="mt-1 text-[11px] text-gray-400">
                                   {money.format(increment)} increments
@@ -1238,7 +1246,7 @@ export default function AuctionHouse() {
                                       },
                                     }))
                                   }
-                                  className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3"
+                                  className="mt-1 h-12 w-full rounded-lg border border-gray-300 px-3 text-base dark:border-gray-700 dark:bg-gray-950"
                                 >
                                   {[1, 2, 3, 4, 5].map((y) => (
                                     <option key={y}>{y}</option>
@@ -1282,7 +1290,7 @@ export default function AuctionHouse() {
                                     Number(form.aav) > auctionBudget
                                   }
                                   onClick={() => void bid(a)}
-                                  className="mt-3 w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                                  className="mt-3 h-12 w-full rounded-lg bg-brand-500 px-4 text-base font-bold text-white shadow-theme-sm disabled:opacity-50"
                                 >
                                   {busy === `bid-${a.id}`
                                     ? "Submitting…"
@@ -1327,12 +1335,6 @@ export default function AuctionHouse() {
                               )}
                             </div>
                           )}
-                          <AuctionPlayerCard
-                            auction={a}
-                            landing={landings[apiId]}
-                            skater={skaters[apiId]}
-                            goalie={goalies[apiId]}
-                          />
                         </article>
                       );
                     })}

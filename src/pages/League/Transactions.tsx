@@ -297,6 +297,7 @@ export default function Transactions() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState("all");
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
+  const [showFilters, setShowFilters] = useState(false);
 
   async function handleDeleteTransaction(transaction: LeagueTransaction) {
     if (transaction.trade_offer_id) return;
@@ -355,13 +356,16 @@ export default function Transactions() {
     <div>
       <PageMeta title="Great Lakes Dynasty Hockey League" description="Great Lakes Dynasty Hockey League transactions" />
       <PageBreadcrumb pageTitle="Transactions" />
-      <div className="min-h-screen rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:px-10 xl:py-12">
-        <div className="mb-6">
+      <div className="min-h-screen rounded-2xl border border-gray-200 bg-white px-4 py-6 dark:border-gray-800 dark:bg-white/[0.03] sm:px-5 sm:py-7 xl:px-10 xl:py-12">
+        <div className="mb-4 flex items-start justify-between gap-3 sm:mb-6">
+          <div>
           <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">Transactions</h3>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Official GLDHL signings and player transactions.</p>
+          </div>
+          {!loading && !error && transactions.length > 0 && <button type="button" onClick={() => setShowFilters((current) => !current)} aria-expanded={showFilters} className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-xs font-bold text-gray-600 dark:border-gray-700 dark:text-gray-300 md:hidden">{showFilters ? "Hide filters" : `Filters${typeFilter !== "all" || selectedTeamIds.size ? ` (${(typeFilter !== "all" ? 1 : 0) + selectedTeamIds.size})` : ""}`}</button>}
         </div>
 
-        {!loading && !error && transactions.length > 0 && <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+        {!loading && !error && transactions.length > 0 && <div className={`${showFilters ? "block" : "hidden"} mb-6 rounded-xl border border-gray-200 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-white/[0.03] md:block`}>
           <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)_auto] md:items-end">
             <div>
               <label htmlFor="transaction-type" className="mb-1.5 block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Transaction Type</label>
@@ -402,7 +406,7 @@ export default function Transactions() {
                 />
                 {transaction.trade_offer_id ? (
                   <div>
-                    <div className="flex flex-col items-start gap-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
                         Trade
                       </span>
@@ -415,10 +419,10 @@ export default function Transactions() {
                       <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:bg-white/[0.03] dark:text-gray-400">{transaction.notes}</p>
                     )}
                   </div>
-                ) : <div className="flex items-start gap-4">
+                ) : <div className="flex items-start gap-3 sm:gap-4">
                   <Link
                     to={transaction.fantasy_team?.id ? `/teams/${transaction.fantasy_team.id}` : "/teams"}
-                    className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-50 shadow-theme-xs transition hover:border-brand-300 hover:shadow-theme-sm dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-gray-50 shadow-theme-xs transition hover:border-brand-300 hover:shadow-theme-sm dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500 sm:h-14 sm:w-14"
                     title={transaction.fantasy_team?.team_name || "View teams"}
                   >
                     {transaction.fantasy_team?.logo ? (
@@ -435,7 +439,7 @@ export default function Transactions() {
                   </Link>
 
                   <div className="min-w-0 flex-1">
-                    <div className="mb-2 flex flex-col items-start gap-1">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <span className="rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
                         {getActionLabel(transaction)}
                       </span>
