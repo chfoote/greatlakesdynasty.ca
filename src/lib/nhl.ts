@@ -131,6 +131,105 @@ export type NhlPlayerSearchResult = {
   active?: boolean;
 };
 
+type NhlScoreGame = { id: number; gameState: string; startTimeUTC?: string };
+type NhlScoreResponse = { games?: NhlScoreGame[] };
+type NhlBoxscorePlayer = { playerId?: number; position?: string; goals?: number; assists?: number; plusMinus?: number; pim?: number; hits?: number; powerPlayGoals?: number; sog?: number; blockedShots?: number; toi?: string; goalsAgainst?: number; saves?: number; savePctg?: number };
+type NhlBoxscoreTeamPlayers = { forwards?: NhlBoxscorePlayer[]; defense?: NhlBoxscorePlayer[]; goalies?: NhlBoxscorePlayer[] };
+type NhlBoxscoreResponse = { awayTeam?: { abbrev?: string }; homeTeam?: { abbrev?: string }; playerByGameStats?: { awayTeam?: NhlBoxscoreTeamPlayers; homeTeam?: NhlBoxscoreTeamPlayers } };
+
+export function getNhlStatsDate(dayOffset = 0) {
+  // The GLDHL stat day rolls over at 6:00 a.m. Eastern so late West Coast
+  // games remain part of the date on which they started.
+  const shifted = new Date(Date.now() - 6 * 60 * 60 * 1000 + dayOffset * 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(shifted);
+}
+
+async function fetchScoreboard(date = getNhlStatsDate()) {
+  const response = await fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Unable to load today's NHL games (${response.status})`);
+  return response.json() as Promise<NhlScoreResponse>;
+}
+
+async function fetchGameBoxscore(gameId: number) {
+  const response = await fetch(`/nhl-web-api/gamecenter/${gameId}/boxscore`, { cache: "no-store" });
+  if (!response.ok) return null;
+  return response.json() as Promise<NhlBoxscoreResponse>;
+}
+
+export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
+  // Avoid /score/now: the NHL responds with an absolute redirect which can
+  // escape our same-origin proxy and be blocked by the browser. NHL game dates
+  // are published in Eastern time, so request that date directly.
+  const scoreboard = await fetchScoreboard();
+  const now = Date.now();
+  const liveGames = (scoreboard.games ?? []).filter((game) =>
+    ["LIVE", "CRIT"].includes(game.gameState)
+    // During preseason the scoreboard can remain PRE briefly after puck drop.
+    // The box score below is the final authority on whether players are active.
+    || (game.gameState === "PRE" && Boolean(game.startTimeUTC) && new Date(game.startTimeUTC!).getTime() <= now),
+  );
+  if (!liveGames.length) return new Set();
+
+  const boxscores = await Promise.all(liveGames.map(async (game) => {
+    return fetchGameBoxscore(game.id);
+  }));
+  const ids = new Set<string>();
+  boxscores.forEach((boxscore) => {
+    if (!boxscore?.playerByGameStats) return;
+    [boxscore.playerByGameStats.awayTeam, boxscore.playerByGameStats.homeTeam].forEach((team) => {
+      [...(team?.forwards ?? []), ...(team?.defense ?? []), ...(team?.goalies ?? [])].forEach((player) => {
+        if (player.playerId) ids.add(String(player.playerId));
+      });
+    });
+  });
+  return ids;
+}
+
+export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }> {
+  const scoreboard = await fetchScoreboard(date);
+  const now = Date.now();
+  const games = (scoreboard.games ?? []).filter((game) =>
+    ["LIVE", "CRIT", "OFF", "FINAL"].includes(game.gameState)
+    || (game.gameState === "PRE" && Boolean(game.startTimeUTC) && new Date(game.startTimeUTC!).getTime() <= now),
+  );
+  const boxscores = (await Promise.all(games.map((game) => fetchGameBoxscore(game.id)))).filter((boxscore): boxscore is NhlBoxscoreResponse => boxscore !== null);
+  const skaters = new Map<number, NhlSkaterRecord>();
+  const goalies = new Map<number, NhlGoalieRecord>();
+
+  boxscores.forEach((boxscore) => {
+    const sides = [
+      [boxscore.playerByGameStats?.awayTeam, boxscore.awayTeam?.abbrev || ""],
+      [boxscore.playerByGameStats?.homeTeam, boxscore.homeTeam?.abbrev || ""],
+    ] as const;
+    sides.forEach(([team, teamAbbrev]) => {
+      [...(team?.forwards ?? []), ...(team?.defense ?? [])].forEach((player) => {
+        if (!player.playerId) return;
+        const current = skaters.get(player.playerId);
+        const gamesPlayed = player.toi && player.toi !== "00:00" ? 1 : 0;
+        skaters.set(player.playerId, {
+          playerId: player.playerId, skaterFullName: "", positionCode: player.position || "", teamAbbrevs: teamAbbrev,
+          gamesPlayed: (current?.gamesPlayed || 0) + gamesPlayed, goals: (current?.goals || 0) + (player.goals || 0), assists: (current?.assists || 0) + (player.assists || 0),
+          plusMinus: (current?.plusMinus || 0) + (player.plusMinus || 0), penaltyMinutes: (current?.penaltyMinutes || 0) + (player.pim || 0), ppGoals: (current?.ppGoals || 0) + (player.powerPlayGoals || 0),
+          ppPoints: (current?.ppPoints || 0) + (player.powerPlayGoals || 0), shGoals: current?.shGoals || 0, shPoints: current?.shPoints || 0, gameWinningGoals: current?.gameWinningGoals || 0,
+          shots: (current?.shots || 0) + (player.sog || 0), blockedShots: (current?.blockedShots || 0) + (player.blockedShots || 0), hits: (current?.hits || 0) + (player.hits || 0), totalFaceoffWins: current?.totalFaceoffWins || 0,
+        });
+      });
+      (team?.goalies ?? []).forEach((player) => {
+        if (!player.playerId) return;
+        const current = goalies.get(player.playerId);
+        const gamesPlayed = player.toi && player.toi !== "00:00" ? 1 : 0;
+        goalies.set(player.playerId, {
+          playerId: player.playerId, goalieFullName: "", teamAbbrevs: teamAbbrev, gamesPlayed: (current?.gamesPlayed || 0) + gamesPlayed, gamesStarted: current?.gamesStarted || 0,
+          wins: current?.wins || 0, losses: current?.losses || 0, otLosses: current?.otLosses || 0, goalsAgainst: (current?.goalsAgainst || 0) + (player.goalsAgainst || 0),
+          saves: (current?.saves || 0) + (player.saves || 0), shutouts: current?.shutouts || 0, penaltyMinutes: current?.penaltyMinutes || 0, goals: current?.goals || 0, assists: current?.assists || 0,
+          savePct: player.savePctg ?? current?.savePct ?? null, goalsAgainstAverage: null,
+        });
+      });
+    });
+  });
+  return { skaters: [...skaters.values()], goalies: [...goalies.values()] };
+}
+
 export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
   const response = await fetch(`/nhl-web-api/player/${playerId}/landing`);
   if (!response.ok) throw new Error(`Unable to load NHL player profile (${response.status})`);
