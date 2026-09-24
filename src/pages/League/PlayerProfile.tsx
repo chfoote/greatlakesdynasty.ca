@@ -11,6 +11,7 @@ import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import { TradeTransactionDetails } from "./Transactions";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import PlayerInterestButton from "./PlayerInterestButton";
+import { fetchPlayerLeadership } from "../../lib/teamLeadership";
 
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
@@ -74,6 +75,7 @@ export default function PlayerProfile() {
   const [statsSeason, setStatsSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const tradeInterest = usePlayerTradeInterest(CURRENT_LEAGUE_SEASON);
 
   useEffect(() => {
@@ -93,6 +95,7 @@ export default function PlayerProfile() {
           fetchPlayerAwards(), fetchLeagueTransactions(), fetchTeamBrandingHistory(),
         ]);
         const playerSeasons = playerRow ? await fetchPlayerSeasonsByPlayer(playerRow.id) : [];
+        const leadershipRows = await fetchPlayerLeadership(playerSeasons.map((season) => season.id)).catch(() => []);
         const brandedSeasons = playerSeasons.map((season) => ({ ...season, fantasy_team: season.fantasy_team ? applyTeamBranding(season.fantasy_team, branding, season.season_year) : null }));
         const currentSkater = currentSkaters.find((row) => row.playerId === apiId);
         const currentGoalie = currentGoalies.find((row) => row.playerId === apiId);
@@ -100,6 +103,7 @@ export default function PlayerProfile() {
         const previousGoalie = previousGoalies.find((row) => row.playerId === apiId);
         if (!active) return;
         setLanding(landingRow); setFantasyPlayer(playerRow); setSeasons(brandedSeasons);
+        setLeadershipByPlayerSeason(new Map(leadershipRows.map((row) => [row.player_season_id, row.slot === "C" ? "C" as const : "A" as const])));
         setSkater(currentSkater || previousSkater || null); setGoalie(currentGoalie || previousGoalie || null);
         setStatsSeason(currentSkater || currentGoalie ? CURRENT_LEAGUE_SEASON : CURRENT_LEAGUE_SEASON - 1);
         setAwards(playerRow ? allAwards.filter((award) => award.player_id === playerRow.id) : []);
@@ -122,7 +126,7 @@ export default function PlayerProfile() {
       {!loading && !error && landing && <>
         <section className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
           {landing.heroImage && <img src={landing.heroImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-10" />}
-          <div className="relative p-5 sm:p-7"><div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-center gap-5"><div className="h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">{landing.headshot ? <img src={landing.headshot} alt={`${name} headshot`} className="h-full w-full object-cover" /> : null}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">{name}</h1>{landing.sweaterNumber != null && <span className="rounded-full bg-gray-100 px-2.5 py-1 text-sm font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">#{landing.sweaterNumber}</span>}{currentSeason && tradeInterest.canExpressInterest(currentSeason) && <PlayerInterestButton showLabel interested={tradeInterest.isInterested(currentSeason.id)} busy={tradeInterest.busyPlayerSeasonId === currentSeason.id} onClick={() => void tradeInterest.toggleInterest(currentSeason)} />}</div><p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{position} · {landing.fullTeamName?.default || landing.currentTeamAbbrev || "NHL Team Unassigned"}</p>{tradeInterest.error && <p className="mt-2 text-xs font-medium text-error-600">{tradeInterest.error}</p>}</div></div>
+          <div className="relative p-5 sm:p-7"><div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-center gap-5"><div className="h-28 w-28 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">{landing.headshot ? <img src={landing.headshot} alt={`${name} headshot`} className="h-full w-full object-cover" /> : null}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">{name}</h1>{currentSeason && leadershipByPlayerSeason.get(currentSeason.id) && <span className={`inline-flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-black ring-1 ${leadershipByPlayerSeason.get(currentSeason.id) === "C" ? "bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300" : "bg-sky-100 text-sky-800 ring-sky-300 dark:bg-sky-500/15 dark:text-sky-300"}`}>{leadershipByPlayerSeason.get(currentSeason.id)}</span>}{landing.sweaterNumber != null && <span className="rounded-full bg-gray-100 px-2.5 py-1 text-sm font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">#{landing.sweaterNumber}</span>}{currentSeason && tradeInterest.canExpressInterest(currentSeason) && <PlayerInterestButton showLabel interested={tradeInterest.isInterested(currentSeason.id)} busy={tradeInterest.busyPlayerSeasonId === currentSeason.id} onClick={() => void tradeInterest.toggleInterest(currentSeason)} />}</div><p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{position} · {landing.fullTeamName?.default || landing.currentTeamAbbrev || "NHL Team Unassigned"}</p>{tradeInterest.error && <p className="mt-2 text-xs font-medium text-error-600">{tradeInterest.error}</p>}</div></div>
             <div className="grid gap-3 sm:grid-cols-2 lg:w-[430px]"><InfoCard label="Current GLDHL Team" value={currentSeason?.fantasy_team ? <Link to={`/teams/${currentSeason.fantasy_team.id}`} className="flex items-center gap-2 text-brand-500 hover:underline">{currentSeason.fantasy_team.logo && <img src={currentSeason.fantasy_team.logo} alt="" className="h-7 w-7 rounded object-contain" />}{currentSeason.fantasy_team.team_name}</Link> : "Not Owned"} /><InfoCard label="Current Contract" value={currentSeason ? `${currentSeason.salary == null ? "No salary" : money.format(currentSeason.salary)} · ${currentSeason.term_end_year || currentSeason.position || "No term"}` : "—"} /><InfoCard label="Birthday" value={landing.birthDate ? `${formatDate(landing.birthDate)} (${ageOn(landing.birthDate)})` : "—"} /><InfoCard label="Shoots / Catches" value={landing.shootsCatches || "—"} /></div></div></div>
         </section>
 

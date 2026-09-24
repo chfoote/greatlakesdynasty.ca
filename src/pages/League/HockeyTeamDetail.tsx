@@ -266,10 +266,10 @@ function SkaterTable({ code, label, players, stats, awardsByPlayer, tradeBlockId
   </RosterSection>;
 }
 
-function GoalieTable({ players, stats, awardsByPlayer, tradeBlockIds, livePlayerIds, renderInterest }: { players: PlayerSeasonWithRelations[]; stats: Map<string, NhlGoalieRecord>; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; livePlayerIds: Set<string>; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
+function GoalieTable({ players, stats, awardsByPlayer, tradeBlockIds, livePlayerIds, leadershipByPlayer, renderInterest }: { players: PlayerSeasonWithRelations[]; stats: Map<string, NhlGoalieRecord>; awardsByPlayer: Map<number, PlayerAward[]>; tradeBlockIds: Set<number>; livePlayerIds: Set<string>; leadershipByPlayer: Map<number, "C" | "A">; renderInterest: (season: PlayerSeasonWithRelations) => React.ReactNode }) {
   const rows = [...players].sort((a, b) => getGoalieScore(stats.get(playerApiId(b)) || emptyGoalie) - getGoalieScore(stats.get(playerApiId(a)) || emptyGoalie));
   return <RosterSection code="G" label="Goalies" count={players.length}>
-    <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">{rows.length ? rows.map((season) => { const record = stats.get(playerApiId(season)); const score = record ? getGoalieScore(record) : 0; return <MobileRosterCard key={season.id} season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} isLive={livePlayerIds.has(playerApiId(season))} details={[["GP", record?.gamesPlayed ?? "—"], ["W", record?.wins ?? "—"], ["SV%", record?.savePct?.toFixed(3) ?? "—"], ["Score", record ? formatFantasyPoints(score) : "—"]]} />; }) : <p className="p-4 text-center text-sm text-gray-500">No players.</p>}</div>
+    <div className="divide-y divide-gray-100 dark:divide-gray-800 md:hidden">{rows.length ? rows.map((season) => { const record = stats.get(playerApiId(season)); const score = record ? getGoalieScore(record) : 0; return <MobileRosterCard key={season.id} season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} isLive={livePlayerIds.has(playerApiId(season))} leadershipRole={leadershipByPlayer.get(season.id)} details={[["GP", record?.gamesPlayed ?? "—"], ["W", record?.wins ?? "—"], ["SV%", record?.savePct?.toFixed(3) ?? "—"], ["Score", record ? formatFantasyPoints(score) : "—"]]} />; }) : <p className="p-4 text-center text-sm text-gray-500">No players.</p>}</div>
     <table className="hidden min-w-full divide-y divide-gray-100 text-xs dark:divide-gray-800 md:table">
       <thead><tr className="text-center font-semibold uppercase text-gray-500 dark:text-gray-400">
         {['Player','Pos','GP','GS','W','L','OTL','GA','SV','SO','PIMs','G','A','SV%','GAA','Score','PPG'].map((heading, index) => <th key={heading} className={`whitespace-nowrap px-2 py-2 ${index === 0 ? "text-left" : ""}`}>{heading}</th>)}
@@ -280,7 +280,7 @@ function GoalieTable({ players, stats, awardsByPlayer, tradeBlockIds, livePlayer
           const score = record ? getGoalieScore(record) : 0;
           const values = record ? [record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists] : Array(11).fill(null);
           return <tr key={season.id} className="text-center text-gray-600 dark:text-gray-300">
-            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} isLive={livePlayerIds.has(playerApiId(season))} /></td>
+            <td className="px-2 py-2"><PlayerName season={season} nhlTeam={record?.teamAbbrevs} awards={season.player?.id ? awardsByPlayer.get(season.player.id) || [] : []} onTradeBlock={tradeBlockIds.has(season.id)} interestAction={renderInterest(season)} isLive={livePlayerIds.has(playerApiId(season))} leadershipRole={leadershipByPlayer.get(season.id)} /></td>
             <td className="px-2 py-2">G</td>
             {values.map((value, index) => <td key={index} className="px-2 py-2">{formatNhlStat(value)}</td>)}
             <td className="px-2 py-2">{record?.savePct == null ? "—" : record.savePct.toFixed(3)}</td>
@@ -342,12 +342,14 @@ function MultiYearView({
   skaters,
   goalies,
   awardsByPlayer,
+  leadershipByPlayer,
 }: {
   years: number[];
   rosters: Record<number, PlayerSeasonWithRelations[]>;
   skaters: Map<string, NhlSkaterRecord>;
   goalies: Map<string, NhlGoalieRecord>;
   awardsByPlayer: Map<number, PlayerAward[]>;
+  leadershipByPlayer: Map<number, "C" | "A">;
 }) {
   const summaries = years.map((year) => {
     const rows = rosters[year] || [];
@@ -400,7 +402,7 @@ function MultiYearView({
             <td className="px-3 py-3">{apiPosition}</td>
             {years.map((year) => {
               const row = seasons.get(year);
-              return <td key={year} className="whitespace-nowrap px-3 py-3 font-medium text-gray-800 dark:text-white/90">{row?.salary == null ? "—" : money.format(row.salary)}</td>;
+              return <td key={year} className="whitespace-nowrap px-3 py-3 font-medium text-gray-800 dark:text-white/90">{row?.salary == null ? "—" : money.format(row.salary)}{row && <LeadershipBadge role={leadershipByPlayer.get(row.id)} />}</td>;
             })}
             <td className="px-3 py-3 font-semibold text-gray-800 dark:text-white/90">{skater || goalie ? formatFantasyPoints(score) : "—"}</td>
             <td className="px-3 py-3">{gamesPlayed ? formatFantasyPoints(score / gamesPlayed) : "—"}</td>
@@ -426,7 +428,7 @@ const emptySkater: NhlSkaterRecord = { playerId: 0, skaterFullName: "", position
 const emptyGoalie: NhlGoalieRecord = { playerId: 0, goalieFullName: "", teamAbbrevs: "", gamesPlayed: 0, gamesStarted: 0, wins: 0, losses: 0, otLosses: 0, goalsAgainst: 0, saves: 0, shutouts: 0, penaltyMinutes: 0, goals: 0, assists: 0, savePct: null, goalsAgainstAverage: null };
 
 function TeamLeadershipEditor({ roster, leadership, disabled, onChange }: { roster: PlayerSeasonWithRelations[]; leadership: TeamLeadership[]; disabled: boolean; onChange: (slot: LeadershipSlot, playerSeasonId: number | null) => void }) {
-  const eligible = roster.filter((season) => ["C", "LW", "RW", "D"].includes(position(season))).sort((a, b) => playerName(a).localeCompare(playerName(b)));
+  const eligible = roster.filter((season) => ["C", "LW", "RW", "D", "G"].includes(position(season))).sort((a, b) => playerName(a).localeCompare(playerName(b)));
   const selected = new Map(leadership.map((entry) => [entry.slot, entry.player_season_id]));
   const slots: Array<[LeadershipSlot, string]> = [["C", "Captain"], ["A1", "Alternate Captain 1"], ["A2", "Alternate Captain 2"]];
   return <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/[0.06]">
@@ -458,6 +460,7 @@ export default function HockeyTeamDetail() {
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
   const [multiYearRosters, setMultiYearRosters] = useState<Record<number, PlayerSeasonWithRelations[]>>({});
+  const [multiYearLeadership, setMultiYearLeadership] = useState<Map<number, "C" | "A">>(new Map());
   const [skaters, setSkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalies, setGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
   const [statsView, setStatsView] = useState<"season" | "today" | "yesterday">("season");
@@ -587,9 +590,13 @@ export default function HockeyTeamDetail() {
 
   useEffect(() => {
     if (!team || viewMode !== "multi") return;
-    Promise.all(multiYearSeasons.map(async (year) => [year, await fetchPlayerSeasonsByTeamAndSeason(team.id, year)] as const))
+    Promise.all(multiYearSeasons.map(async (year) => {
+      const [players, leaders] = await Promise.all([fetchPlayerSeasonsByTeamAndSeason(team.id, year), fetchTeamLeadership(team.id, year)]);
+      return { year, players, leaders };
+    }))
       .then((results) => {
-        setMultiYearRosters(Object.fromEntries(results));
+        setMultiYearRosters(Object.fromEntries(results.map(({ year, players }) => [year, players])));
+        setMultiYearLeadership(new Map(results.flatMap(({ leaders }) => leaders.map((entry) => [entry.player_season_id, entry.slot === "C" ? "C" as const : "A" as const] as const))));
         setError("");
       })
       .catch((err: Error) => setError(err.message));
@@ -686,8 +693,8 @@ export default function HockeyTeamDetail() {
           {leadershipError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Team leadership: {leadershipError}</div>}
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
-          {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} skaters={skaters} goalies={goalies} awardsByPlayer={awardsByPlayer} /> : <div className="mt-5 space-y-4">
-            {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={displayedGoalies} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={displayedSkaters} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} />)}
+          {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} skaters={skaters} goalies={goalies} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : <div className="mt-5 space-y-4">
+            {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={displayedGoalies} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={displayedSkaters} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} />)}
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Non-Rostered Players</h3><div className="space-y-4">{nonRosterSections.map((section) => <CompactTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} skaters={displayedSkaters} goalies={displayedGoalies} note={section.cap ? "Counts toward cap only" : "Excluded from cap and roster"} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} renderInterest={renderInterest} />)}</div></div>
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Buyout Penalties</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Dead cap charges</span><span className="text-xs text-gray-500">Counts toward cap · no roster spot</span></div>{buyoutPenalties.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{buyoutPenalties.map((penalty) => <tr key={penalty.id}><td className="px-3 py-3 font-semibold">{penalty.player?.full_name || "Player buyout"}</td><td className="px-3 py-3 text-center">{penalty.season_year}</td><td className="px-3 py-3 text-right font-black text-error-600">{money.format(penalty.amount)}</td></tr>)}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">No buyout penalties this season.</p>}</div></div>
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Salary Retention</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Retention charges and relief</span><span className="text-xs text-gray-500">Net adjustment: {money.format(retentionNet)}</span></div>{retentionAdjustments.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{retentionAdjustments.map((adjustment) => { const counterpart = adjustment.adjustment_type === "charge" ? adjustment.retention?.receiving_team : adjustment.retention?.retaining_team; return <tr key={adjustment.id}><td className="px-3 py-3 font-semibold">{adjustment.player?.full_name || "Retained contract"}</td><td className="px-3 py-3 text-center capitalize">{adjustment.adjustment_type}{counterpart ? ` · ${counterpart.abbreviation}` : ""}</td><td className={`px-3 py-3 text-right font-black ${adjustment.amount > 0 ? "text-error-600" : "text-success-600"}`}>{adjustment.amount > 0 ? "+" : "−"}{money.format(Math.abs(adjustment.amount))}</td></tr>; })}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">No retention adjustments this season.</p>}</div></div>

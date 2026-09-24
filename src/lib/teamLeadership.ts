@@ -23,6 +23,25 @@ export async function fetchTeamLeadership(teamId: number, seasonYear: number) {
   return (data ?? []) as TeamLeadership[];
 }
 
+export async function fetchSeasonLeadership(seasonYear: number) {
+  const { data, error } = await supabase
+    .from("team_leadership")
+    .select("*")
+    .eq("season_year", seasonYear);
+  if (error) throw error;
+  return (data ?? []) as TeamLeadership[];
+}
+
+export async function fetchPlayerLeadership(playerSeasonIds: number[]) {
+  if (!playerSeasonIds.length) return [];
+  const { data, error } = await supabase
+    .from("team_leadership")
+    .select("*")
+    .in("player_season_id", playerSeasonIds);
+  if (error) throw error;
+  return (data ?? []) as TeamLeadership[];
+}
+
 export async function setTeamLeadershipSlot({
   teamId,
   seasonYear,

@@ -77,6 +77,12 @@ const tradeOfferSelect = `
   )
 `;
 
+function wakeTradeEmailWorker() {
+  void supabase.functions.invoke("trade-emails", { body: { batch_size: 10 } }).catch(() => {
+    // Delivery remains queued if the provider is temporarily unavailable.
+  });
+}
+
 export async function fetchTradeOffers(seasonYear: number) {
   const { data, error } = await supabase
     .from("trade_offers")
@@ -162,6 +168,7 @@ export async function createTradeOffer({
     .single();
 
   if (error) throw error;
+  wakeTradeEmailWorker();
   return data as TradeOffer;
 }
 
@@ -255,6 +262,7 @@ export async function updateTradeOfferStatus({
     .single();
 
   if (error) throw error;
+  if (status === "accepted") wakeTradeEmailWorker();
   return data as TradeOffer;
 }
 
