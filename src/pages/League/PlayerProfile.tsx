@@ -12,6 +12,7 @@ import { TradeTransactionDetails } from "./Transactions";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import PlayerInterestButton from "./PlayerInterestButton";
 import { fetchPlayerLeadership } from "../../lib/teamLeadership";
+import { fetchRecordBookData, type ScoringLeader } from "../../lib/recordBook";
 
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
@@ -63,6 +64,19 @@ function PlayerTrophyCase({ awards }: { awards: PlayerAward[] }) {
   return <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Trophy Case</h2><div className="inline-flex rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setView("seasonal")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${view === "seasonal" ? "bg-amber-500 text-white" : "text-gray-500"}`}>Seasonal Awards</button><button type="button" onClick={() => setView("monthly")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${view === "monthly" ? "bg-amber-500 text-white" : "text-gray-500"}`}>Monthly Honours</button></div></div>{visible.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{visible.map((assignment) => <div key={assignment.id} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">{assignment.award?.image_url ? <img src={assignment.award.image_url} alt={assignment.award.name} className="h-12 w-12 object-contain" /> : <span className="text-3xl">{assignment.is_monthly ? icon(assignment) : "🏆"}</span>}<div><p className="font-semibold text-amber-900 dark:text-amber-200">{assignment.award?.name || "Award"}</p><p className="text-xs text-amber-700 dark:text-amber-300">{assignment.is_monthly && assignment.month_index !== undefined ? `${honourMonths[assignment.month_index]} · ` : ""}Season {assignment.season_year}</p></div></div>)}</div> : <p className="mt-4 text-sm text-gray-500">{view === "monthly" ? "No monthly honours yet." : "No seasonal awards yet."}</p>}</section>;
 }
 
+function FranchiseScoringHistory({ rows }: { rows: ScoringLeader[] }) {
+  const ordered = [...rows].sort((a, b) => b.fantasyPoints - a.fantasyPoints);
+  const total = ordered.reduce((sum, row) => sum + row.fantasyPoints, 0);
+  return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">GLDHL Ownership History</p><h2 className="text-lg font-black text-gray-900 dark:text-white">Points by Franchise</h2><p className="mt-1 text-xs text-gray-500">Fantasy production is credited to the franchise that owned the player when it was earned.</p></div>{ordered.length > 0 && <p className="text-sm font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(total)} career FPTS</p>}</div>
+    {ordered.length ? <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">{ordered.map((row) => {
+      const current = row.team && row.currentTeam && row.team.id === row.currentTeam.id && row.team.team_name === row.currentTeam.team_name;
+      const firstSeason = row.seasons[0]; const lastSeason = row.seasons[row.seasons.length - 1];
+      return <article key={row.key} className="relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/70"><div className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: row.team?.primary_color || "#465fff" }} /><div className="flex items-center gap-3">{row.team?.logo && <Link to={`/teams/${row.team.id}`} className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1 ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700"><img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /></Link>}<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Link to={row.team ? `/teams/${row.team.id}` : "#"} className="truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{row.team?.team_name || "Unknown Franchise"}</Link>{current && <span className="rounded-full bg-success-100 px-2 py-0.5 text-[9px] font-black uppercase text-success-700 dark:bg-success-500/15 dark:text-success-300">Current</span>}</div><p className="mt-1 text-xs text-gray-500">{firstSeason === lastSeason ? firstSeason : `${firstSeason}–${lastSeason}`} · {row.gamesPlayed} GP</p></div></div><p className="mt-4 text-2xl font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(row.fantasyPoints)} <span className="text-[10px] font-black uppercase text-gray-400">FPTS</span></p></article>;
+    })}</div> : <p className="p-5 text-sm text-gray-500">No franchise-attributed scoring has been recorded yet.</p>}
+  </section>;
+}
+
 export default function PlayerProfile() {
   const playerApiId = new URLSearchParams(useLocation().search).get("playerId") || "";
   const [landing, setLanding] = useState<NhlPlayerLanding | null>(null);
@@ -76,6 +90,7 @@ export default function PlayerProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
+  const [franchiseScoring, setFranchiseScoring] = useState<ScoringLeader[]>([]);
   const tradeInterest = usePlayerTradeInterest(CURRENT_LEAGUE_SEASON);
 
   useEffect(() => {
@@ -85,14 +100,14 @@ export default function PlayerProfile() {
     async function load() {
       setLoading(true); setError("");
       try {
-        const [landingRow, playerRow, currentSkaters, currentGoalies, previousSkaters, previousGoalies, allAwards, allTransactions, branding] = await Promise.all([
+        const [landingRow, playerRow, currentSkaters, currentGoalies, previousSkaters, previousGoalies, allAwards, allTransactions, branding, recordBook] = await Promise.all([
           fetchNhlPlayerLanding(apiId),
           fetchFantasyPlayerByApiId(playerApiId),
           fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON)).catch(() => []),
           fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON)).catch(() => []),
           fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
           fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
-          fetchPlayerAwards(), fetchLeagueTransactions(), fetchTeamBrandingHistory(),
+          fetchPlayerAwards(), fetchLeagueTransactions(), fetchTeamBrandingHistory(), fetchRecordBookData().catch(() => null),
         ]);
         const playerSeasons = playerRow ? await fetchPlayerSeasonsByPlayer(playerRow.id) : [];
         const leadershipRows = await fetchPlayerLeadership(playerSeasons.map((season) => season.id)).catch(() => []);
@@ -108,6 +123,7 @@ export default function PlayerProfile() {
         setStatsSeason(currentSkater || currentGoalie ? CURRENT_LEAGUE_SEASON : CURRENT_LEAGUE_SEASON - 1);
         setAwards(playerRow ? allAwards.filter((award) => award.player_id === playerRow.id) : []);
         setTransactions(playerRow ? allTransactions.filter((transaction) => transaction.player_id === playerRow.id || transaction.trade_offer?.trade_offer_players.some((move) => move.player_season?.player_id === playerRow.id)).sort((a,b) => b.transaction_date.localeCompare(a.transaction_date) || b.created_at.localeCompare(a.created_at)) : []);
+        setFranchiseScoring(recordBook?.franchisePositionLeaders.filter((row) => row.playerId === playerApiId) || []);
       } catch (err) { if (active) setError(err instanceof Error ? err.message : "Unable to load player profile."); }
       finally { if (active) setLoading(false); }
     }
@@ -133,6 +149,8 @@ export default function PlayerProfile() {
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><InfoCard label="NHL Team" value={<span className="flex items-center gap-2">{landing.teamLogo && <img src={landing.teamLogo} alt="" className="h-7 w-7 object-contain" />}{landing.fullTeamName?.default || landing.currentTeamAbbrev || "—"}</span>} /><InfoCard label="Position / Number" value={`${position}${landing.sweaterNumber != null ? ` · #${landing.sweaterNumber}` : ""}`} /><InfoCard label="Birthplace" value={[landing.birthCity?.default, landing.birthStateProvince?.default, landing.birthCountry].filter(Boolean).join(", ") || "—"} /><InfoCard label="Draft" value={draft ? `${draft.year || "—"} ${draft.teamAbbrev || ""} · Round ${draft.round || "—"} · Pick ${draft.pickInRound || "—"}${draft.overallPick ? ` (${draft.overallPick} overall)` : ""}` : "Undrafted"} /></section>
 
         {skater ? <SkaterStats record={skater} season={statsSeason} /> : goalie ? <GoalieStats record={goalie} season={statsSeason} /> : <div className="rounded-xl border border-dashed border-gray-300 p-6 text-sm text-gray-500">No current or previous-season NHL stats were returned.</div>}
+
+        <FranchiseScoringHistory rows={franchiseScoring} />
 
         <PlayerTrophyCase awards={awards} />
 

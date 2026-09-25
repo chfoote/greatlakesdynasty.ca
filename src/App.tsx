@@ -47,6 +47,7 @@ import PowerRankings from "./pages/League/PowerRankings";
 import GmCentre from "./pages/League/GmCentre";
 import GmProfile from "./pages/League/GmProfile";
 import GmTradeNetwork from "./pages/League/GmTradeNetwork";
+import RecordBook from "./pages/League/RecordBook";
 
 export default function App() {
   return (
@@ -57,6 +58,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route path="/teams" element={<Teams />} />
             <Route path="/teams/:abbreviation/farm-systems" element={<FarmSystems />} />
+            <Route path="/teams/:abbreviation/records" element={<RecordBook />} />
             <Route path="/teams/:abbreviation" element={<HockeyTeamDetail />} />
 
             {/* Protected Dashboard Layout — requires login */}
@@ -81,6 +83,7 @@ export default function App() {
               <Route path="/auction-house" element={<AuctionHouse />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/power-rankings" element={<PowerRankings />} />
+              <Route path="/record-book" element={<RecordBook />} />
               <Route path="/gms" element={<GmCentre />} />
               <Route path="/gm-trade-network" element={<GmTradeNetwork />} />
               <Route path="/gms/:managerId" element={<GmProfile />} />

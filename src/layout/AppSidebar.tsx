@@ -71,6 +71,11 @@ const leaguePulseItems: NavItem[] = [
     path: "/awards",
   },
   {
+    icon: <ReportIcon />,
+    name: "League Record Book",
+    path: "/record-book",
+  },
+  {
     icon: <TransactionsIcon />,
     name: "Transactions",
     path: "/transactions",
