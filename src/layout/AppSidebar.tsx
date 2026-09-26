@@ -94,6 +94,11 @@ const gmToolItems: NavItem[] = [
     path: "/gms",
   },
   {
+    icon: <ReportIcon />,
+    name: "CBA & Rulebook",
+    path: "/cba",
+  },
+  {
     icon: <AuctionIcon />,
     name: "Auction House",
     path: "/auction-house",

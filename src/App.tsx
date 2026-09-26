@@ -48,6 +48,7 @@ import GmCentre from "./pages/League/GmCentre";
 import GmProfile from "./pages/League/GmProfile";
 import GmTradeNetwork from "./pages/League/GmTradeNetwork";
 import RecordBook from "./pages/League/RecordBook";
+import Rulebook from "./pages/League/Rulebook";
 
 export default function App() {
   return (
@@ -84,6 +85,7 @@ export default function App() {
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/power-rankings" element={<PowerRankings />} />
               <Route path="/record-book" element={<RecordBook />} />
+              <Route path="/cba" element={<Rulebook />} />
               <Route path="/gms" element={<GmCentre />} />
               <Route path="/gm-trade-network" element={<GmTradeNetwork />} />
               <Route path="/gms/:managerId" element={<GmProfile />} />
