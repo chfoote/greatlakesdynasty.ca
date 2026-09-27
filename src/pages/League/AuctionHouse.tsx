@@ -52,7 +52,12 @@ const money = new Intl.NumberFormat("en-CA", {
 });
 const requiredRoster = { C: 3, LW: 3, RW: 3, D: 6, G: 2 } as const;
 const minimumSalaryPerOpening = 750_000;
+const allowedAuctionYears = [1, 2, 3, 5] as const;
 type RosterPosition = keyof typeof requiredRoster;
+
+function allowedAuctionTerm(years: number | undefined) {
+  return allowedAuctionYears.includes(years as (typeof allowedAuctionYears)[number]) ? years! : 1;
+}
 
 function BidSnipeBadge({ seconds }: { seconds: number | null | undefined }) {
   if (seconds === null || seconds === undefined || seconds > 7) return null;
@@ -702,7 +707,7 @@ export default function AuctionHouse() {
         const increment = auction.bid_increment || 25_000;
         const existing = next[auction.id];
         if (!existing) {
-          const years = high?.years || 1;
+          const years = allowedAuctionTerm(high?.years);
           next[auction.id] = {
             aav: String(nextWinningAav(high, years, minimum, increment)),
             years: String(years),
@@ -1096,9 +1101,9 @@ export default function AuctionHouse() {
                               a.qualifying_aav || 500_000,
                             )
                           : a.minimum_aav || 500_000;
-                      const defaultYears = a.auction_type === "ufa" && high
+                      const defaultYears = allowedAuctionTerm(a.auction_type === "ufa" && high
                         ? high.years
-                        : mine?.years || 1;
+                        : mine?.years);
                       const suggestedAav = a.auction_type === "ufa"
                         ? nextWinningAav(high, defaultYears, minimum, increment)
                         : mine?.aav || minimum;
@@ -1106,8 +1111,8 @@ export default function AuctionHouse() {
                         aav: String(suggestedAav),
                         years: String(
                           a.auction_type === "ufa" && high
-                            ? high.years
-                            : mine?.years || 1,
+                            ? allowedAuctionTerm(high.years)
+                            : allowedAuctionTerm(mine?.years),
                         ),
                       };
                       const auctionPosition = a.roster_position.toUpperCase() as RosterPosition;
@@ -1321,7 +1326,7 @@ export default function AuctionHouse() {
                                   }
                                   className="mt-1 h-12 w-full rounded-lg border border-gray-300 px-3 text-base dark:border-gray-700 dark:bg-gray-950"
                                 >
-                                  {[1, 2, 3, 4, 5].map((y) => (
+                                  {allowedAuctionYears.map((y) => (
                                     <option key={y}>{y}</option>
                                   ))}
                                 </select>
