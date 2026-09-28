@@ -99,6 +99,11 @@ const gmToolItems: NavItem[] = [
     path: "/cba",
   },
   {
+    icon: <AwardsIcon />,
+    name: "Competitive Balance Draft",
+    path: "/competitive-balance-draft",
+  },
+  {
     icon: <AuctionIcon />,
     name: "Auction House",
     path: "/auction-house",
