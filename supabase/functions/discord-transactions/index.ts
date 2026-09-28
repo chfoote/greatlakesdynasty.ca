@@ -102,6 +102,7 @@ function actionLabel(action: string) {
     long_term_injured_reserve: "Long Term Injured Reserve",
     released_to_rfa_offer: "RFA Offer",
     matched_rfa_offer: "RFA Offer Matched",
+    competitive_balance_drafted: "Competitive Balance Draft Selection",
     traded: "Trade Acquisition",
   } as Record<string, string>)[action] || "Transaction";
 }
@@ -109,7 +110,7 @@ function actionLabel(action: string) {
 function actionSentence(transaction: Transaction) {
   const team = transaction.fantasy_team?.team_name || "Unknown team";
   const name = playerName(transaction.player);
-  const position = transaction.position ? `${transaction.position.toUpperCase()} ` : "";
+  const position = transaction.action === "competitive_balance_drafted" ? "prospect " : transaction.position ? `${transaction.position.toUpperCase()} ` : "";
   const phrases: Record<string, [string, string]> = {
     signed: ["have signed", ""],
     called_up: ["have called up", ""],
@@ -121,6 +122,7 @@ function actionSentence(transaction: Transaction) {
     long_term_injured_reserve: ["have assigned", " to Long Term Injured Reserve"],
     released_to_rfa_offer: ["have released", " to an RFA offer"],
     matched_rfa_offer: ["have matched an RFA offer for", ""],
+    competitive_balance_drafted: ["have selected", " in the Competitive Balance Draft"],
     traded: ["have acquired", " via trade"],
   };
   const [verb, suffix] = phrases[transaction.action] || ["have updated", ""];
@@ -305,4 +307,3 @@ Deno.serve(async (request) => {
 
   return Response.json(results);
 });
-

@@ -17,6 +17,7 @@ const transactionTypeOptions = [
   { value: "long_term_injured_reserve", label: "Long Term Injured Reserve" },
   { value: "released_to_rfa_offer", label: "Released to RFA Offer" },
   { value: "matched_rfa_offer", label: "Matched RFA Offer" },
+  { value: "competitive_balance_drafted", label: "Competitive Balance Draft" },
   { value: "traded", label: "Acquired via Trade" },
 ] as const;
 
@@ -63,6 +64,7 @@ function getTransactionSentence(transaction: LeagueTransaction, fallbackPosition
     long_term_injured_reserve: `${team} have assigned`,
     released_to_rfa_offer: `${team} have released`,
     matched_rfa_offer: `${team} have matched an RFA offer for`,
+    competitive_balance_drafted: `${team} have selected`,
     traded: `${team} have acquired`,
   };
   const suffixes = {
@@ -76,6 +78,7 @@ function getTransactionSentence(transaction: LeagueTransaction, fallbackPosition
     long_term_injured_reserve: " to Long Term Injured Reserve",
     released_to_rfa_offer: " to an RFA offer",
     matched_rfa_offer: "",
+    competitive_balance_drafted: " in the Competitive Balance Draft",
     traded: " via trade",
   };
   const contractYears = transaction.term_end_year
@@ -91,7 +94,7 @@ function getTransactionSentence(transaction: LeagueTransaction, fallbackPosition
 
   return {
     prefix: prefixes[transaction.action] || `${team} have updated`,
-    position: transaction.action === "traded" && position === "PROSPECT" ? "prospect" : position,
+    position: transaction.action === "competitive_balance_drafted" ? "prospect" : transaction.action === "traded" && position === "PROSPECT" ? "prospect" : position,
     suffix: `${suffixes[transaction.action] || ""}${signingTerms}.`,
     contractDetail: showsContractTerms && contractValue !== null
       ? `Contract value is ${money.format(contractValue)}.`
@@ -112,6 +115,7 @@ function getActionLabel(transaction: LeagueTransaction) {
     long_term_injured_reserve: "Long Term IR",
     released_to_rfa_offer: "RFA Offer",
     matched_rfa_offer: "RFA Matched",
+    competitive_balance_drafted: "Competitive Balance Draft",
     traded: "Traded",
   }[transaction.action] || "Transaction";
 }

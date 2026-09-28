@@ -15,6 +15,7 @@ export type CompetitiveBalancePick = {
   position: string | null;
   nhl_team: string | null;
   selected_at: string | null;
+  transaction_id: number | null;
   team: FantasyTeam;
   player: FantasyPlayer | null;
 };

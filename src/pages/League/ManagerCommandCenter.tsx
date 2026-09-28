@@ -48,7 +48,7 @@ function transactionLabel(transaction: LeagueTransaction) {
     signed: `${name} signed`, called_up: `${name} called up`, waived: `${name} waived`,
     claimed: `${name} claimed`, bought_out: `${name} bought out`, retained: `${name} retained`,
     injured_reserve: `${name} placed on IR`, long_term_injured_reserve: `${name} placed on LTIR`,
-    released_to_rfa_offer: `${name} released to RFA offer`, matched_rfa_offer: `${name} RFA offer matched`,
+    released_to_rfa_offer: `${name} released to RFA offer`, matched_rfa_offer: `${name} RFA offer matched`, competitive_balance_drafted: `${name} selected in Competitive Balance Draft`,
     traded: `${name} acquired`,
   };
   return labels[transaction.action] || `${name} updated`;

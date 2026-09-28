@@ -37,6 +37,7 @@ export type GmStats = {
 const actionKeys: GmActionKey[] = [
   "signed", "called_up", "waived", "claimed", "bought_out", "retained",
   "injured_reserve", "long_term_injured_reserve", "released_to_rfa_offer", "matched_rfa_offer",
+  "competitive_balance_drafted",
 ];
 
 function emptyActions() {

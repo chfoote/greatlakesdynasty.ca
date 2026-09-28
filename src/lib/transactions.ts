@@ -29,6 +29,7 @@ export type TransactionAction =
   | "long_term_injured_reserve"
   | "released_to_rfa_offer"
   | "matched_rfa_offer"
+  | "competitive_balance_drafted"
   | "traded";
 
 export type LeagueTransaction = {
@@ -36,7 +37,7 @@ export type LeagueTransaction = {
   player_season_id: number | null;
   player_id: number | null;
   fantasy_team_id: number | null;
-  transaction_type: "signing" | "extension" | "trade" | "waiver" | "release";
+  transaction_type: "signing" | "extension" | "trade" | "waiver" | "release" | "draft";
   action: TransactionAction;
   transaction_date: string;
   season_year: number;
