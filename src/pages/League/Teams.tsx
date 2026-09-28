@@ -51,8 +51,36 @@ export default function Teams() {
         )}
 
         {!loading && !error && teams.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {teams.map((team) => (
+          <>
+            <nav
+              aria-label="Quick team navigation"
+              className="mb-6 grid grid-cols-5 gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900/60 sm:grid-cols-10 sm:gap-3"
+            >
+              {teams.map((team) => (
+                <Link
+                  key={`quick-team-${team.id}`}
+                  to={`/teams/${team.id}`}
+                  title={team.team_name}
+                  aria-label={`View ${team.team_name}`}
+                  className="group mx-auto flex aspect-square w-full max-w-16 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1.5 shadow-theme-xs transition hover:-translate-y-0.5 hover:border-brand-400 hover:shadow-theme-md focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-brand-500"
+                >
+                  {team.logo ? (
+                    <img
+                      src={team.logo}
+                      alt=""
+                      className="h-full w-full object-contain transition group-hover:scale-105"
+                    />
+                  ) : (
+                    <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">
+                      {team.abbreviation}
+                    </span>
+                  )}
+                </Link>
+              ))}
+            </nav>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {teams.map((team) => (
               <Link
                 key={team.id}
                 to={`/teams/${team.id}`}
@@ -115,8 +143,9 @@ export default function Teams() {
                   </div>
                 )}
               </Link>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>

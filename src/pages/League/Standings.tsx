@@ -149,7 +149,7 @@ export default function Standings() {
   const [skaterStats, setSkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalieStats, setGoalieStats] = useState<Map<string, NhlGoalieRecord>>(new Map());
   const [showHeatMap, setShowHeatMap] = useState(false);
-  const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set(["C", "LW", "RW", "D", "G"]));
+  const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -280,12 +280,15 @@ export default function Standings() {
       />
       <PageBreadcrumb pageTitle="Standings" />
 
-      <div className="rounded-2xl border border-gray-200 bg-white px-2 py-4 dark:border-gray-800 dark:bg-white/[0.03] sm:px-3 xl:px-4">
+      <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 dark:border-gray-800 dark:bg-white/[0.03] sm:px-6 sm:py-6">
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90">
-              Standings
+              {selectedSeason} League Standings
             </h3>
+            <p className="mt-1 max-w-xl text-sm text-gray-500 dark:text-gray-400">
+              Ranked by total fantasy points from each team&apos;s scoring lineup.
+            </p>
           </div>
 
           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end lg:w-auto">
@@ -340,7 +343,47 @@ export default function Standings() {
         )}
 
         {!loading && !error && standings.length > 0 && (
-          <div className="overflow-x-auto">
+          <>
+          <div className="space-y-3 md:hidden">
+            {standings.map((row) => (
+              <Link
+                key={`mobile-${row.team.id}`}
+                to={`/teams/${row.team.id}?season=${selectedSeason}`}
+                className={`block overflow-hidden rounded-2xl border bg-white shadow-theme-xs transition active:scale-[0.99] dark:bg-gray-900 ${row.rank === 1 ? "border-amber-300 ring-1 ring-amber-100 dark:border-amber-500/60 dark:ring-amber-500/10" : "border-gray-200 dark:border-gray-800"}`}
+              >
+                <div className="flex items-center gap-3 p-4">
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-black ${podiumRankClass(row.rank)}`}>
+                    {row.rank}
+                  </span>
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-800">
+                    {row.team.logo ? <img src={row.team.logo} alt="" className="h-full w-full object-contain" /> : <span className="text-xs font-bold text-gray-500">{row.team.abbreviation}</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-gray-900 dark:text-white">{row.team.team_name}</p>
+                    <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-gray-400">{row.team.abbreviation}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-black tabular-nums text-gray-900 dark:text-white">{formatPoints(row.points)}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">FPTS</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-5 border-t border-gray-100 bg-gray-50/80 dark:border-gray-800 dark:bg-white/[0.025]">
+                  {positionGroups.map((group) => (
+                    <div key={group.position} className={`px-1 py-3 text-center ${showHeatMap ? heatMapClass(groupScore(row, group.position), groupHeatMapValues[group.position]) : ""}`}>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{group.position}</p>
+                      <p className="mt-0.5 text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200">{formatPoints(groupScore(row, group.position))}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2 text-xs dark:border-gray-800">
+                  <span className="font-semibold text-gray-400">Behind leader</span>
+                  <span className={`font-bold tabular-nums ${row.pointsBehind === 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-600 dark:text-gray-300"}`}>{row.pointsBehind === 0 ? "Leader" : `−${formatPoints(row.pointsBehind)}`}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 md:block">
             <table className="w-full min-w-[1080px] table-fixed divide-y divide-gray-200 text-[11px] dark:divide-gray-800">
               <colgroup>
                 <col className="w-[170px]" />
@@ -410,6 +453,7 @@ export default function Standings() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>
