@@ -22,8 +22,10 @@ import TradeBlockBadge from "./TradeBlockBadge";
 import PlayerInterestButton from "./PlayerInterestButton";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import { fetchSeasonLeadership } from "../../lib/teamLeadership";
+import PositionBadge from "../../components/hockey/PositionBadge";
+import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 
-const statsSeasons = [2026, 2027];
+const statsSeasons = playedAndCurrentSeasons;
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
 type SkaterSortKey = "player" | "position" | "goals" | "assists" | "plusMinus" | "penaltyMinutes" | "ppGoals" | "ppAssists" | "shGoals" | "shAssists" | "gameWinningGoals" | "shots" | "blockedShots" | "hits" | "faceoffWins" | "score" | "fantasyPointsPerGame";
@@ -63,7 +65,7 @@ export default function SkaterStats() {
   const [positionFilter, setPositionFilter] = useState("all");
   const [rightsFilter, setRightsFilter] = useState<RightsFilter>("all");
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
-  const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [sort, setSort] = useState<{ key: SkaterSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
@@ -191,7 +193,7 @@ export default function SkaterStats() {
                   const score = getSkaterScore(record);
                   return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
                     <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} birthDate={record.birthDate} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.skaterFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadershipRole={fantasySeasons.get(String(record.playerId))?.id ? leadershipByPlayerSeason.get(fantasySeasons.get(String(record.playerId))!.id) : undefined} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
-                    <td className="px-3 py-3 text-center">{record.positionCode === 'L' ? 'LW' : record.positionCode === 'R' ? 'RW' : record.positionCode}</td>
+                    <td className="px-3 py-3 text-center"><PositionBadge position={record.positionCode} /></td>
                     {[record.goals,record.assists,record.plusMinus,record.penaltyMinutes,record.ppGoals,record.ppPoints-record.ppGoals,record.shGoals,record.shPoints-record.shGoals,record.gameWinningGoals,record.shots,record.blockedShots,record.hits,record.totalFaceoffWins].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                     <td className="px-3 py-3 text-center font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>
                     <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.gamesPlayed ? formatFantasyPoints(score / record.gamesPlayed) : '—'}</td>

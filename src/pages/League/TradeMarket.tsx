@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
 import { useAuth } from "../../context/AuthContext";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import { fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
@@ -197,7 +198,7 @@ export default function TradeMarket() {
             const rows = [...(rosterByPosition[section.code] || [])].sort((a, b) => playerStats(b).score - playerStats(a).score);
             if (!rows.length) return null;
             return <section key={section.code} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-800 dark:bg-white/[0.03]"><h3 className="text-sm font-semibold text-gray-800 dark:text-white">{section.code} <span className="font-normal text-gray-500">({section.label})</span></h3><span className="text-xs text-gray-500">{rows.length} players</span></div>
+              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-800 dark:bg-white/[0.03]"><h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-white"><PositionBadge position={section.code} /><span className="font-normal text-gray-500">{section.label}</span></h3><span className="text-xs text-gray-500">{rows.length} players</span></div>
               <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr className="border-b border-gray-100 text-xs uppercase text-gray-500 dark:border-gray-800"><th className="px-3 py-2 text-left">Player</th><th className="px-3 py-2 text-center">Salary</th><th className="px-3 py-2 text-center">Term</th><th className="px-3 py-2 text-center">Fantasy Points</th><th className="px-3 py-2 text-center">FPPG</th><th className="px-3 py-2 text-left">Interest</th><th className="px-3 py-2 text-right">Trade Block</th></tr></thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.map((row) => {
                   const listed = listingByPlayerSeason.has(row.id);
@@ -221,7 +222,7 @@ export default function TradeMarket() {
             const row = listing.player_season;
             const interested = interestByPlayerSeason.has(listing.player_season_id);
             return <article key={listing.id} className="rounded-xl border border-gray-200 p-4 dark:border-gray-800">
-              <div className="flex items-center gap-3">{listing.fantasy_team?.logo && <img src={listing.fantasy_team.logo} alt="" className="h-10 w-10 rounded-lg object-contain" />}<div className="min-w-0"><Link to={`/player-profile?playerId=${row?.player?.player_api_id}`} className="font-semibold text-brand-500 hover:underline">{playerName(row)}</Link><p className="text-xs text-gray-500">{listing.fantasy_team?.team_name} · {(row?.position || "—").toUpperCase()}</p></div></div>
+              <div className="flex items-center gap-3">{listing.fantasy_team?.logo && <img src={listing.fantasy_team.logo} alt="" className="h-10 w-10 rounded-lg object-contain" />}<div className="min-w-0"><Link to={`/player-profile?playerId=${row?.player?.player_api_id}`} className="font-semibold text-brand-500 hover:underline">{playerName(row)}</Link><div className="mt-1 flex items-center gap-2 text-xs text-gray-500"><span>{listing.fantasy_team?.team_name}</span><PositionBadge position={row?.position} /></div></div></div>
               <p className="mt-3 text-sm text-gray-600">{row?.salary == null ? "No salary" : money.format(row.salary)}{row?.term_end_year ? ` through ${row.term_end_year}` : ""}</p>
               <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={busyKey === `interest-${listing.player_season_id}`} onClick={() => toggleInterest(listing)} className={`rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50 ${interested ? "border border-brand-300 bg-brand-50 text-brand-700" : "border border-gray-300 text-gray-700 hover:border-brand-300 hover:text-brand-600"}`}>{interested ? "★ Interested" : "☆ I'm Interested"}</button><Link to={`/trade-manager?fromTeam=${teamId}&toTeam=${listing.fantasy_team_id}&playerSeason=${listing.player_season_id}&season=${season}`} className="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600">Start Offer</Link></div>
             </article>;

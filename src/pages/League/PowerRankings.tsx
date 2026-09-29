@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
+import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
@@ -27,7 +29,7 @@ type GoalieTandem = { team: FantasyTeam; goalies: PlayerRanking[]; gamesPlayed: 
 const positions: Position[] = ["C", "LW", "RW", "D", "G"];
 const positionNames: Record<Position, string> = { C: "Centres", LW: "Left Wings", RW: "Right Wings", D: "Defence", G: "Goalies" };
 const scoringLimits: Record<Position, number> = { C: 3, LW: 3, RW: 3, D: 6, G: 2 };
-const seasonOptions = [2026, 2027];
+const seasonOptions = playedAndCurrentSeasons;
 const periodStartBySeason: Record<number, string> = { 2026: "2025-10-06", 2027: "2026-10-05" };
 const periodsPerSeason = 14;
 const monthNames = ["October", "November", "December", "January", "February", "March", "April"];
@@ -160,7 +162,7 @@ function PlayerPositionCard({ position, rows }: { position: Position; rows: Play
 }
 
 function SpotlightPlayer({ row, badge }: { row: PlayerRanking; badge?: string }) {
-  return <div className="flex min-w-0 items-center gap-3"><Link to={`/teams/${row.team.id}`}><TeamMark team={row.team} size="large" /></Link><div className="min-w-0"><div className="flex items-center gap-2">{badge && <span className="text-lg">{badge}</span>}<Link to={`/player-profile?playerId=${row.season.player?.player_api_id}`} className="truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row.season)}</Link></div><p className="truncate text-[11px] text-gray-500">{row.team.abbreviation} · {row.position} · {row.gamesPlayed} GP · {formatFantasyPoints(row.points)} FPTS</p></div></div>;
+  return <div className="flex min-w-0 items-center gap-3"><Link to={`/teams/${row.team.id}`}><TeamMark team={row.team} size="large" /></Link><div className="min-w-0"><div className="flex items-center gap-2">{badge && <span className="text-lg">{badge}</span>}<Link to={`/player-profile?playerId=${row.season.player?.player_api_id}`} className="truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row.season)}</Link><PositionBadge position={row.position} /></div><p className="truncate text-[11px] text-gray-500">{row.team.abbreviation} · {row.gamesPlayed} GP · {formatFantasyPoints(row.points)} FPTS</p></div></div>;
 }
 
 function PlayerHighlights({ rows, mode, tandem, headshots }: { rows: PlayerRanking[]; mode: PeriodMode; tandem?: GoalieTandem; headshots: Map<string, string> }) {
@@ -177,7 +179,7 @@ function PlayerHighlights({ rows, mode, tandem, headshots }: { rows: PlayerRanki
         <div className="absolute left-4 top-4 z-10 rounded-full border border-white/15 bg-black/30 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-violet-200 shadow-lg"><span className="mr-1.5">{icon}</span>{label}</div>
         <Link to={`/teams/${row.team.id}`} title={row.team.team_name} className="absolute right-4 top-4 z-10 flex h-12 w-12 items-center justify-center rounded-xl border border-white/20 bg-white/95 p-1 shadow-lg">{row.team.logo ? <img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-[10px] font-black text-gray-700">{row.team.abbreviation}</span>}</Link>
         <Link to={`/player-profile?playerId=${apiId}`} className="mx-auto flex h-40 w-40 items-end justify-center overflow-hidden rounded-full bg-gradient-to-b from-white/10 to-violet-400/20 ring-1 ring-white/10">{headshot ? <img src={headshot} alt={`${playerName(row.season)} headshot`} className="h-full w-full object-contain object-bottom" /> : <span className="mb-10 text-5xl font-black text-white/20">{playerName(row.season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}</Link>
-        <div className="relative -mx-5 mt-2 bg-gradient-to-t from-black/60 to-transparent px-5 pb-5 pt-5 text-center"><Link to={`/player-profile?playerId=${apiId}`} className="text-lg font-black hover:text-violet-300">{playerName(row.season)}</Link><p className="mt-1 text-xs text-gray-400">{row.team.abbreviation} · {row.position} · {row.gamesPlayed} GP</p><p className="mt-3 text-2xl font-black text-violet-300">{formatFantasyPoints(row.points)} <span className="text-xs font-bold text-gray-400">FPTS</span></p></div>
+        <div className="relative -mx-5 mt-2 bg-gradient-to-t from-black/60 to-transparent px-5 pb-5 pt-5 text-center"><div className="flex items-center justify-center gap-2"><Link to={`/player-profile?playerId=${apiId}`} className="text-lg font-black hover:text-violet-300">{playerName(row.season)}</Link><PositionBadge position={row.position} /></div><p className="mt-1 text-xs text-gray-400">{row.team.abbreviation} · {row.gamesPlayed} GP</p><p className="mt-3 text-2xl font-black text-violet-300">{formatFantasyPoints(row.points)} <span className="text-xs font-bold text-gray-400">FPTS</span></p></div>
       </div>;
     })}</div></section>
     <div className="grid gap-5 lg:grid-cols-2">
@@ -203,7 +205,7 @@ function UnitCard({ position, teams }: { position: Position; teams: TeamRanking[
 
 export default function PowerRankings() {
   const [tab, setTab] = useState<"players" | "teams">("players");
-  const [season, setSeason] = useState(2026);
+  const [season, setSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [mode, setMode] = useState<PeriodMode>("period");
   const [period, setPeriod] = useState(() => latestPeriod(2026));
   const [month, setMonth] = useState(0);

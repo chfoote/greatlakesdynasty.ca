@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
 import { fetchAwards, fetchPlayerAwards, type Award, type PlayerAward } from "../../lib/awards";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
@@ -219,6 +220,7 @@ export default function Awards() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       {apiId ? <Link to={`/player-profile?playerId=${apiId}`} className="font-semibold text-gray-800 hover:text-brand-500 dark:text-white/90">{playerName(assignment)}</Link> : <span className="font-semibold text-gray-800 dark:text-white/90">{playerName(assignment)}</span>}
+                      {season?.position && <PositionBadge position={season.position} />}
                       {wins > 1 && <span title={`${wins} ${category} wins across all seasons`} className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">{wins}× winner</span>}
                     </div>
                     {team && <Link to={`/teams/${team.id}`} className="mt-1 flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-500 dark:text-gray-400">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import {
   compareAuctionBids,
   fetchAuctions,
@@ -86,7 +87,7 @@ function CompactPrintReport({ auctions, history, tab }: { auctions: Auction[]; h
 }
 
 export default function AuctionReport() {
-  const [season, setSeason] = useState(2026);
+  const [season, setSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [auctionDate, setAuctionDate] = useState("");
   const [includeTests, setIncludeTests] = useState(false);
   const [tab, setTab] = useState<"results" | "timeline">("results");

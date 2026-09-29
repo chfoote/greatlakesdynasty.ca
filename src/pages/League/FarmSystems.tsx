@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
 import { applyTeamBranding, fetchFantasyTeamByAbbreviation, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchPlayerSeasons, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import {
@@ -151,7 +152,7 @@ function ProspectCells({ prospect }: { prospect?: FarmProspect }) {
       <span title={status || undefined} className={unavailable ? "text-gray-400 line-through decoration-gray-400" : ""}>{prospect.playerId ? <Link to={`/player-profile?playerId=${prospect.playerId}`} className={unavailable ? "hover:text-gray-500" : "text-brand-500 hover:underline"}>{pickName(prospect.pick)}</Link> : pickName(prospect.pick)}</span>
       {prospect.currentRights?.team.logo && <img src={prospect.currentRights.team.logo} alt="" title={`Current rights: ${prospect.currentRights.team.team_name} (${prospect.currentRights.seasonYear})`} className="ml-2 inline-block h-6 w-6 rounded object-contain align-middle" />}
     </td>
-    <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{prospect.pick.positionCode || "—"}</td>
+    <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300"><PositionBadge position={prospect.pick.positionCode} /></td>
     <td className={`px-3 py-3 text-center dark:text-gray-300 ${agedOut ? "text-gray-400 line-through" : "text-gray-600"}`}><span title={formatBirthDate(prospect.birthDate)} className={prospect.birthDate ? "cursor-help border-b border-dotted border-gray-400" : ""}>{age ?? "—"}</span></td>
     <td className="px-3 py-3 text-xs text-gray-600 dark:text-gray-300">{prospect.pick.positionCode === "G" ? <GoalieStats record={prospect.goalie} season={prospect.statsSeason} /> : <SkaterStats record={prospect.skater} season={prospect.statsSeason} />}</td>
   </>;

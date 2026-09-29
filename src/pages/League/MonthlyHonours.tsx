@@ -6,12 +6,14 @@ import { fetchNhlGoalieStatsForPeriod, fetchNhlPlayerLanding, fetchNhlSkaterStat
 import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
 import { syncMonthlyHonours } from "../../lib/awards";
 import { useAuth } from "../../context/AuthContext";
+import PositionBadge from "../../components/hockey/PositionBadge";
+import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 
 type HonourCategory = "Forward" | "Defenceman" | "Goalie";
 type MonthlyWinner = { month: string; monthIndex: number; category: HonourCategory; season: PlayerSeasonWithRelations; team: FantasyTeam; gamesPlayed: number; points: number };
 type CachedHeadshot = { url: string; savedAt: number };
 
-const seasons = [2026, 2027];
+const seasons = playedAndCurrentSeasons;
 const months = ["October", "November", "December", "January", "February", "March", "April"];
 const headshotCacheKey = "award-headshots-v1";
 const headshotCacheAge = 24 * 60 * 60 * 1000;
@@ -49,7 +51,7 @@ function historicalTeamId(row: PlayerSeasonWithRelations, transactions: LeagueTr
 
 export default function MonthlyHonours() {
   const { isAdmin } = useAuth();
-  const [season, setSeason] = useState(2026);
+  const [season, setSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [winners, setWinners] = useState<MonthlyWinner[]>([]);
   const [headshots, setHeadshots] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -129,7 +131,7 @@ export default function MonthlyHonours() {
         const apiId = winner.season.player?.player_api_id || "";
         const style = categoryStyle[winner.category];
         const countAtThisWin = winners.filter((candidate) => candidate.season.player?.player_api_id === apiId && candidate.monthIndex <= winner.monthIndex).length;
-        return <article key={`${month}:${winner.category}`} className="relative overflow-hidden p-5"><div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${style.gradient}`} /><div className="flex items-center justify-between gap-3"><span className="text-xs font-black uppercase tracking-wide text-gray-500">{style.icon} {winner.category} of the Month</span>{countAtThisWin > 1 && <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">{countAtThisWin}× winner</span>}</div><div className="mt-4 flex items-center gap-4"><Link to={`/player-profile?playerId=${apiId}`} className="flex h-20 w-20 shrink-0 items-end justify-center overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">{headshots.get(apiId) ? <img src={headshots.get(apiId)} alt={`${playerName(winner.season)} headshot`} className="h-full w-full object-contain object-bottom" /> : <span className="mb-5 text-xl font-black text-gray-400">{playerName(winner.season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}</Link><div className="min-w-0"><Link to={`/player-profile?playerId=${apiId}`} className="block truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(winner.season)}</Link><Link to={`/teams/${winner.team.id}`} className="mt-1 flex items-center gap-2 text-xs text-gray-500 hover:text-brand-500">{winner.team.logo && <img src={winner.team.logo} alt={`${winner.team.team_name} logo`} className="h-6 w-6 object-contain" />}{winner.team.abbreviation} · {winner.season.position} · {winner.gamesPlayed} GP</Link><p className="mt-2 text-lg font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(winner.points)} FPTS</p></div></div></article>;
+        return <article key={`${month}:${winner.category}`} className="relative overflow-hidden p-5"><div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${style.gradient}`} /><div className="flex items-center justify-between gap-3"><span className="text-xs font-black uppercase tracking-wide text-gray-500">{style.icon} {winner.category} of the Month</span>{countAtThisWin > 1 && <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">{countAtThisWin}× winner</span>}</div><div className="mt-4 flex items-center gap-4"><Link to={`/player-profile?playerId=${apiId}`} className="flex h-20 w-20 shrink-0 items-end justify-center overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">{headshots.get(apiId) ? <img src={headshots.get(apiId)} alt={`${playerName(winner.season)} headshot`} className="h-full w-full object-contain object-bottom" /> : <span className="mb-5 text-xl font-black text-gray-400">{playerName(winner.season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}</Link><div className="min-w-0"><div className="flex items-center gap-2"><Link to={`/player-profile?playerId=${apiId}`} className="block truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(winner.season)}</Link><PositionBadge position={winner.season.position} /></div><Link to={`/teams/${winner.team.id}`} className="mt-1 flex items-center gap-2 text-xs text-gray-500 hover:text-brand-500">{winner.team.logo && <img src={winner.team.logo} alt={`${winner.team.team_name} logo`} className="h-6 w-6 object-contain" />}{winner.team.abbreviation} · {winner.gamesPlayed} GP</Link><p className="mt-2 text-lg font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(winner.points)} FPTS</p></div></div></article>;
       })}</div></section>;
     })}
     {!loading && !error && !winners.length && <p className="rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700">No completed monthly performances are available for this season yet.</p>}

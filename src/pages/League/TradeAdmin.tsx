@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import {
   approveTradeOffer,
   fetchTradeOffers,
@@ -103,7 +104,7 @@ function TradeAdminOfferCard({
 }
 
 export default function TradeAdmin() {
-  const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [offers, setOffers] = useState<TradeOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyOfferId, setBusyOfferId] = useState<number | null>(null);

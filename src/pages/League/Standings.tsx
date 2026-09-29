@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import {
   fetchPlayerSeasonsBySeason,
@@ -9,6 +10,8 @@ import {
 } from "../../lib/fantasyPlayers";
 import {
   fetchNhlGoalieStats,
+  fetchNhlDailyStats,
+  getNhlStatsDate,
   fetchNhlSkaterStats,
   getGoalieScore,
   getSkaterScore,
@@ -148,6 +151,10 @@ export default function Standings() {
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [skaterStats, setSkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalieStats, setGoalieStats] = useState<Map<string, NhlGoalieRecord>>(new Map());
+  const [statsView, setStatsView] = useState<"season" | "today" | "yesterday">("season");
+  const [dailySkaterStats, setDailySkaterStats] = useState<Map<string, NhlSkaterRecord>>(new Map());
+  const [dailyGoalieStats, setDailyGoalieStats] = useState<Map<string, NhlGoalieRecord>>(new Map());
+  const [dailyLoading, setDailyLoading] = useState(false);
   const [showHeatMap, setShowHeatMap] = useState(false);
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
@@ -190,6 +197,33 @@ export default function Standings() {
     };
   }, [selectedSeason]);
 
+  useEffect(() => {
+    if (statsView === "season") return;
+    let active = true;
+    const refresh = async () => {
+      setDailyLoading(true);
+      try {
+        const date = getNhlStatsDate(statsView === "yesterday" ? -1 : 0);
+        const result = await fetchNhlDailyStats(date);
+        if (!active) return;
+        setDailySkaterStats(new Map(result.skaters.map((record) => [String(record.playerId), record])));
+        setDailyGoalieStats(new Map(result.goalies.map((record) => [String(record.playerId), record])));
+      } catch {
+        if (!active) return;
+        setDailySkaterStats(new Map());
+        setDailyGoalieStats(new Map());
+      } finally {
+        if (active) setDailyLoading(false);
+      }
+    };
+    void refresh();
+    const intervalId = statsView === "today" ? window.setInterval(() => void refresh(), 30_000) : null;
+    return () => { active = false; if (intervalId) window.clearInterval(intervalId); };
+  }, [statsView, selectedSeason]);
+
+  const displayedSkaterStats = statsView === "season" ? skaterStats : dailySkaterStats;
+  const displayedGoalieStats = statsView === "season" ? goalieStats : dailyGoalieStats;
+
   const standings = useMemo<StandingsRow[]>(() => {
     const rows = teams.map((team) => {
       const teamPlayers = playerSeasons.filter(
@@ -198,11 +232,11 @@ export default function Standings() {
       const slotScores: Record<string, number> = {};
 
       skaterSlots.forEach((slot) => {
-        slotScores[slot.key] = scoreSlot(teamPlayers, slot, skaterStats, getSkaterScore);
+        slotScores[slot.key] = scoreSlot(teamPlayers, slot, displayedSkaterStats, getSkaterScore);
       });
 
       goalieSlots.forEach((slot) => {
-        slotScores[slot.key] = scoreSlot(teamPlayers, slot, goalieStats, getGoalieScore);
+        slotScores[slot.key] = scoreSlot(teamPlayers, slot, displayedGoalieStats, getGoalieScore);
       });
 
       return {
@@ -225,7 +259,7 @@ export default function Standings() {
       rank: index + 1,
       pointsBehind: leaderPoints - row.points,
     }));
-  }, [teams, playerSeasons, skaterStats, goalieStats]);
+  }, [teams, playerSeasons, displayedSkaterStats, displayedGoalieStats]);
 
   const averageRow = useMemo(() => {
     const slotScores = Object.fromEntries(
@@ -271,6 +305,8 @@ export default function Standings() {
     if (next.has(position)) next.delete(position); else next.add(position);
     return next;
   });
+  const scoreLabel = statsView === "season" ? "Points" : statsView === "today" ? "Today" : "Yesterday";
+  const scoreCaption = statsView === "season" ? "FPTS" : "DAILY FPTS";
 
   return (
     <div>
@@ -286,12 +322,11 @@ export default function Standings() {
             <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90">
               {selectedSeason} League Standings
             </h3>
-            <p className="mt-1 max-w-xl text-sm text-gray-500 dark:text-gray-400">
-              Ranked by total fantasy points from each team&apos;s scoring lineup.
-            </p>
+            <p className="mt-1 max-w-xl text-sm text-gray-500 dark:text-gray-400">{statsView === "season" ? "Ranked by total fantasy points from each team’s scoring lineup." : `${scoreLabel}’s gain from scoring-lineup players only.`}</p>
           </div>
 
           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end lg:w-auto">
+            <div><label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">Score View {dailyLoading && <span className="ml-1 text-brand-500">Updating…</span>}</label><div className="inline-flex h-11 w-full rounded-lg border border-gray-300 bg-white p-1 dark:border-gray-700 dark:bg-gray-900 sm:w-auto">{(["season", "today", "yesterday"] as const).map((view) => <button key={view} type="button" onClick={() => { setStatsView(view); if (view !== "season") setSelectedSeason(CURRENT_LEAGUE_SEASON); }} className={`rounded-md px-3 text-xs font-bold capitalize transition ${statsView === view ? "bg-brand-500 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>{view}</button>)}</div></div>
             <button
               type="button"
               aria-pressed={showHeatMap}
@@ -311,8 +346,9 @@ export default function Standings() {
               <select
                 id="standings_season"
                 value={selectedSeason}
+                disabled={statsView !== "season"}
                 onChange={(event) => setSelectedSeason(Number(event.target.value))}
-                className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
               >
                 {seasonOptions.map((season) => (
                   <option key={season} value={season}>
@@ -364,13 +400,13 @@ export default function Standings() {
                   </div>
                   <div className="text-right">
                     <p className="text-xl font-black tabular-nums text-gray-900 dark:text-white">{formatPoints(row.points)}</p>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">FPTS</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{scoreCaption}</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-5 border-t border-gray-100 bg-gray-50/80 dark:border-gray-800 dark:bg-white/[0.025]">
                   {positionGroups.map((group) => (
                     <div key={group.position} className={`px-1 py-3 text-center ${showHeatMap ? heatMapClass(groupScore(row, group.position), groupHeatMapValues[group.position]) : ""}`}>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{group.position}</p>
+                      <PositionBadge position={group.position} />
                       <p className="mt-0.5 text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200">{formatPoints(groupScore(row, group.position))}</p>
                     </div>
                   ))}
@@ -398,11 +434,11 @@ export default function Standings() {
                   {positionGroups.map((group) => {
                     const expanded = expandedPositions.has(group.position);
                     return <th key={group.position} rowSpan={expanded ? 1 : 2} colSpan={expanded ? group.slots.length : 1} className="border-l border-gray-200 px-1 py-1 text-center font-semibold text-gray-700 dark:border-gray-800 dark:text-gray-200">
-                      <button type="button" onClick={() => togglePosition(group.position)} aria-expanded={expanded} className="inline-flex items-center justify-center gap-1 rounded px-1.5 py-0.5 hover:bg-gray-200/70 dark:hover:bg-gray-800" title={`${expanded ? "Collapse" : "Expand"} ${group.position} scoring`}><span>{group.position}</span><span className={`text-[8px] text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}>▼</span></button>
+                      <button type="button" onClick={() => togglePosition(group.position)} aria-expanded={expanded} className="inline-flex items-center justify-center gap-1 rounded px-1.5 py-0.5 hover:bg-gray-200/70 dark:hover:bg-gray-800" title={`${expanded ? "Collapse" : "Expand"} ${group.position} scoring`}><PositionBadge position={group.position} /><span className={`text-[8px] text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}>▼</span></button>
                     </th>;
                   })}
                   <th rowSpan={2} className="border-l border-gray-200 px-1 py-2 text-center font-bold text-gray-900 dark:border-gray-800 dark:text-white">
-                    Points
+                    {scoreLabel}
                   </th>
                   <th rowSpan={2} className="px-1 py-2 text-center font-semibold text-gray-700 dark:text-gray-200">
                     Behind

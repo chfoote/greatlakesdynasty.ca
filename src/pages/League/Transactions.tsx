@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
 import { useAuth } from "../../context/AuthContext";
 import { deleteLeagueTransaction, fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
 
@@ -271,7 +272,7 @@ export function TradeTransactionDetails({ transaction }: { transaction: LeagueTr
                 return (
                   <div key={move.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-white px-3 py-2.5 shadow-theme-xs dark:bg-gray-900">
                     <div className="min-w-0">
-                      <span className="mr-2 text-xs font-bold text-brand-600 dark:text-brand-400">{season?.position?.toUpperCase() || "—"}</span>
+                      <PositionBadge position={season?.position} className="mr-2" />
                       {player?.player_api_id ? (
                         <Link to={`/player-profile?playerId=${player.player_api_id}`} className="font-medium text-gray-800 hover:text-brand-500 hover:underline dark:text-white/90">
                           {playerName}
@@ -459,7 +460,7 @@ export default function Transactions() {
                       return (
                         <>
                           <p className="text-sm leading-6 text-gray-700 dark:text-gray-300 sm:text-base">
-                            {sentence.prefix} {sentence.position ? `${sentence.position} ` : ""}
+                            {sentence.prefix} {sentence.position ? <PositionBadge position={sentence.position} className="mx-1 align-middle" /> : null}{" "}
                             {apiId ? (
                               <Link
                                 to={`/player-profile?playerId=${apiId}`}

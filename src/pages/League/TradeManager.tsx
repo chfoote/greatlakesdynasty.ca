@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import PositionBadge from "../../components/hockey/PositionBadge";
 import Checkbox from "../../components/form/input/Checkbox";
 import { useAuth } from "../../context/AuthContext";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
@@ -708,9 +709,7 @@ function TeamColumn({
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <span className="w-fit rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                            {getPosition(season)}
-                          </span>
+                          <PositionBadge position={getPosition(season)} className="px-2 py-1 text-xs" />
                           <span className="w-fit rounded-full bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
                             Score {formatScore(score)}
                           </span>

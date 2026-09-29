@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import Input from "../../components/form/input/InputField";
 import Label from "../../components/form/Label";
 import { fetchFantasyPlayers, type FantasyPlayer } from "../../lib/fantasyPlayers";
@@ -28,7 +29,7 @@ export default function AwardAdmin() {
   const [imageUrl, setImageUrl] = useState("");
   const [awardId, setAwardId] = useState("");
   const [playerId, setPlayerId] = useState("");
-  const [seasonYear, setSeasonYear] = useState(2026);
+  const [seasonYear, setSeasonYear] = useState(CURRENT_LEAGUE_SEASON);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");

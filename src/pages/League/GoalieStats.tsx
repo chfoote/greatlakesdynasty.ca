@@ -19,15 +19,17 @@ import TradeBlockBadge from "./TradeBlockBadge";
 import PlayerInterestButton from "./PlayerInterestButton";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import { fetchSeasonLeadership } from "../../lib/teamLeadership";
+import PositionBadge from "../../components/hockey/PositionBadge";
+import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 
-const statsSeasons = [2026, 2027];
+const statsSeasons = playedAndCurrentSeasons;
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
-type GoalieSortKey = "player" | "gamesPlayed" | "gamesStarted" | "wins" | "losses" | "otLosses" | "goalsAgainst" | "saves" | "shutouts" | "penaltyMinutes" | "goals" | "assists" | "savePct" | "goalsAgainstAverage" | "score" | "fantasyPointsPerGame";
+type GoalieSortKey = "player" | "position" | "gamesPlayed" | "gamesStarted" | "wins" | "losses" | "otLosses" | "goalsAgainst" | "saves" | "shutouts" | "penaltyMinutes" | "goals" | "assists" | "savePct" | "goalsAgainstAverage" | "score" | "fantasyPointsPerGame";
 type SortDirection = "asc" | "desc";
 
 const goalieColumns: { label: string; key: GoalieSortKey }[] = [
-  { label: "PLAYER", key: "player" }, { label: "GP", key: "gamesPlayed" },
+  { label: "PLAYER", key: "player" }, { label: "POS", key: "position" }, { label: "GP", key: "gamesPlayed" },
   { label: "GS", key: "gamesStarted" }, { label: "W", key: "wins" },
   { label: "L", key: "losses" }, { label: "OTL", key: "otLosses" },
   { label: "GA", key: "goalsAgainst" }, { label: "SV", key: "saves" },
@@ -39,6 +41,7 @@ const goalieColumns: { label: string; key: GoalieSortKey }[] = [
 
 function goalieSortValue(record: NhlGoalieRecord, key: GoalieSortKey) {
   if (key === "player") return record.goalieFullName;
+  if (key === "position") return "G";
   if (key === "score") return getGoalieScore(record);
   if (key === "fantasyPointsPerGame") return record.gamesPlayed ? getGoalieScore(record) / record.gamesPlayed : 0;
   return record[key] ?? Number.NEGATIVE_INFINITY;
@@ -54,7 +57,7 @@ export default function GoalieStats() {
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [rightsFilter, setRightsFilter] = useState<RightsFilter>("all");
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
-  const [selectedSeason, setSelectedSeason] = useState(2026);
+  const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [sort, setSort] = useState<{ key: GoalieSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
@@ -168,6 +171,7 @@ export default function GoalieStats() {
                 const score = getGoalieScore(record);
                 return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
                   <td className="px-3 py-3"><NhlPlayerCell playerName={record.goalieFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} birthDate={record.birthDate} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.goalieFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadershipRole={fantasySeasons.get(String(record.playerId))?.id ? leadershipByPlayerSeason.get(fantasySeasons.get(String(record.playerId))!.id) : undefined} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
+                  <td className="px-3 py-3 text-center"><PositionBadge position="G" /></td>
                   {[record.gamesPlayed,record.gamesStarted,record.wins,record.losses,record.otLosses,record.goalsAgainst,record.saves,record.shutouts,record.penaltyMinutes,record.goals,record.assists].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.savePct === null ? '—' : record.savePct.toFixed(3)}</td>
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(record.goalsAgainstAverage, 2)}</td>
