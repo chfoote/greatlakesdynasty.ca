@@ -26,10 +26,12 @@ import {
   createTradeOffer,
   createAdminTradeOffer,
   createAdminThreeTeamTrade,
+  createThreeTeamTradeOffer,
   dismissTradeOffer,
   fetchTradeOfferDismissals,
   fetchTradeOffers,
   updateTradeOfferStatus,
+  respondToThreeTeamTradeOffer,
   type TradeOffer,
   type TradeOfferPlayer,
 } from "../../lib/tradeOffers";
@@ -361,8 +363,7 @@ function TradeOfferCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-              {offer.from_team?.team_name || "Unknown Team"} to{" "}
-              {offer.to_team?.team_name || "Unknown Team"}
+              {[offer.from_team?.team_name, offer.to_team?.team_name, offer.third_team?.team_name].filter(Boolean).join(" / ") || "Unknown Teams"}
             </h3>
             <span
               className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ring-1 ${
@@ -395,14 +396,7 @@ function TradeOfferCard({
             >
               Decline
             </button>
-            <button
-              type="button"
-              onClick={onCounter}
-              disabled={responding}
-              className="rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-600 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:text-brand-300 dark:hover:bg-brand-500/10"
-            >
-              Counter
-            </button>
+            {!offer.third_team_id && <button type="button" onClick={onCounter} disabled={responding} className="rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-600 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:text-brand-300 dark:hover:bg-brand-500/10">Counter</button>}
           </div>
         )}
 
@@ -433,7 +427,8 @@ function TradeOfferCard({
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      {offer.third_team_id && offer.status === "pending" && <p className="mt-3 text-xs font-medium text-gray-500">Approvals: {offer.to_team?.abbreviation || "Team 2"} {offer.to_team_accepted_at ? "✓" : "pending"} · {offer.third_team?.abbreviation || "Team 3"} {offer.third_team_accepted_at ? "✓" : "pending"}</p>}
+      <div className={`mt-4 grid gap-4 ${offer.third_team_id ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
         <div>
           <p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
             {offer.to_team?.team_name || "Receiving Team"} receives
@@ -444,6 +439,7 @@ function TradeOfferCard({
             )}
           />
         </div>
+        {offer.third_team && <div><p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{offer.third_team.team_name} receives</p><TradeOfferPlayerList players={offer.trade_offer_players.filter((player) => player.to_team_id === offer.third_team_id)} /></div>}
         <div>
           <p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
             {offer.from_team?.team_name || "Offering Team"} receives
@@ -1223,6 +1219,15 @@ export default function TradeManager() {
           notes: tradeNotes.trim() || null,
           playerMoves,
         });
+      } else if (threeTeamMode && !counteringOffer) {
+        await createThreeTeamTradeOffer({
+          seasonYear: selectedSeason,
+          team1Id: Number(team1Id),
+          team2Id: Number(team2Id),
+          team3Id: Number(team3Id),
+          notes: tradeNotes.trim() || null,
+          playerMoves,
+        });
       } else if (isAdmin && !counteringOffer) {
         await createAdminTradeOffer({
           seasonYear: selectedSeason,
@@ -1259,6 +1264,8 @@ export default function TradeManager() {
       setSuccess(
         isAdmin && !counteringOffer
           ? "Agreed trade submitted to Trade Admin for final approval."
+          : threeTeamMode
+          ? `Three-team offer sent to ${team2Name} and ${team3Name}.`
           : counteringOffer
           ? `Counter offer sent to ${team2Name}.`
           : `Trade offer sent to ${team2Name}.`,
@@ -1271,26 +1278,26 @@ export default function TradeManager() {
   }
 
   async function handleRespondToOffer(
-    tradeOfferId: number,
+    offer: TradeOffer,
     status: "accepted" | "declined",
   ) {
-    setRespondingOfferId(tradeOfferId);
+    setRespondingOfferId(offer.id);
     setError("");
     setSuccess("");
 
     try {
-      const nextOffer = await updateTradeOfferStatus({
-        tradeOfferId,
-        status,
-      });
-      setTradeOffers((current) =>
-        status === "declined"
-          ? current.filter((offer) => offer.id !== nextOffer.id)
-          : current.map((offer) => (offer.id === nextOffer.id ? nextOffer : offer)),
-      );
+      if (offer.third_team_id) {
+        await respondToThreeTeamTradeOffer(offer.id, status === "accepted");
+        setTradeOffers(await fetchTradeOffers(selectedSeason));
+      } else {
+        const nextOffer = await updateTradeOfferStatus({ tradeOfferId: offer.id, status });
+        setTradeOffers((current) => status === "declined" ? current.filter((row) => row.id !== nextOffer.id) : current.map((row) => (row.id === nextOffer.id ? nextOffer : row)));
+      }
       setSuccess(
         status === "accepted"
-          ? "Trade accepted and sent to admin for approval."
+          ? offer.third_team_id
+            ? "Approval recorded. The trade goes to admin after both receiving teams accept."
+            : "Trade accepted and sent to admin for approval."
           : "Trade offer declined.",
       );
     } catch (err) {
@@ -1483,12 +1490,12 @@ export default function TradeManager() {
                 <TradeOfferCard
                   key={offer.id}
                   offer={offer}
-                  canRespond={String(offer.to_team_id) === team1Id}
+                  canRespond={(String(offer.to_team_id) === team1Id && !offer.to_team_accepted_at) || (String(offer.third_team_id) === team1Id && !offer.third_team_accepted_at)}
                   canRevoke={String(offer.from_team_id) === team1Id}
                   canDismiss={false}
                   responding={respondingOfferId === offer.id}
-                  onAccept={() => handleRespondToOffer(offer.id, "accepted")}
-                  onDecline={() => handleRespondToOffer(offer.id, "declined")}
+                  onAccept={() => handleRespondToOffer(offer, "accepted")}
+                  onDecline={() => handleRespondToOffer(offer, "declined")}
                   onCounter={() => handleStartCounterOffer(offer)}
                   onRevoke={() => handleRevokeOffer(offer.id)}
                   onDismiss={() => undefined}
@@ -1514,7 +1521,7 @@ export default function TradeManager() {
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-          {isAdmin && !counteringOffer && (
+          {!counteringOffer && (
             <div className="mb-4 flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 p-3 dark:border-brand-500/30 dark:bg-brand-500/10">
               <Checkbox
                 checked={threeTeamMode}
@@ -1527,7 +1534,7 @@ export default function TradeManager() {
               />
               <div>
                 <p className="text-sm font-semibold text-gray-900 dark:text-white">Add Third Team</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Admin-only: select a destination for every player included in the trade.</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Select a destination for every player. Both other managers must accept before admin review.</p>
               </div>
             </div>
           )}

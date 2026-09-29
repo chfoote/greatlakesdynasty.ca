@@ -8,8 +8,36 @@ import {
   updateTradeOfferStatus,
   type TradeOffer,
 } from "../../lib/tradeOffers";
+import { fetchPlayerSeasonsByTeamAndSeason } from "../../lib/fantasyPlayers";
+import { fetchBuyoutPenalties } from "../../lib/buyouts";
+import { fetchRetentionAdjustments } from "../../lib/retentions";
 
 const seasonOptions = Array.from({ length: 10 }, (_, index) => 2026 + index);
+const rosterLimit = 23;
+const activePositions = new Set(["C", "LW", "RW", "D", "G"]);
+const capPositions = new Set([...activePositions, "W", "IR", "RETENTION"]);
+const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
+
+type TeamImpact = {
+  currentPayroll: number;
+  projectedPayroll: number;
+  currentRoster: number;
+  projectedRoster: number;
+  cap: number;
+};
+
+function salaryCapForSeason(year: number) { return year <= 2026 ? 45_000_000 : 50_000_000; }
+function position(value?: string | null) { return (value || "").toUpperCase(); }
+function signed(value: number, formatter: (amount: number) => string = String) { return value === 0 ? "No change" : `${value > 0 ? "+" : "−"}${formatter(Math.abs(value))}`; }
+
+function ComplianceMetric({ label, current, projected, limit, format = String }: { label: string; current: number; projected: number; limit: number; format?: (value: number) => string }) {
+  const valid = projected <= limit;
+  return <div className={`rounded-lg border p-3 ${valid ? "border-success-200 bg-success-50/70 dark:border-success-500/25 dark:bg-success-500/10" : "border-error-200 bg-error-50 dark:border-error-500/30 dark:bg-error-500/10"}`}>
+    <div className="flex items-center justify-between gap-2"><p className="text-[10px] font-black uppercase tracking-wide text-gray-500">{label}</p><span className={`text-[9px] font-black uppercase ${valid ? "text-success-700 dark:text-success-300" : "text-error-700 dark:text-error-300"}`}>{valid ? "Within limit" : "Over limit"}</span></div>
+    <p className="mt-1 text-sm font-black text-gray-900 dark:text-white">{format(current)} → {format(projected)}</p>
+    <p className="mt-1 text-[10px] text-gray-500">{signed(projected - current, format)} · Limit {format(limit)}</p>
+  </div>;
+}
 
 function TradeAdminOfferCard({
   offer,
@@ -18,6 +46,7 @@ function TradeAdminOfferCard({
   onTransactionDateChange,
   onApprove,
   onDecline,
+  impacts,
 }: {
   offer: TradeOffer;
   busy: boolean;
@@ -25,8 +54,15 @@ function TradeAdminOfferCard({
   onTransactionDateChange: (date: string) => void;
   onApprove: () => void;
   onDecline: () => void;
+  impacts: Record<number, TeamImpact>;
 }) {
   const participatingTeams = [offer.from_team, offer.to_team, offer.third_team].filter(Boolean);
+  const complianceReady = participatingTeams.length > 0 && participatingTeams.every((team) => team && impacts[team.id]);
+  const tradeCompliant = complianceReady && participatingTeams.every((team) => {
+    if (!team) return false;
+    const impact = impacts[team.id];
+    return impact.projectedPayroll <= impact.cap && impact.projectedRoster <= rosterLimit;
+  });
   return (
     <article className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -38,6 +74,7 @@ function TradeAdminOfferCard({
             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold uppercase text-gray-700 dark:bg-gray-800 dark:text-gray-300">
               {offer.status.replace("_", " ")}
             </span>
+            {complianceReady && <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ring-1 ${tradeCompliant ? "bg-success-50 text-success-700 ring-success-200 dark:bg-success-500/10 dark:text-success-300" : "bg-error-50 text-error-700 ring-error-200 dark:bg-error-500/10 dark:text-error-300"}`}>{tradeCompliant ? "All teams compliant" : "Limit issue"}</span>}
           </div>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Offer #{offer.id} | Season {offer.season_year}
@@ -89,6 +126,13 @@ function TradeAdminOfferCard({
         ))}
       </div>
 
+      <section className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-gray-950/30">
+        <div className="mb-3"><p className="text-xs font-black uppercase tracking-wide text-gray-700 dark:text-gray-200">Post-trade compliance</p><p className="mt-0.5 text-[11px] text-gray-500">Includes active contracts, buyout penalties, and retained-salary adjustments.</p></div>
+        <div className={`grid gap-3 ${participatingTeams.length === 3 ? "xl:grid-cols-3" : "lg:grid-cols-2"}`}>
+          {participatingTeams.map((team) => team && <div key={team.id} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900"><p className="mb-2 text-xs font-bold text-gray-800 dark:text-white">{team.team_name}</p>{impacts[team.id] ? <div className="grid gap-2 sm:grid-cols-2"><ComplianceMetric label="Payroll" current={impacts[team.id].currentPayroll} projected={impacts[team.id].projectedPayroll} limit={impacts[team.id].cap} format={(value) => money.format(value)} /><ComplianceMetric label="Active roster" current={impacts[team.id].currentRoster} projected={impacts[team.id].projectedRoster} limit={rosterLimit} /></div> : <p className="text-xs text-gray-400">Compliance data unavailable.</p>}</div>)}
+        </div>
+      </section>
+
       {offer.notes && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950/30">
           <p className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
@@ -111,6 +155,7 @@ export default function TradeAdmin() {
   const [transactionDates, setTransactionDates] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [offerImpacts, setOfferImpacts] = useState<Record<number, Record<number, TeamImpact>>>({});
 
   async function loadOffers() {
     setLoading(true);
@@ -119,6 +164,35 @@ export default function TradeAdmin() {
     try {
       const rows = await fetchTradeOffers(selectedSeason);
       setOffers(rows);
+      const cap = salaryCapForSeason(selectedSeason);
+      const teamIds = [...new Set(rows.flatMap((offer) => [offer.from_team_id, offer.to_team_id, offer.third_team_id].filter((id): id is number => id !== null)))];
+      const baselines = new Map(await Promise.all(teamIds.map(async (teamId) => {
+        const [roster, penalties, adjustments] = await Promise.all([
+          fetchPlayerSeasonsByTeamAndSeason(teamId, selectedSeason),
+          fetchBuyoutPenalties(selectedSeason, teamId),
+          fetchRetentionAdjustments(selectedSeason, teamId),
+        ]);
+        return [teamId, {
+          payroll: roster.filter((row) => capPositions.has(position(row.position))).reduce((sum, row) => sum + (row.salary || 0), 0) + penalties.reduce((sum, row) => sum + row.amount, 0) + adjustments.reduce((sum, row) => sum + row.amount, 0),
+          roster: roster.filter((row) => activePositions.has(position(row.position))).length,
+        }] as const;
+      })));
+      setOfferImpacts(Object.fromEntries(rows.map((offer) => {
+        const participatingIds = [offer.from_team_id, offer.to_team_id, offer.third_team_id].filter((id): id is number => id !== null);
+        return [offer.id, Object.fromEntries(participatingIds.map((teamId) => {
+          const baseline = baselines.get(teamId) || { payroll: 0, roster: 0 };
+          let payrollDelta = 0;
+          let rosterDelta = 0;
+          offer.trade_offer_players.forEach((move) => {
+            const salary = move.player_season?.salary || 0;
+            const playerPosition = position(move.player_season?.position);
+            const direction = move.to_team_id === teamId ? 1 : move.from_team_id === teamId ? -1 : 0;
+            if (capPositions.has(playerPosition)) payrollDelta += direction * salary;
+            if (activePositions.has(playerPosition)) rosterDelta += direction;
+          });
+          return [teamId, { currentPayroll: baseline.payroll, projectedPayroll: baseline.payroll + payrollDelta, currentRoster: baseline.roster, projectedRoster: baseline.roster + rosterDelta, cap }];
+        }))];
+      })));
       setTransactionDates((current) => Object.fromEntries(
         rows.map((offer) => [offer.id, current[offer.id] || new Date().toLocaleDateString("en-CA")]),
       ));
@@ -245,6 +319,7 @@ export default function TradeAdmin() {
                 onTransactionDateChange={(date) => setTransactionDates((current) => ({ ...current, [offer.id]: date }))}
                 onApprove={() => handleApprove(offer)}
                 onDecline={() => handleDecline(offer)}
+                impacts={offerImpacts[offer.id] || {}}
               />
             ))}
           </div>

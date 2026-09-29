@@ -36,6 +36,8 @@ export type TradeOffer = {
   response_notes: string | null;
   admin_notes: string | null;
   accepted_at: string | null;
+  to_team_accepted_at: string | null;
+  third_team_accepted_at: string | null;
   declined_at: string | null;
   revoked_at?: string | null;
   completed_at: string | null;
@@ -221,6 +223,31 @@ export async function createAdminThreeTeamTrade({
   });
   if (error) throw error;
   return data;
+}
+
+export async function createThreeTeamTradeOffer({
+  seasonYear, team1Id, team2Id, team3Id, notes, playerMoves,
+}: {
+  seasonYear: number; team1Id: number; team2Id: number; team3Id: number; notes: string | null;
+  playerMoves: Array<{ playerSeasonId: number; fromTeamId: number; toTeamId: number }>;
+}) {
+  const { data, error } = await supabase.rpc("create_three_team_trade_offer", {
+    p_season_year: seasonYear, p_team_1_id: team1Id, p_team_2_id: team2Id,
+    p_team_3_id: team3Id, p_notes: notes, p_player_moves: playerMoves,
+  });
+  if (error) throw error;
+  wakeTradeEmailWorker();
+  return data as TradeOffer;
+}
+
+export async function respondToThreeTeamTradeOffer(tradeOfferId: number, accept: boolean) {
+  const { data, error } = await supabase.rpc("respond_to_three_team_trade_offer", {
+    p_trade_offer_id: tradeOfferId,
+    p_accept: accept,
+  });
+  if (error) throw error;
+  if (accept && data?.status === "accepted") wakeTradeEmailWorker();
+  return data as TradeOffer;
 }
 
 export async function updateTradeOfferStatus({

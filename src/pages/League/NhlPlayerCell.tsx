@@ -3,6 +3,7 @@ import type { PlayerAward } from "../../lib/awards";
 import PlayerAwardBadges from "./PlayerAwardBadges";
 import { Link } from "react-router";
 import type { ProspectRight } from "../../lib/prospectRights";
+import InjuryDesignationBadge from "../../components/hockey/InjuryDesignationBadge";
 
 const currencyFormatter = new Intl.NumberFormat("en-CA", {
   style: "currency",
@@ -73,6 +74,7 @@ export default function NhlPlayerCell({
       </div>
       <div className="text-left">
         {profilePlayerId ? <Link to={`/player-profile?playerId=${profilePlayerId}`} className="font-medium text-brand-500 hover:text-brand-600 hover:underline">{playerName}</Link> : <span className="font-medium text-gray-800 dark:text-white/90">{playerName}</span>}
+        <InjuryDesignationBadge position={fantasySeason?.position} />
         {leadershipRole && <span title={leadershipRole === "C" ? "Team Captain" : "Alternate Captain"} className={`ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 align-middle text-[10px] font-black ring-1 ${leadershipRole === "C" ? "bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/40" : "bg-sky-100 text-sky-800 ring-sky-300 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/40"}`}>{leadershipRole}</span>}
         <PlayerAwardBadges awards={awards} includeMonthly={false} />
         <p className={`mt-0.5 text-[11px] font-medium ${isExpiring ? "text-orange-600 dark:text-orange-400" : "text-gray-500 dark:text-gray-400"}`}>
