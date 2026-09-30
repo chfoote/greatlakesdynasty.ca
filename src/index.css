@@ -791,6 +791,20 @@ span.flatpickr-weekday,
   @apply opacity-100;
 }
 
+/* The mobile sidebar sits below the 4rem header. Using the dynamic viewport
+   keeps its final links above Safari's expanding bottom toolbar. */
+.app-sidebar {
+  height: calc(100vh - 4rem);
+  height: calc(100dvh - 4rem);
+}
+
+@media (min-width: 1024px) {
+  .app-sidebar {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
 @media print {
   @page {
     size: portrait;
