@@ -11,6 +11,7 @@ const goalieStatsCache = new Map<number, { expiresAt: number; request: Promise<N
 const skaterPeriodCache = new Map<string, { expiresAt: number; request: Promise<NhlSkaterRecord[]> }>();
 const goaliePeriodCache = new Map<string, { expiresAt: number; request: Promise<NhlGoalieRecord[]> }>();
 const playerBiosCache = new Map<string, { expiresAt: number; request: Promise<NhlPlayerBio[]> }>();
+const playerSeasonStatsCache = new Map<string, { expiresAt: number; request: Promise<{ skater: NhlSkaterRecord | null; goalie: NhlGoalieRecord | null }> }>();
 
 type NhlSkaterSummary = {
   playerId: number;
@@ -259,6 +260,14 @@ function reportUrl(position: "skater" | "goalie", report: string, seasonId: numb
   return `/nhl-api/${position}/${report}?${params}`;
 }
 
+function playerReportUrl(position: "skater" | "goalie", report: string, seasonId: number, playerId: number) {
+  const params = new URLSearchParams({
+    limit: "-1",
+    cayenneExp: `seasonId=${seasonId} and gameTypeId=2 and playerId=${playerId}`,
+  });
+  return `/nhl-api/${position}/${report}?${params}`;
+}
+
 function periodReportUrl(position: "skater" | "goalie", report: string, seasonId: number, startDate: string, endDate: string) {
   const params = new URLSearchParams({
     limit: "-1",
@@ -316,6 +325,29 @@ export async function fetchNhlSkaterStats(
       throw error;
     });
   skaterStatsCache.set(seasonId, { expiresAt: Date.now() + statsCacheTtlMs, request });
+  return request;
+}
+
+export function fetchNhlPlayerSeasonStats(playerId: number, seasonId: number) {
+  const key = `${playerId}:${seasonId}`;
+  const cached = playerSeasonStatsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+  const request = Promise.all([
+    fetchReport<NhlSkaterSummary>(playerReportUrl("skater", "summary", seasonId, playerId), "player skater summary"),
+    fetchReport<NhlSkaterRealtime>(playerReportUrl("skater", "realtime", seasonId, playerId), "player realtime stats"),
+    fetchReport<NhlSkaterFaceoffs>(playerReportUrl("skater", "faceoffwins", seasonId, playerId), "player faceoff stats"),
+    fetchReport<NhlGoalieRecord>(playerReportUrl("goalie", "summary", seasonId, playerId), "player goalie stats"),
+  ]).then(([summary, realtime, faceoffs, goalies]) => {
+    const skater = summary[0];
+    return {
+      skater: skater ? { ...skater, blockedShots: realtime[0]?.blockedShots ?? 0, hits: realtime[0]?.hits ?? 0, totalFaceoffWins: faceoffs[0]?.totalFaceoffWins ?? 0 } : null,
+      goalie: goalies[0] ?? null,
+    };
+  }).catch((error) => {
+    playerSeasonStatsCache.delete(key);
+    throw error;
+  });
+  playerSeasonStatsCache.set(key, { expiresAt: Date.now() + statsCacheTtlMs, request });
   return request;
 }
 
