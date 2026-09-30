@@ -32,7 +32,7 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
 function LeadershipSeasonBadge({ role }: { role?: "C" | "A" }) {
   if (!role) return null;
   const label = role === "C" ? "Captain" : "Assistant Captain";
-  return <span title={label} className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-black uppercase ring-1 ${role === "C" ? "bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300" : "bg-sky-100 text-sky-800 ring-sky-300 dark:bg-sky-500/15 dark:text-sky-300"}`}>{role} · {label}</span>;
+  return <span title={label} aria-label={label} className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-black ring-1 ${role === "C" ? "bg-amber-100 text-amber-800 ring-amber-300 dark:bg-amber-500/15 dark:text-amber-300" : "bg-sky-100 text-sky-800 ring-sky-300 dark:bg-sky-500/15 dark:text-sky-300"}`}>{role}</span>;
 }
 
 function SkaterStats({ record, season }: { record: NhlSkaterRecord; season: number }) {
