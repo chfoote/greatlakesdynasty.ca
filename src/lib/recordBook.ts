@@ -83,6 +83,7 @@ export type RecordHistoryEvent = {
 
 const number = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 2 });
 const activePositions = new Set(["C", "LW", "RW", "D", "G"]);
+const prospectPositions = new Set(["PROSPECT", "AP"]);
 
 function playerName(row: PlayerSeasonWithRelations) {
   return row.player?.full_name || [row.player?.first_name, row.player?.last_name].filter(Boolean).join(" ") || "Unknown player";
@@ -194,11 +195,19 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
     const [skaters, goalies] = await Promise.all([fetchNhlSkaterStats(nhlSeasonId(year)), fetchNhlGoalieStats(nhlSeasonId(year))]);
     return { year, skaters, goalies };
   }));
+  const callUpDateBySeasonPlayer = new Map<string, string>();
+  transactions.filter((transaction) => transaction.action === "called_up" && transaction.player_id).forEach((transaction) => {
+    const key = `${transaction.season_year}:${transaction.player_id}`;
+    const current = callUpDateBySeasonPlayer.get(key);
+    if (!current || transaction.transaction_date < current) callUpDateBySeasonPlayer.set(key, transaction.transaction_date);
+  });
   const leaderRows = leaderYears.flatMap((year) => {
     const yearStats = leaderStats.find((item) => item.year === year);
     const yearSkaters = new Map((yearStats?.skaters || []).map((row) => [String(row.playerId), row]));
     const yearGoalies = new Map((yearStats?.goalies || []).map((row) => [String(row.playerId), row]));
-    return allSeasons.filter((row) => row.season_year === year && row.player?.player_api_id && row.fantasy_team_id).map((row) => {
+    return allSeasons.filter((row) => row.season_year === year && row.player?.player_api_id && row.fantasy_team_id)
+      .filter((row) => !prospectPositions.has((row.position || "").toUpperCase()) || callUpDateBySeasonPlayer.has(`${year}:${row.player_id}`))
+      .map((row) => {
       const playerId = row.player!.player_api_id;
       const skater = yearSkaters.get(playerId);
       const goalie = yearGoalies.get(playerId);
@@ -228,8 +237,10 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
     const yearRows = leaderRows.filter((item) => item.row.season_year === year);
     const playerIds = new Set(yearRows.map((item) => item.row.player_id));
     const tradeDates = [...new Set(tradeMoves.filter((move) => playerIds.has(move.playerId) && move.date >= seasonStart && move.date <= seasonEnd).map((move) => move.date))].sort();
-    if (!tradeDates.length) return yearRows.map((item) => ({ ...item, row: { ...item.row, fantasy_team_id: ownerOnDate(item.row.player_id, item.row.fantasy_team_id, seasonEnd) } })).filter((item) => item.row.fantasy_team_id);
-    const starts = [seasonStart, ...tradeDates];
+    const callUpDates = [...new Set(yearRows.map((item) => callUpDateBySeasonPlayer.get(`${year}:${item.row.player_id}`)).filter((date): date is string => Boolean(date) && date! >= seasonStart && date! <= seasonEnd))];
+    const boundaryDates = [...new Set([...tradeDates, ...callUpDates])].sort();
+    if (!boundaryDates.length) return yearRows.map((item) => ({ ...item, row: { ...item.row, fantasy_team_id: ownerOnDate(item.row.player_id, item.row.fantasy_team_id, seasonEnd) } })).filter((item) => item.row.fantasy_team_id);
+    const starts = [seasonStart, ...boundaryDates];
     const periods = starts.map((start, index) => ({ start, end: index + 1 < starts.length ? previousDate(starts[index + 1]) : seasonEnd })).filter((period) => period.start <= period.end);
     const periodStats = await Promise.all(periods.map(async (period) => {
       const [skaters, goalies] = await Promise.all([fetchNhlSkaterStatsForPeriod(nhlSeasonId(year), period.start, period.end), fetchNhlGoalieStatsForPeriod(nhlSeasonId(year), period.start, period.end)]);
@@ -239,9 +250,10 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
       const skater = period.skaters.get(item.playerId);
       const goalie = period.goalies.get(item.playerId);
       const gamesPlayed = goalie?.gamesPlayed || skater?.gamesPlayed || 0;
+      const callUpDate = callUpDateBySeasonPlayer.get(`${year}:${item.row.player_id}`);
       const fantasyTeamId = ownerOnDate(item.row.player_id, item.row.fantasy_team_id, period.start);
-      return { ...item, row: { ...item.row, fantasy_team_id: fantasyTeamId }, skater: skater || null, goalie: goalie || null, gamesPlayed, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0 };
-    }).filter((item) => item.gamesPlayed > 0 && item.row.fantasy_team_id));
+      return { ...item, row: { ...item.row, fantasy_team_id: fantasyTeamId }, skater: skater || null, goalie: goalie || null, gamesPlayed, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0, eligible: !callUpDate || period.start >= callUpDate };
+    }).filter((item) => item.eligible && item.gamesPlayed > 0 && item.row.fantasy_team_id));
   }))).flat();
   const buildLeaders = (byFranchise: boolean, limitPerPosition = true) => {
     const sourceRows = byFranchise ? franchiseLeaderRows : leaderRows;
