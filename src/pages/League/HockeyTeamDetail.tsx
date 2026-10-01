@@ -20,6 +20,7 @@ import {
   fetchNhlDailyStats,
   getNhlStatsDate,
   fetchNhlLivePlayerIds,
+  fetchNhlLiveSeasonStats,
   fetchNhlPlayerLanding,
   fetchNhlSkaterStats,
   formatFantasyPoints,
@@ -591,15 +592,20 @@ export default function HockeyTeamDetail() {
       .then((rows) => setTradeBlockIds(new Set(rows.map((row) => row.player_season_id))))
       .catch(() => setTradeBlockIds(new Set()));
 
-    Promise.all([
+    const finalizedStatsRequest = () => Promise.all([
       fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
       fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
-    ])
-      .then(([seasonSkaters, seasonGoalies]) => {
-        setSkaters(new Map(seasonSkaters.map((row) => [String(row.playerId), row])));
-        setGoalies(new Map(seasonGoalies.map((row) => [String(row.playerId), row])));
+    ]).then(([seasonSkaters, seasonGoalies]) => ({ skaters: seasonSkaters, goalies: seasonGoalies }));
+    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(selectedSeason).catch(finalizedStatsRequest)
+      : finalizedStatsRequest();
+    statsRequest
+      .then((stats) => {
+        setSkaters(new Map(stats.skaters.map((row) => [String(row.playerId), row])));
+        setGoalies(new Map(stats.goalies.map((row) => [String(row.playerId), row])));
         setStatsError("");
-      });
+      })
+      .catch((err: Error) => setStatsError(err.message));
 
     Promise.all([fetchPlayerAwards(), fetchAwards(true)])
       .then(([rows, definitions]) => {
@@ -613,6 +619,24 @@ export default function HockeyTeamDetail() {
         setAwardDefinitions([]);
       });
   }, [team, selectedSeason]);
+
+  useEffect(() => {
+    if (selectedSeason !== CURRENT_LEAGUE_SEASON || statsView !== "season") return;
+    let active = true;
+    const refreshSeasonStats = async () => {
+      try {
+        const stats = await fetchNhlLiveSeasonStats(selectedSeason);
+        if (!active) return;
+        setSkaters(new Map(stats.skaters.map((row) => [String(row.playerId), row])));
+        setGoalies(new Map(stats.goalies.map((row) => [String(row.playerId), row])));
+        setStatsError("");
+      } catch {
+        // Retain the latest composite if a live refresh temporarily fails.
+      }
+    };
+    const intervalId = window.setInterval(() => void refreshSeasonStats(), 30_000);
+    return () => { active = false; window.clearInterval(intervalId); };
+  }, [selectedSeason, statsView]);
 
   useEffect(() => {
     if (!team) return;

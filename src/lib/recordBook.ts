@@ -3,7 +3,7 @@ import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type Fa
 import { fetchPlayerSeasons, fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchLeagueTransactions } from "./transactions";
 import { fetchPlayerAwards } from "./awards";
-import { fetchNhlGoalieStats, fetchNhlGoalieStatsForPeriod, fetchNhlSkaterStats, fetchNhlSkaterStatsForPeriod, getGoalieScore, getSkaterScore } from "./nhl";
+import { fetchNhlGoalieStats, fetchNhlGoalieStatsForPeriod, fetchNhlSkaterStats, fetchNhlSkaterStatsForPeriod, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "./nhl";
 import { fetchSeasonLeadership } from "./teamLeadership";
 
 export type RecordBookEntry = {
@@ -43,6 +43,26 @@ export type ScoringLeader = {
   seasons: number[];
   team: FantasyTeam | null;
   currentTeam: FantasyTeam | null;
+};
+
+export type FranchiseStatLine = {
+  key: string;
+  playerId: string;
+  playerName: string;
+  position: ScoringLeader["position"];
+  seasons: number[];
+  team: FantasyTeam | null;
+  currentTeam: FantasyTeam | null;
+  skater: {
+    gamesPlayed: number; goals: number; assists: number; plusMinus: number; penaltyMinutes: number; shots: number;
+    ppGoals: number; ppAssists: number; shGoals: number; shAssists: number; gameWinningGoals: number;
+    blockedShots: number; hits: number; faceoffWins: number; fantasyPoints: number; pointsPerGame: number;
+  } | null;
+  goalie: {
+    gamesPlayed: number; gamesStarted: number; wins: number; losses: number; otLosses: number; goalsAgainst: number;
+    saves: number; shutouts: number; penaltyMinutes: number; goals: number; assists: number; savePct: number;
+    goalsAgainstAverage: number; fantasyPoints: number; pointsPerGame: number;
+  } | null;
 };
 
 export type DailyPlayerPerformance = {
@@ -184,7 +204,7 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
       const goalie = yearGoalies.get(playerId);
       const nhlPosition = skater?.positionCode === "L" ? "LW" : skater?.positionCode === "R" ? "RW" : skater?.positionCode;
       const position = (goalie ? "G" : nhlPosition || row.position || "C").toUpperCase() as ScoringLeader["position"];
-      return { row, playerId, position, gamesPlayed: goalie?.gamesPlayed || skater?.gamesPlayed || 0, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0 };
+      return { row, playerId, position, skater: skater || null, goalie: goalie || null, gamesPlayed: goalie?.gamesPlayed || skater?.gamesPlayed || 0, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0 };
     }).filter((item) => activePositions.has(item.position) && item.gamesPlayed > 0);
   });
   const tradeMoves = transactions.flatMap((transaction) => transaction.transaction_type === "trade" && transaction.trade_offer
@@ -220,7 +240,7 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
       const goalie = period.goalies.get(item.playerId);
       const gamesPlayed = goalie?.gamesPlayed || skater?.gamesPlayed || 0;
       const fantasyTeamId = ownerOnDate(item.row.player_id, item.row.fantasy_team_id, period.start);
-      return { ...item, row: { ...item.row, fantasy_team_id: fantasyTeamId }, gamesPlayed, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0 };
+      return { ...item, row: { ...item.row, fantasy_team_id: fantasyTeamId }, skater: skater || null, goalie: goalie || null, gamesPlayed, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0 };
     }).filter((item) => item.gamesPlayed > 0 && item.row.fantasy_team_id));
   }))).flat();
   const buildLeaders = (byFranchise: boolean, limitPerPosition = true) => {
@@ -243,13 +263,54 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
   };
   const positionLeaders = buildLeaders(false);
   const franchisePositionLeaders = buildLeaders(true, false);
+  const franchiseGroups = new Map<string, typeof franchiseLeaderRows>();
+  franchiseLeaderRows.filter((item) => !teamId || item.row.fantasy_team_id === teamId).forEach((item) => {
+    const key = `${item.playerId}:${item.row.fantasy_team_id}`;
+    franchiseGroups.set(key, [...(franchiseGroups.get(key) || []), item]);
+  });
+  const sumSkater = (rows: NhlSkaterRecord[], field: keyof NhlSkaterRecord) => rows.reduce((sum, row) => sum + Number(row[field] || 0), 0);
+  const sumGoalie = (rows: NhlGoalieRecord[], field: keyof NhlGoalieRecord) => rows.reduce((sum, row) => sum + Number(row[field] || 0), 0);
+  const franchiseStatLines: FranchiseStatLine[] = [...franchiseGroups.entries()].map(([key, rows]) => {
+    const latest = [...rows].sort((a, b) => b.row.season_year - a.row.season_year)[0];
+    const currentSeason = allSeasons.filter((row) => row.player_id === latest.row.player_id && row.fantasy_team_id).sort((a, b) => b.season_year - a.season_year)[0];
+    const skaters = rows.map((item) => item.skater).filter((row): row is NhlSkaterRecord => Boolean(row));
+    const goalies = rows.map((item) => item.goalie).filter((row): row is NhlGoalieRecord => Boolean(row));
+    const fantasyPoints = rows.reduce((sum, item) => sum + item.fantasyPoints, 0);
+    const gamesPlayed = rows.reduce((sum, item) => sum + item.gamesPlayed, 0);
+    const saves = sumGoalie(goalies, "saves");
+    const goalsAgainst = sumGoalie(goalies, "goalsAgainst");
+    const gaaWeight = goalies.reduce((sum, row) => sum + (row.goalsAgainstAverage == null ? 0 : row.gamesPlayed), 0);
+    const creditedTeam = latest.row.fantasy_team_id ? teamMap.get(latest.row.fantasy_team_id) || null : null;
+    return {
+      key, playerId: latest.playerId, playerName: playerName(latest.row), position: latest.position,
+      seasons: [...new Set(rows.map((item) => item.row.season_year))].sort((a, b) => a - b),
+      team: creditedTeam ? applyTeamBranding(creditedTeam, brandingHistory, latest.row.season_year) : null,
+      currentTeam: currentSeason?.fantasy_team_id ? teamMap.get(currentSeason.fantasy_team_id) || null : null,
+      skater: skaters.length ? {
+        gamesPlayed, goals: sumSkater(skaters, "goals"), assists: sumSkater(skaters, "assists"), plusMinus: sumSkater(skaters, "plusMinus"),
+        penaltyMinutes: sumSkater(skaters, "penaltyMinutes"), shots: sumSkater(skaters, "shots"), ppGoals: sumSkater(skaters, "ppGoals"),
+        ppAssists: sumSkater(skaters, "ppPoints") - sumSkater(skaters, "ppGoals"), shGoals: sumSkater(skaters, "shGoals"),
+        shAssists: sumSkater(skaters, "shPoints") - sumSkater(skaters, "shGoals"), gameWinningGoals: sumSkater(skaters, "gameWinningGoals"),
+        blockedShots: sumSkater(skaters, "blockedShots"), hits: sumSkater(skaters, "hits"), faceoffWins: sumSkater(skaters, "totalFaceoffWins"),
+        fantasyPoints, pointsPerGame: gamesPlayed ? fantasyPoints / gamesPlayed : 0,
+      } : null,
+      goalie: goalies.length ? {
+        gamesPlayed, gamesStarted: sumGoalie(goalies, "gamesStarted"), wins: sumGoalie(goalies, "wins"), losses: sumGoalie(goalies, "losses"),
+        otLosses: sumGoalie(goalies, "otLosses"), goalsAgainst, saves, shutouts: sumGoalie(goalies, "shutouts"),
+        penaltyMinutes: sumGoalie(goalies, "penaltyMinutes"), goals: sumGoalie(goalies, "goals"), assists: sumGoalie(goalies, "assists"),
+        savePct: saves + goalsAgainst ? saves / (saves + goalsAgainst) : 0,
+        goalsAgainstAverage: gaaWeight ? goalies.reduce((sum, row) => sum + Number(row.goalsAgainstAverage || 0) * row.gamesPlayed, 0) / gaaWeight : 0,
+        fantasyPoints, pointsPerGame: gamesPlayed ? fantasyPoints / gamesPlayed : 0,
+      } : null,
+    };
+  });
 
   const monthly = awards.filter((award) => award.is_monthly && (!teamId || award.fantasy_team_id === teamId));
   const honourCounts = new Map<number, number>(); monthly.forEach((award) => honourCounts.set(award.player_id, (honourCounts.get(award.player_id) || 0) + 1));
   const mostHonours = [...honourCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   if (mostHonours) { const winner = monthly.find((award) => award.player_id === mostHonours[0]); entries.push({ key: "most-monthly-honours", category: "Awards & Leadership", label: "Most Monthly Honours", value: mostHonours[1], formattedValue: `${mostHonours[1]} honours`, holder: winner?.player?.full_name || "Unknown player", team: winner?.fantasy_team_id ? teamMap.get(winner.fantasy_team_id) || null : null, playerId: winner?.player?.player_api_id || undefined, verification: "verified" }); }
 
-  return { entries, contracts: topContracts, positionLeaders, franchisePositionLeaders, dailyTeams, dailyPlayers, history: (history || []) as RecordHistoryEvent[], teams };
+  return { entries, contracts: topContracts, positionLeaders, franchisePositionLeaders, franchiseStatLines, dailyTeams, dailyPlayers, history: (history || []) as RecordHistoryEvent[], teams };
 }
 
 export async function syncDailyRecordSnapshot(date: string) {
