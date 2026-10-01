@@ -15,6 +15,7 @@ import {
   ChatIcon,
   DashboardIcon,
   GoalieIcon,
+  GoalHornIcon,
   MarketIcon,
   PlayerAdminIcon,
   ReportIcon,
@@ -60,6 +61,11 @@ const leagueItems: NavItem[] = [
 ];
 
 const leaguePulseItems: NavItem[] = [
+  {
+    icon: <GoalHornIcon />,
+    name: "The Goal Horn",
+    path: "/goal-horn",
+  },
   {
     icon: <StandingsIcon />,
     name: "Power Rankings",

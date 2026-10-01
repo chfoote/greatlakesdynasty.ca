@@ -50,6 +50,7 @@ import GmTradeNetwork from "./pages/League/GmTradeNetwork";
 import RecordBook from "./pages/League/RecordBook";
 import Rulebook from "./pages/League/Rulebook";
 import CompetitiveBalanceDraft from "./pages/League/CompetitiveBalanceDraft";
+import GoalHorn from "./pages/League/GoalHorn";
 
 export default function App() {
   return (
@@ -85,6 +86,7 @@ export default function App() {
               <Route path="/auction-house" element={<AuctionHouse />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />
               <Route path="/power-rankings" element={<PowerRankings />} />
+              <Route path="/goal-horn" element={<GoalHorn />} />
               <Route path="/record-book" element={<RecordBook />} />
               <Route path="/cba" element={<Rulebook />} />
               <Route path="/competitive-balance-draft" element={<CompetitiveBalanceDraft />} />

@@ -69,3 +69,7 @@ export function BuyoutIcon(props: IconProps) {
 export function AwardsIcon(props: IconProps) {
   return <Icon {...props}><circle cx="12" cy="9" r="5"/><path d="m8.5 13-2 8 5.5-3 5.5 3-2-8M10 9l1.3 1.3L14 7.5"/></Icon>;
 }
+
+export function GoalHornIcon(props: IconProps) {
+  return <Icon {...props}><path d="M5 10v4l10 4V6L5 10Z"/><path d="M15 9h3a3 3 0 0 1 0 6h-3M7 15l-1 5h4l1-3M19 4v2M22 7l-2 1M22 12h-2"/></Icon>;
+}
