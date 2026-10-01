@@ -11,6 +11,7 @@ import {
 import {
   fetchNhlGoalieStats,
   fetchNhlDailyStats,
+  fetchNhlLiveSeasonStats,
   getNhlStatsDate,
   fetchNhlSkaterStats,
   getGoalieScore,
@@ -166,20 +167,30 @@ export default function Standings() {
     setLoading(true);
     setError("");
 
+    const finalizedStatsRequest = () => Promise.all([
+      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
+      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
+    ]).then(([skaters, goalies]) => ({ skaters, goalies }));
+    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(selectedSeason).catch(finalizedStatsRequest)
+      : Promise.all([
+          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
+          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
+        ]).then(([skaters, goalies]) => ({ skaters, goalies }));
+
     Promise.all([
       fetchFantasyTeams(),
       fetchTeamBrandingHistory(),
       fetchPlayerSeasonsBySeason(selectedSeason),
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
+      statsRequest,
     ])
-      .then(([teamRows, brandingRows, seasonRows, skaters, goalies]) => {
+      .then(([teamRows, brandingRows, seasonRows, stats]) => {
         if (!active) return;
 
         setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
         setPlayerSeasons(seasonRows);
-        setSkaterStats(new Map(skaters.map((record) => [String(record.playerId), record])));
-        setGoalieStats(new Map(goalies.map((record) => [String(record.playerId), record])));
+        setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
+        setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
       })
       .catch((err) => {
         if (active) {
@@ -196,6 +207,23 @@ export default function Standings() {
       active = false;
     };
   }, [selectedSeason]);
+
+  useEffect(() => {
+    if (statsView !== "season" || selectedSeason !== CURRENT_LEAGUE_SEASON) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const stats = await fetchNhlLiveSeasonStats(selectedSeason);
+        if (!active) return;
+        setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
+        setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
+      } catch {
+        // Keep the most recently loaded composite if a live refresh fails.
+      }
+    };
+    const intervalId = window.setInterval(() => void refresh(), 30_000);
+    return () => { active = false; window.clearInterval(intervalId); };
+  }, [statsView, selectedSeason]);
 
   useEffect(() => {
     if (statsView === "season") return;
