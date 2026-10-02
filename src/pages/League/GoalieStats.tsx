@@ -148,7 +148,7 @@ export default function GoalieStats() {
       <PageBreadcrumb pageTitle="Goalie Stats" />
       <div className="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:px-10 xl:py-12">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div><h3 className="mb-2 font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">Goalie Stats</h3><p className="text-sm text-gray-500 dark:text-gray-400 sm:text-base">NHL regular-season scoring and GLDHL ownership for Season {selectedSeason}.</p></div>
+          <div><h3 className="mb-2 font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">Goalie Stats</h3><p className="text-sm text-gray-500 dark:text-gray-400 sm:text-base">NHL regular-season scoring and GLDHL ownership for Season {selectedSeason}.</p><p className="mt-1 text-xs font-semibold text-brand-500">Goalie offense: 3 fantasy points per goal · 2 per assist</p></div>
           <div className="w-full sm:w-40"><label className="mb-1.5 block text-xs font-semibold uppercase text-gray-500">Season</label><select value={selectedSeason} onChange={(event) => { setSelectedSeason(Number(event.target.value)); setSelectedTeamIds(new Set()); }} className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900">{statsSeasons.map((season) => <option key={season}>{season}</option>)}</select></div>
         </div>
         <StatsRightsFilters

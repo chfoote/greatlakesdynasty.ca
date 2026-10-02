@@ -326,6 +326,8 @@ function AuctionPlayerCard({
           ["OTL", goalie.otLosses],
           ["SV", goalie.saves],
           ["SO", goalie.shutouts],
+          ["G", goalie.goals],
+          ["A", goalie.assists],
           ["SV%", goalie.savePct?.toFixed(3) ?? "—"],
           ["GAA", formatNhlStat(goalie.goalsAgainstAverage, 2)],
         ]

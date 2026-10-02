@@ -109,7 +109,7 @@ function SkaterStats({ record, season }: { record?: NhlSkaterRecord; season?: nu
 
 function GoalieStats({ record, season }: { record?: NhlGoalieRecord; season?: number }) {
   if (!record) return <span className="text-gray-400">No NHL stats</span>;
-  return <span className="whitespace-nowrap">{season}: {record.gamesPlayed} GP · {record.wins} W · {record.savePct == null ? "—" : record.savePct.toFixed(3)} SV% · {formatNhlStat(record.goalsAgainstAverage, 2)} GAA</span>;
+  return <span className="whitespace-nowrap">{season}: {record.gamesPlayed} GP · {record.wins} W · {record.goals} G · {record.assists} A · {record.savePct == null ? "—" : record.savePct.toFixed(3)} SV% · {formatNhlStat(record.goalsAgainstAverage, 2)} GAA</span>;
 }
 
 function ordinal(value: number) {

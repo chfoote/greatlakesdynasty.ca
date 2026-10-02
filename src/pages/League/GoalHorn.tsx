@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -50,11 +50,23 @@ export default function GoalHorn() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const feedOrder = useRef(new Map<string, number>());
+  const feedOrderDate = useRef("");
 
   const load = useCallback(async (background = false) => {
     if (background) setRefreshing(true); else setLoading(true);
     setError("");
-    try { const result = await fetchGoalFeed(date); setEvents(result.events); setTeams(result.teams); setGames(result.games); setLive(result.live); setUpdatedAt(new Date()); }
+    try {
+      const result = await fetchGoalFeed(date);
+      if (feedOrderDate.current !== date) { feedOrder.current.clear(); feedOrderDate.current = date; }
+      const firstLoad = feedOrder.current.size === 0;
+      const arrivalTime = Date.now();
+      result.events.forEach((event, index) => {
+        if (!feedOrder.current.has(event.key)) feedOrder.current.set(event.key, firstLoad ? event.sortValue : arrivalTime - index);
+      });
+      setEvents([...result.events].sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
+      setTeams(result.teams); setGames(result.games); setLive(result.live); setUpdatedAt(new Date());
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load The Goal Horn."); }
     finally { setLoading(false); setRefreshing(false); }
   }, [date]);

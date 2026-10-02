@@ -72,6 +72,19 @@ function strengthLabel(code: string | undefined, scoringIsHome: boolean) {
   return null;
 }
 
+function estimatedGoalTime(startTimeUTC: string | undefined, period: number, periodType: string, minutes: number, seconds: number, sortOrder: number) {
+  const start = startTimeUTC ? new Date(startTimeUTC).getTime() : 0;
+  const playedSeconds = minutes * 60 + seconds;
+  // NHL events do not include a wall-clock timestamp. Estimate it from puck
+  // drop while accounting for intermissions so simultaneous games interleave
+  // naturally instead of grouping primarily by scheduled start time.
+  let elapsedSeconds: number;
+  if (period <= 3) elapsedSeconds = Math.max(period - 1, 0) * (20 * 60 + 18 * 60) + playedSeconds;
+  else if (periodType === "SO") elapsedSeconds = 3 * 20 * 60 + 2 * 18 * 60 + 8 * 60 + playedSeconds;
+  else elapsedSeconds = 3 * 20 * 60 + 2 * 18 * 60 + 3 * 60 + Math.max(period - 4, 0) * (20 * 60 + 18 * 60) + playedSeconds;
+  return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
+}
+
 export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights] = await Promise.all([
@@ -115,7 +128,6 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       const assists = [player(details.assist1PlayerId), player(details.assist2PlayerId)].filter((value): value is GoalFeedPlayer => Boolean(value));
       const period = play.periodDescriptor?.number || 0;
       const [minutes, seconds] = (play.timeInPeriod || "00:00").split(":").map(Number);
-      const start = game.startTimeUTC ? new Date(game.startTimeUTC).getTime() : 0;
       return {
         key: `${game.id}:${play.eventId}`, gameId: game.id, gameState: game.gameState, startTimeUTC: game.startTimeUTC,
         nhlTeam: { abbreviation: (scoringIsHome ? game.homeTeam?.abbrev : game.awayTeam?.abbrev) || "NHL", logo: scoringIsHome ? game.homeTeam?.logo : game.awayTeam?.logo },
@@ -123,7 +135,7 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
         homeTeam: { abbreviation: game.homeTeam?.abbrev || "HOME", score: details.homeScore ?? game.homeTeam?.score ?? 0, logo: game.homeTeam?.logo },
         scorer, assists, period, periodType: play.periodDescriptor?.periodType || "REG", timeInPeriod: play.timeInPeriod || "00:00",
         strength: strengthLabel(details.situationCode, scoringIsHome), shotType: details.shotType,
-        sortValue: start + period * 1_000_000 + (minutes * 60 + seconds) * 1_000 + (play.sortOrder || 0),
+        sortValue: estimatedGoalTime(game.startTimeUTC, period, play.periodDescriptor?.periodType || "REG", minutes, seconds, play.sortOrder || 0),
       } satisfies GoalFeedEvent;
     });
   }).sort((a, b) => b.sortValue - a.sortValue);

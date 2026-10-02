@@ -52,7 +52,7 @@ function SeasonHistory({ rows, seasons, awards, leadership }: { rows: Historical
   if (!rows.length) return null;
   const goalieHistory = rows.some((row) => row.goalie);
   const headings = goalieHistory
-    ? ["Season", "Fantasy Team", "GP", "GS", "W", "L", "OTL", "GA", "SV", "SO", "SV%", "GAA", "FPTS", "FPPG", "Awards"]
+    ? ["Season", "Fantasy Team", "GP", "GS", "W", "L", "OTL", "GA", "SV", "SO", "PIM", "G", "A", "SV%", "GAA", "FPTS", "FPPG", "Awards"]
     : ["Season", "Fantasy Team", "GP", "G", "A", "+/-", "PIM", "PPG", "PPA", "SHG", "SHA", "GWG", "S", "BLK", "HIT", "FOW", "FPTS", "FPPG", "Awards"];
   return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
     <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">GLDHL history</p><h2 className="mt-1 text-lg font-black text-gray-900 dark:text-white">Previous League Seasons</h2><p className="mt-1 text-xs text-gray-500">Most recent season first · swipe horizontally on mobile.</p></div>
@@ -64,10 +64,10 @@ function SeasonHistory({ rows, seasons, awards, leadership }: { rows: Historical
       const score = row.goalie ? getGoalieScore(row.goalie) : row.skater ? getSkaterScore(row.skater) : 0;
       const gp = record?.gamesPlayed || 0;
       const values = row.goalie
-        ? [row.goalie.gamesPlayed, row.goalie.gamesStarted, row.goalie.wins, row.goalie.losses, row.goalie.otLosses, row.goalie.goalsAgainst, row.goalie.saves, row.goalie.shutouts, row.goalie.savePct?.toFixed(3) ?? "—", formatNhlStat(row.goalie.goalsAgainstAverage, 2)]
+        ? [row.goalie.gamesPlayed, row.goalie.gamesStarted, row.goalie.wins, row.goalie.losses, row.goalie.otLosses, row.goalie.goalsAgainst, row.goalie.saves, row.goalie.shutouts, row.goalie.penaltyMinutes, row.goalie.goals, row.goalie.assists, row.goalie.savePct?.toFixed(3) ?? "—", formatNhlStat(row.goalie.goalsAgainstAverage, 2)]
         : row.skater
           ? [row.skater.gamesPlayed, row.skater.goals, row.skater.assists, row.skater.plusMinus, row.skater.penaltyMinutes, row.skater.ppGoals, row.skater.ppPoints - row.skater.ppGoals, row.skater.shGoals, row.skater.shPoints - row.skater.shGoals, row.skater.gameWinningGoals, row.skater.shots, row.skater.blockedShots, row.skater.hits, row.skater.totalFaceoffWins]
-          : Array.from({ length: goalieHistory ? 10 : 14 }, () => "—");
+          : Array.from({ length: goalieHistory ? 13 : 14 }, () => "—");
       return <tr key={row.season} className="even:bg-gray-50/70 dark:even:bg-white/[0.02]"><td className="px-3 py-3 text-left text-sm font-black text-gray-900 dark:text-white">{row.season}</td><td className="px-3 py-3"><div className="flex items-center gap-2">{team?.logo && <img src={team.logo} alt="" className="h-7 w-7 object-contain" />}<div><div className="flex items-center gap-2"><p className="font-bold text-gray-800 dark:text-gray-200">{team?.abbreviation || "FA"}</p>{fantasySeason && <LeadershipSeasonBadge role={leadership.get(fantasySeason.id)} />}</div><p className="max-w-36 truncate text-[10px] text-gray-400">{team?.team_name || "Free Agent"}</p></div></div></td>{values.map((value, index) => <td key={index} className="px-3 py-3 text-center tabular-nums text-gray-600 dark:text-gray-300">{value}</td>)}<td className="bg-brand-50/60 px-3 py-3 text-center font-black tabular-nums text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{record ? formatFantasyPoints(score) : "—"}</td><td className="bg-brand-50/60 px-3 py-3 text-center font-black tabular-nums text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{gp ? formatFantasyPoints(score / gp) : "—"}</td><td className="px-3 py-3">{seasonAwards.length ? <PlayerAwardBadges awards={seasonAwards} /> : <span className="text-gray-400">—</span>}</td></tr>;
     })}</tbody></table></div>
   </section>;
