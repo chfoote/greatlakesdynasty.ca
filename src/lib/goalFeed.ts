@@ -1,6 +1,7 @@
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
+import { fetchProspectRights, getProspectRight } from "./prospectRights";
 
 type Localized = { default?: string };
 type ScoreTeam = { id?: number; abbrev?: string; score?: number; logo?: string; commonName?: Localized; placeName?: Localized };
@@ -73,7 +74,7 @@ function strengthLabel(code: string | undefined, scoringIsHome: boolean) {
 
 export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
-  const [scoreResponse, roster, teams, transactions] = await Promise.all([
+  const [scoreResponse, roster, teams, transactions, prospectRights] = await Promise.all([
     fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error(`Unable to load NHL games (${response.status})`);
       return response.json() as Promise<ScoreResponse>;
@@ -81,6 +82,7 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
     fetchPlayerSeasonsBySeason(season),
     fetchFantasyTeams(true),
     fetchLeagueTransactions(),
+    fetchProspectRights(season),
   ]);
   const games = scoreResponse.games ?? [];
   const playByPlay = await Promise.all(games.map(async (game) => {
@@ -101,7 +103,10 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       const nhl = nhlPlayers.get(playerId);
       const fantasy = fantasyPlayers.get(String(playerId));
       const name = [nhl?.firstName?.default, nhl?.lastName?.default].filter(Boolean).join(" ") || fantasy?.row.player?.full_name || "Unknown player";
-      return { playerId: String(playerId), name, headshot: nhl?.headshot, fantasyTeam: fantasy?.team || null, prospect: ["PROSPECT", "AP"].includes((fantasy?.row.position || "").toUpperCase()) };
+      const prospectRight = getProspectRight(prospectRights, playerId, name);
+      const rosterPosition = (fantasy?.row.position || "").toUpperCase();
+      const isRosterProspect = ["PROSPECT", "AP"].includes(rosterPosition);
+      return { playerId: String(playerId), name, headshot: nhl?.headshot, fantasyTeam: fantasy?.team || prospectRight?.team || null, prospect: isRosterProspect || (!fantasy && Boolean(prospectRight)) };
     };
     return (data.plays ?? []).filter((play) => play.typeDescKey === "goal" && play.details?.scoringPlayerId).map((play) => {
       const details = play.details!;
