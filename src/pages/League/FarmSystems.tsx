@@ -8,9 +8,13 @@ import { fetchPlayerSeasons, type PlayerSeasonWithRelations } from "../../lib/fa
 import {
   fetchNhlDraftPicks,
   fetchNhlGoalieStats,
+  fetchNhlLiveSeasonStats,
   fetchNhlPlayerLanding,
   fetchNhlSkaterStats,
+  formatFantasyPoints,
   formatNhlStat,
+  getGoalieScore,
+  getSkaterScore,
   searchNhlPlayers,
   type NhlDraftPick,
   type NhlGoalieRecord,
@@ -27,6 +31,7 @@ type FarmProspect = {
   pick: NhlDraftPick;
   playerId?: number;
   birthDate?: string;
+  headshot?: string;
   statsSeason?: number;
   skater?: NhlSkaterRecord;
   goalie?: NhlGoalieRecord;
@@ -129,6 +134,20 @@ function FarmTeamHeading({ label, farmTeam, prospects }: { label: string; farmTe
     </div>
     <div className="min-w-0"><p className="text-xs font-bold uppercase tracking-[0.15em] text-gray-500">{label} Farm System</p><h2 className="mt-1 truncate text-xl font-bold text-gray-900 dark:text-white">{farmTeam || "Not assigned"}</h2></div>
   </div>;
+}
+
+function ProspectSpotlight({ team, prospects, loading }: { team: FantasyTeam | null; prospects: FarmProspect[]; loading: boolean }) {
+  const leaders = prospects.map((prospect) => {
+    const score = prospect.goalie ? getGoalieScore(prospect.goalie) : prospect.skater ? getSkaterScore(prospect.skater) : 0;
+    const gamesPlayed = prospect.goalie?.gamesPlayed || prospect.skater?.gamesPlayed || 0;
+    return { prospect, score, gamesPlayed };
+  }).filter(({ prospect, score }) => {
+    const age = ageOnDate(prospect.birthDate);
+    const rightsBelongHere = !prospect.currentRights || prospect.currentRights.team.id === team?.id;
+    return prospect.statsSeason === CURRENT_LEAGUE_SEASON && !prospect.previouslySigned && rightsBelongHere && (age === null || age < 25) && score > 0;
+  }).sort((a, b) => b.score - a.score || b.gamesPlayed - a.gamesPlayed).slice(0, 5);
+
+  return <section className="mb-5 overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-theme-xs dark:border-emerald-500/30 dark:bg-white/[0.03]"><div className="flex flex-col gap-2 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 to-cyan-50 px-5 py-4 dark:border-emerald-500/20 dark:from-emerald-500/10 dark:to-cyan-500/10 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">Farm Report · {CURRENT_LEAGUE_SEASON}</p><h2 className="mt-1 text-xl font-black text-gray-900 dark:text-white">Prospect Spotlight</h2><p className="mt-1 text-xs text-gray-500">Top NHL-performing prospects ranked by GLDHL fantasy score.</p></div><span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">Goalies and skaters · one leaderboard</span></div>{loading ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => <div key={index} className="h-48 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />)}</div> : leaders.length ? <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto p-4 xl:grid xl:grid-cols-5 xl:overflow-visible">{leaders.map(({ prospect, score, gamesPlayed }, index) => { const record = prospect.goalie || prospect.skater; return <article key={prospect.key} className="relative w-[78vw] max-w-[280px] shrink-0 snap-start overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900/60 xl:w-auto"><span className="absolute right-3 top-3 text-2xl font-black text-emerald-200 dark:text-emerald-500/20">#{index + 1}</span><div className="flex items-center gap-3"><Link to={prospect.playerId ? `/player-profile?playerId=${prospect.playerId}` : "#"} className="flex h-14 w-14 shrink-0 items-end justify-center overflow-hidden rounded-full bg-white ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">{prospect.headshot ? <img src={prospect.headshot} alt="" className="h-full w-full object-cover object-top" /> : <span className="text-lg font-black text-gray-300">{pickName(prospect.pick).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}</Link><div className="min-w-0"><Link to={prospect.playerId ? `/player-profile?playerId=${prospect.playerId}` : "#"} className="block truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{pickName(prospect.pick)}</Link><div className="mt-1 flex items-center gap-1.5"><PositionBadge position={prospect.pick.positionCode} />{prospect.pick.teamLogoLight && <img src={prospect.pick.teamLogoLight} alt="" className="h-5 w-5 object-contain" />}</div></div></div><div className="mt-4 grid grid-cols-3 gap-1 rounded-lg bg-white p-2 text-center dark:bg-gray-950/60"><div><p className="text-[8px] font-black uppercase text-gray-400">GP</p><p className="mt-0.5 text-sm font-black text-gray-800 dark:text-white">{gamesPlayed}</p></div><div><p className="text-[8px] font-black uppercase text-gray-400">{prospect.goalie ? "W" : "PTS"}</p><p className="mt-0.5 text-sm font-black text-gray-800 dark:text-white">{prospect.goalie ? prospect.goalie.wins : prospect.skater ? prospect.skater.goals + prospect.skater.assists : 0}</p></div><div><p className="text-[8px] font-black uppercase text-gray-400">FPPG</p><p className="mt-0.5 text-sm font-black text-gray-800 dark:text-white">{gamesPlayed ? formatFantasyPoints(score / gamesPlayed) : "—"}</p></div></div><div className="mt-3 flex items-end justify-between"><div><p className="text-[8px] font-black uppercase tracking-wider text-gray-400">Fantasy Score</p><p className="text-xl font-black text-emerald-600 dark:text-emerald-300">{formatFantasyPoints(score)}</p></div><p className="text-[9px] font-semibold text-gray-400">{record?.teamAbbrevs || prospect.pick.teamAbbrev}</p></div></article>; })}</div> : <div className="px-5 py-10 text-center"><p className="text-sm font-bold text-gray-600 dark:text-gray-300">No prospect fantasy points yet</p><p className="mt-1 text-xs text-gray-400">This leaderboard will populate as eligible prospects produce in the NHL.</p></div>}</section>;
 }
 
 function ProspectCells({ prospect }: { prospect?: FarmProspect }) {
@@ -245,18 +264,21 @@ export default function FarmSystems() {
         const displayTeam = applyTeamBranding(teamRow, branding, CURRENT_LEAGUE_SEASON);
         if (active) setTeam(displayTeam);
 
-        const [draftResults, currentSkaters, currentGoalies, previousSkaters, previousGoalies, fantasySeasons, fantasyTeams, allBranding] = await Promise.all([
+        const [draftResults, currentStats, previousSkaters, previousGoalies, fantasySeasons, fantasyTeams, allBranding] = await Promise.all([
           Promise.all(draftYears.map(async (year) => ({ year, picks: await fetchNhlDraftPicks(year) }))),
-          fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON)).catch(() => []),
-          fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON)).catch(() => []),
+          fetchNhlLiveSeasonStats(CURRENT_LEAGUE_SEASON).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
           fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
           fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
           fetchPlayerSeasons().catch(() => [] as PlayerSeasonWithRelations[]),
           fetchFantasyTeams().catch(() => [] as FantasyTeam[]),
           fetchTeamBrandingHistory().catch(() => []),
         ]);
+        const currentSkaters = currentStats.skaters;
+        const currentGoalies = currentStats.goalies;
         const skaterCurrent = new Map(currentSkaters.map((record) => [normalize(record.skaterFullName), record]));
         const goalieCurrent = new Map(currentGoalies.map((record) => [normalize(record.goalieFullName), record]));
+        const skaterCurrentById = new Map(currentSkaters.map((record) => [String(record.playerId), record]));
+        const goalieCurrentById = new Map(currentGoalies.map((record) => [String(record.playerId), record]));
         const skaterPrevious = new Map(previousSkaters.map((record) => [normalize(record.skaterFullName), record]));
         const goaliePrevious = new Map(previousGoalies.map((record) => [normalize(record.goalieFullName), record]));
         const farmNames = [displayTeam.eastern_farm_system, displayTeam.western_farm_system].filter((name): name is string => Boolean(name));
@@ -277,7 +299,20 @@ export default function FarmSystems() {
               goalie: pick.positionCode === "G" ? record as NhlGoalieRecord | undefined : undefined,
             } satisfies FarmProspect;
           }));
-        const resolvedRows = await Promise.all(rows.map(async (row) => {
+        const acquiredRows = fantasySeasons.filter((season) => season.season_year === CURRENT_LEAGUE_SEASON && season.fantasy_team_id === displayTeam.id && ["PROSPECT", "AP"].includes((season.position || "").toUpperCase()) && season.player?.player_api_id)
+          .filter((season) => !rows.some((row) => String(row.playerId || "") === season.player!.player_api_id || normalize(pickName(row.pick)) === normalize(season.player!.full_name || "")))
+          .map((season) => {
+            const playerId = Number(season.player!.player_api_id);
+            const goalie = goalieCurrentById.get(String(playerId));
+            const skater = skaterCurrentById.get(String(playerId));
+            const fullName = season.player!.full_name || [season.player!.first_name, season.player!.last_name].filter(Boolean).join(" ") || "Unknown Player";
+            return {
+              key: `acquired-${season.id}`, draftYear: CURRENT_LEAGUE_SEASON - 1, playerId,
+              pick: { round: 0, pickInRound: 0, overallPick: 0, teamId: 0, teamAbbrev: goalie?.teamAbbrevs || skater?.teamAbbrevs || "NHL", firstName: { default: fullName }, positionCode: goalie ? "G" : skater?.positionCode || "" },
+              statsSeason: goalie || skater ? CURRENT_LEAGUE_SEASON : undefined, goalie, skater,
+            } satisfies FarmProspect;
+          });
+        const resolvedRows = await Promise.all([...rows, ...acquiredRows].map(async (row) => {
           if (row.playerId) return row;
           try {
             const searchResults = await searchNhlPlayers(pickName(row.pick));
@@ -309,7 +344,8 @@ export default function FarmSystems() {
           return {
             ...row,
             birthDate: row.playerId ? landingByPlayer.get(row.playerId)?.birthDate : undefined,
-            previouslySigned: recordedSeasons.some((season) => Boolean(season.fantasy_team_id)),
+            headshot: row.playerId ? landingByPlayer.get(row.playerId)?.headshot : undefined,
+            previouslySigned: recordedSeasons.some((season) => Boolean(season.fantasy_team_id) && !["PROSPECT", "AP"].includes((season.position || "").toUpperCase())),
             currentRights: rightsTeam ? {
               team: applyTeamBranding(rightsTeam, allBranding, latestSeason.season_year),
               seasonYear: latestSeason.season_year,
@@ -333,6 +369,7 @@ export default function FarmSystems() {
         <TeamIdentityCard team={team} season={CURRENT_LEAGUE_SEASON} managerName={team.manager_name} />
         <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div>
       </div>}
+      <ProspectSpotlight team={team} prospects={prospects} loading={loading} />
       <DraftBoard team={team} draftYears={draftYears} easternProspects={easternProspects} westernProspects={westernProspects} loading={loading} />
     </>}
   </div>;
