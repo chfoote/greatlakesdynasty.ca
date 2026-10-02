@@ -3,6 +3,7 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import {
   fetchNhlGoalieStats,
+  fetchNhlLiveSeasonStats,
   formatFantasyPoints,
   formatNhlStat,
   getGoalieScore,
@@ -67,7 +68,9 @@ export default function GoalieStats() {
     let active = true;
     setLoading(true);
     setProspectRights(new Map());
-    const statsRequest = fetchNhlGoalieStats(nhlSeasonId(selectedSeason));
+    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(selectedSeason).then((stats) => stats.goalies)
+      : fetchNhlGoalieStats(nhlSeasonId(selectedSeason));
     statsRequest
       .then((data) => {
         if (!active) return;

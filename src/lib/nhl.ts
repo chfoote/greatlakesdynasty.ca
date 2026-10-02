@@ -137,6 +137,7 @@ type NhlScoreResponse = { games?: NhlScoreGame[] };
 type NhlBoxscorePlayer = { playerId?: number; position?: string; goals?: number; assists?: number; plusMinus?: number; pim?: number; hits?: number; powerPlayGoals?: number; sog?: number; blockedShots?: number; toi?: string; goalsAgainst?: number; saves?: number; savePctg?: number; starter?: boolean; decision?: "W" | "L" | "O"; shotsAgainst?: number };
 type NhlBoxscoreTeamPlayers = { forwards?: NhlBoxscorePlayer[]; defense?: NhlBoxscorePlayer[]; goalies?: NhlBoxscorePlayer[] };
 type NhlBoxscoreResponse = { gameState?: string; awayTeam?: { abbrev?: string; score?: number }; homeTeam?: { abbrev?: string; score?: number }; playerByGameStats?: { awayTeam?: NhlBoxscoreTeamPlayers; homeTeam?: NhlBoxscoreTeamPlayers } };
+type NhlPlayByPlayResponse = { plays?: Array<{ typeDescKey?: string; periodDescriptor?: { periodType?: string }; details?: { scoringPlayerId?: number; assist1PlayerId?: number; assist2PlayerId?: number } }> };
 
 export function getNhlStatsDate(dayOffset = 0) {
   // The GLDHL stat day rolls over at 6:00 a.m. Eastern so late West Coast
@@ -155,6 +156,12 @@ async function fetchGameBoxscore(gameId: number) {
   const response = await fetch(`/nhl-web-api/gamecenter/${gameId}/boxscore`, { cache: "no-store" });
   if (!response.ok) return null;
   return response.json() as Promise<NhlBoxscoreResponse>;
+}
+
+async function fetchGamePlayByPlay(gameId: number) {
+  const response = await fetch(`/nhl-web-api/gamecenter/${gameId}/play-by-play`, { cache: "no-store" });
+  if (!response.ok) return null;
+  return response.json() as Promise<NhlPlayByPlayResponse>;
 }
 
 export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
@@ -193,11 +200,26 @@ export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ sk
     ["LIVE", "CRIT", "OFF", "FINAL"].includes(game.gameState)
     || (game.gameState === "PRE" && Boolean(game.startTimeUTC) && new Date(game.startTimeUTC!).getTime() <= now),
   );
-  const boxscores = (await Promise.all(games.map((game) => fetchGameBoxscore(game.id)))).filter((boxscore): boxscore is NhlBoxscoreResponse => boxscore !== null);
+  const gameData = (await Promise.all(games.map(async (game) => {
+    const [boxscore, playByPlay] = await Promise.all([fetchGameBoxscore(game.id), fetchGamePlayByPlay(game.id)]);
+    return { boxscore, playByPlay };
+  }))).filter((item): item is { boxscore: NhlBoxscoreResponse; playByPlay: NhlPlayByPlayResponse | null } => item.boxscore !== null);
   const skaters = new Map<number, NhlSkaterRecord>();
   const goalies = new Map<number, NhlGoalieRecord>();
 
-  boxscores.forEach((boxscore) => {
+  gameData.forEach(({ boxscore, playByPlay }) => {
+    const offense = new Map<number, { goals: number; assists: number }>();
+    const addOffense = (playerId: number | undefined, field: "goals" | "assists") => {
+      if (!playerId) return;
+      const current = offense.get(playerId) || { goals: 0, assists: 0 };
+      current[field] += 1;
+      offense.set(playerId, current);
+    };
+    (playByPlay?.plays ?? []).filter((play) => play.typeDescKey === "goal" && play.periodDescriptor?.periodType !== "SO").forEach((play) => {
+      addOffense(play.details?.scoringPlayerId, "goals");
+      addOffense(play.details?.assist1PlayerId, "assists");
+      addOffense(play.details?.assist2PlayerId, "assists");
+    });
     const sides = [
       [boxscore.playerByGameStats?.awayTeam, boxscore.awayTeam?.abbrev || "", boxscore.homeTeam?.score],
       [boxscore.playerByGameStats?.homeTeam, boxscore.homeTeam?.abbrev || "", boxscore.awayTeam?.score],
@@ -218,6 +240,7 @@ export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ sk
       (team?.goalies ?? []).forEach((player) => {
         if (!player.playerId) return;
         const current = goalies.get(player.playerId);
+        const playByPlayOffense = offense.get(player.playerId);
         const gamesPlayed = player.toi && player.toi !== "00:00" ? 1 : 0;
         const wins = player.decision === "W" ? 1 : 0;
         const losses = player.decision === "L" ? 1 : 0;
@@ -226,7 +249,7 @@ export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ sk
         goalies.set(player.playerId, {
           playerId: player.playerId, goalieFullName: "", teamAbbrevs: teamAbbrev, gamesPlayed: (current?.gamesPlayed || 0) + gamesPlayed, gamesStarted: (current?.gamesStarted || 0) + (player.starter && gamesPlayed ? 1 : 0),
           wins: (current?.wins || 0) + wins, losses: (current?.losses || 0) + losses, otLosses: (current?.otLosses || 0) + otLosses, goalsAgainst: (current?.goalsAgainst || 0) + (player.goalsAgainst || 0),
-          saves: (current?.saves || 0) + (player.saves || 0), shutouts: (current?.shutouts || 0) + shutouts, penaltyMinutes: (current?.penaltyMinutes || 0) + (player.pim || 0), goals: (current?.goals || 0) + (player.goals || 0), assists: (current?.assists || 0) + (player.assists || 0),
+          saves: (current?.saves || 0) + (player.saves || 0), shutouts: (current?.shutouts || 0) + shutouts, penaltyMinutes: (current?.penaltyMinutes || 0) + (player.pim || 0), goals: (current?.goals || 0) + (playByPlayOffense?.goals ?? player.goals ?? 0), assists: (current?.assists || 0) + (playByPlayOffense?.assists ?? player.assists ?? 0),
           savePct: player.savePctg ?? current?.savePct ?? null, goalsAgainstAverage: null,
         });
       });
