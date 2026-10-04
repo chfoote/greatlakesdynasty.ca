@@ -100,15 +100,23 @@ export default function GoalHorn() {
       }
       previousStandings.current = result.standings;
       const firstLoad = feedOrder.current.size === 0;
-      const arrivalTime = Date.now();
       const nextEvents: DisplayFeedEvent[] = [
         ...result.events.map((event) => ({ ...event, kind: "goal" as const })),
         ...result.goalieEvents.map((event) => ({ ...event, kind: "goalie" as const })),
         ...standingsEvents.current,
       ];
-      nextEvents.forEach((event, index) => {
-        if (!feedOrder.current.has(event.key)) feedOrder.current.set(event.key, firstLoad ? event.sortValue : arrivalTime - index);
-      });
+      if (firstLoad) {
+        nextEvents.forEach((event) => feedOrder.current.set(event.key, event.sortValue));
+      } else {
+        const newEvents = nextEvents.filter((event) => !feedOrder.current.has(event.key));
+        const highestExistingOrder = Math.max(0, ...feedOrder.current.values());
+        newEvents.forEach((event, index) => {
+          // Newly detected events always belong above everything already in the
+          // feed. NHL play data has no reliable cross-game wall-clock timestamp,
+          // so comparing an arrival time with earlier estimates can misorder it.
+          feedOrder.current.set(event.key, highestExistingOrder + newEvents.length - index);
+        });
+      }
       setEvents(nextEvents.sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
       setTeams(result.teams); setGames(result.games); setLive(result.live); setUpdatedAt(new Date());
     }
