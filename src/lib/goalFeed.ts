@@ -1,7 +1,7 @@
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
-import { fetchProspectRights, getProspectRight } from "./prospectRights";
+import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights } from "./prospectRights";
 import { fetchNhlDailyStats, fetchNhlLiveSeasonStats, getGoalieScore, getNhlStatsDate, getSkaterScore } from "./nhl";
 
 type Localized = { default?: string };
@@ -130,6 +130,11 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       boxscore: boxscoreResponse.ok ? await boxscoreResponse.json() as Boxscore : null,
     };
   }));
+  const gamePlayers = new Map<number, string>();
+  playByPlay.forEach(({ data }) => (data?.rosterSpots ?? []).forEach((player) => {
+    gamePlayers.set(player.playerId, [player.firstName?.default, player.lastName?.default].filter(Boolean).join(" "));
+  }));
+  const eligibleProspectRights = await removeAgedOutProspectRights(prospectRights, [...gamePlayers].map(([playerId, playerName]) => ({ playerId, playerName })));
   const tonightPoints = new Map<string, number>([
     ...dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)] as const),
     ...dailyStats.goalies.map((record) => [String(record.playerId), getGoalieScore(record)] as const),
@@ -144,10 +149,10 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
     const nhl = (data?.rosterSpots ?? []).find((candidate) => candidate.playerId === playerId);
     const fantasy = fantasyPlayers.get(String(playerId));
     const name = [nhl?.firstName?.default, nhl?.lastName?.default].filter(Boolean).join(" ") || fantasy?.row.player?.full_name || "Unknown player";
-    const prospectRight = getProspectRight(prospectRights, playerId, name);
+    const prospectRight = getProspectRight(eligibleProspectRights, playerId, name);
     const rosterPosition = (fantasy?.row.position || "").toUpperCase();
     const isRosterProspect = ["PROSPECT", "AP"].includes(rosterPosition);
-    return { playerId: String(playerId), name, headshot: nhl?.headshot || fallbackHeadshot, fantasyTeam: fantasy?.team || prospectRight?.team || null, prospect: isRosterProspect || (!fantasy && Boolean(prospectRight)), tonightPoints: tonightPoints.get(String(playerId)) ?? null };
+    return { playerId: String(playerId), name, headshot: nhl?.headshot || fallbackHeadshot, fantasyTeam: fantasy?.team || prospectRight?.team || null, prospect: Boolean(prospectRight) && (isRosterProspect || !fantasy), tonightPoints: tonightPoints.get(String(playerId)) ?? null };
   };
   const events = playByPlay.flatMap(({ game, data }) => {
     if (!data) return [];
