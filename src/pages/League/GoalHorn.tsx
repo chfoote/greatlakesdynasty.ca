@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import { fetchGoalFeed, type GoalFeedEvent, type GoalFeedPlayer } from "../../lib/goalFeed";
+import { fetchGoalFeed, type FeedStanding, type GoalieFeedEvent, type GoalFeedEvent, type GoalFeedPlayer } from "../../lib/goalFeed";
 import { getNhlStatsDate } from "../../lib/nhl";
 import type { FantasyTeam } from "../../lib/fantasyTeams";
 
@@ -22,8 +22,32 @@ function FantasyOwnership({ player, primary = false }: { player: GoalFeedPlayer;
   const team = player.fantasyTeam;
   return <div className="flex min-w-0 items-center gap-2">
     {player.headshot && <Link to={`/player-profile?playerId=${player.playerId}`} className={`${primary ? "h-12 w-12" : "h-8 w-8"} shrink-0 overflow-hidden rounded-full bg-gray-100 ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700`}><img src={player.headshot} alt="" className="h-full w-full object-cover object-top" /></Link>}
-    <div className="min-w-0"><Link to={`/player-profile?playerId=${player.playerId}`} className={`${primary ? "text-base" : "text-sm"} block truncate font-black text-gray-900 hover:text-brand-500 dark:text-white`}>{player.name}</Link><div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">{team?.logo && <img src={team.logo} alt="" className="h-4 w-4 object-contain" />}{team ? <Link to={`/teams/${team.abbreviation}`} className="hover:text-brand-500">{team.abbreviation}</Link> : <span>Free Agent</span>}{player.prospect && <><span>·</span><span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Prospect</span></>}</div></div>
+    <div className="min-w-0"><Link to={`/player-profile?playerId=${player.playerId}`} className={`${primary ? "text-base" : "text-sm"} block truncate font-black text-gray-900 hover:text-brand-500 dark:text-white`}>{player.name}</Link><div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">{team?.logo && <img src={team.logo} alt="" className="h-4 w-4 object-contain" />}{team ? <Link to={`/teams/${team.abbreviation}`} className="hover:text-brand-500">{team.abbreviation}</Link> : <span>Free Agent</span>}{player.prospect && <><span>·</span><span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Prospect</span></>}{player.tonightPoints != null && <><span>·</span><span className="text-brand-500">{player.tonightPoints.toFixed(2)} FPTS tonight</span></>}</div></div>
   </div>;
+}
+
+function GoalieCard({ event }: { event: GoalieFeedEvent }) {
+  return <article className="relative overflow-hidden rounded-2xl border border-sky-200 bg-white shadow-theme-xs dark:border-sky-900/70 dark:bg-white/[0.03]">
+    <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-sky-500 via-blue-500 to-indigo-500" />
+    <div className="grid gap-4 p-4 pl-5 sm:p-5 sm:pl-6 lg:grid-cols-[190px_minmax(260px,1fr)_165px] lg:items-center">
+      <div className="flex items-center gap-3">{event.nhlTeam.logo && <img src={event.nhlTeam.logo} alt={`${event.nhlTeam.abbreviation} logo`} className="h-11 w-11 object-contain" />}<div><p className="text-xs font-black uppercase tracking-[0.18em] text-sky-600">{event.shutout ? "Shutout" : "Goalie Win"}</p><p className="mt-1 text-xs font-semibold text-gray-500">Final · {event.saves} saves</p></div></div>
+      <div className="rounded-xl bg-gradient-to-r from-sky-50 to-indigo-50 p-3 dark:from-sky-500/10 dark:to-indigo-500/10"><p className="mb-2 text-[9px] font-black uppercase tracking-[0.16em] text-sky-600">{event.shutout ? `Shuts the door · ${event.saves}-save shutout` : `Earns the win · ${event.saves} saves`}</p><FantasyOwnership player={event.goalie} primary /></div>
+      <div className="flex items-center justify-center gap-2 rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-900/70"><span className="text-xs font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-xl font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span><span className="text-xs font-black text-gray-500">{event.homeTeam.abbreviation}</span><span className="ml-1 text-[8px] font-black uppercase text-gray-400">Final</span></div>
+    </div>
+  </article>;
+}
+
+type AroundHornEvent = ({ kind: "goal" } & GoalFeedEvent) | ({ kind: "goalie" } & GoalieFeedEvent);
+
+type StandingsFeedEvent = { kind: "standings"; key: string; team: FantasyTeam; passedTeam: FantasyTeam; rank: number; points: number; sortValue: number };
+type DisplayFeedEvent = AroundHornEvent | StandingsFeedEvent;
+
+function StandingsCard({ event }: { event: StandingsFeedEvent }) {
+  const place = event.rank === 1 ? "1st" : event.rank === 2 ? "2nd" : event.rank === 3 ? "3rd" : `${event.rank}th`;
+  return <article className="relative overflow-hidden rounded-2xl border border-violet-200 bg-white shadow-theme-xs dark:border-violet-900/70 dark:bg-white/[0.03]">
+    <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-violet-500 to-fuchsia-500" />
+    <div className="flex flex-col gap-4 p-5 pl-6 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3">{event.team.logo && <img src={event.team.logo} alt="" className="h-12 w-12 object-contain" />}<div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-600">Standings movement</p><p className="mt-1 font-black text-gray-900 dark:text-white">{event.team.team_name} moves into {place}</p><p className="mt-1 text-xs text-gray-500">Passes {event.passedTeam.team_name}</p></div></div><div className="rounded-xl bg-violet-50 px-4 py-3 text-center dark:bg-violet-500/10"><p className="text-xl font-black text-violet-700 dark:text-violet-300">{event.points.toFixed(2)}</p><p className="text-[9px] font-black uppercase tracking-wider text-violet-500">Season FPTS</p></div></div>
+  </article>;
 }
 
 function GoalCard({ event }: { event: GoalFeedEvent }) {
@@ -41,7 +65,7 @@ function GoalCard({ event }: { event: GoalFeedEvent }) {
 export default function GoalHorn() {
   const today = getNhlStatsDate();
   const [date, setDate] = useState(today);
-  const [events, setEvents] = useState<GoalFeedEvent[]>([]);
+  const [events, setEvents] = useState<DisplayFeedEvent[]>([]);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [games, setGames] = useState(0);
@@ -52,22 +76,43 @@ export default function GoalHorn() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const feedOrder = useRef(new Map<string, number>());
   const feedOrderDate = useRef("");
+  const previousStandings = useRef<FeedStanding[]>([]);
+  const standingsEvents = useRef<StandingsFeedEvent[]>([]);
 
   const load = useCallback(async (background = false) => {
     if (background) setRefreshing(true); else setLoading(true);
     setError("");
     try {
       const result = await fetchGoalFeed(date);
-      if (feedOrderDate.current !== date) { feedOrder.current.clear(); feedOrderDate.current = date; }
+      if (feedOrderDate.current !== date) { feedOrder.current.clear(); feedOrderDate.current = date; previousStandings.current = []; standingsEvents.current = []; }
+      if (!previousStandings.current.length) previousStandings.current = result.baselineStandings;
+      if (previousStandings.current.length && result.standings.length) {
+        const previousByTeam = new Map(previousStandings.current.map((row) => [row.team.id, row]));
+        const currentByTeam = new Map(result.standings.map((row) => [row.team.id, row]));
+        result.standings.forEach((row) => {
+          const previous = previousByTeam.get(row.team.id);
+          if (!previous || row.rank >= previous.rank) return;
+          const passed = previousStandings.current.find((candidate) => candidate.rank >= row.rank && candidate.rank < previous.rank && (currentByTeam.get(candidate.team.id)?.rank || 0) > row.rank);
+          if (!passed) return;
+          const movement: StandingsFeedEvent = { kind: "standings", key: `standings:${date}:${row.team.id}:${passed.team.id}:${row.rank}`, team: row.team, passedTeam: passed.team, rank: row.rank, points: row.points, sortValue: Date.now() };
+          if (!standingsEvents.current.some((event) => event.key === movement.key)) standingsEvents.current.unshift(movement);
+        });
+      }
+      previousStandings.current = result.standings;
       const firstLoad = feedOrder.current.size === 0;
       const arrivalTime = Date.now();
-      result.events.forEach((event, index) => {
+      const nextEvents: DisplayFeedEvent[] = [
+        ...result.events.map((event) => ({ ...event, kind: "goal" as const })),
+        ...result.goalieEvents.map((event) => ({ ...event, kind: "goalie" as const })),
+        ...standingsEvents.current,
+      ];
+      nextEvents.forEach((event, index) => {
         if (!feedOrder.current.has(event.key)) feedOrder.current.set(event.key, firstLoad ? event.sortValue : arrivalTime - index);
       });
-      setEvents([...result.events].sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
+      setEvents(nextEvents.sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
       setTeams(result.teams); setGames(result.games); setLive(result.live); setUpdatedAt(new Date());
     }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load The Goal Horn."); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load Around the Horn."); }
     finally { setLoading(false); setRefreshing(false); }
   }, [date]);
 
@@ -77,13 +122,13 @@ export default function GoalHorn() {
     const timer = window.setInterval(() => void load(true), 30_000);
     return () => window.clearInterval(timer);
   }, [date, today, load]);
-  const filteredEvents = useMemo(() => selectedTeamId == null ? events : events.filter((event) => [event.scorer, ...event.assists].some((player) => player.fantasyTeam?.id === selectedTeamId)), [events, selectedTeamId]);
+  const filteredEvents = useMemo(() => selectedTeamId == null ? events : events.filter((event) => event.kind === "goal" ? [event.scorer, ...event.assists].some((player) => player.fantasyTeam?.id === selectedTeamId) : event.kind === "goalie" ? event.goalie.fantasyTeam?.id === selectedTeamId : event.team.id === selectedTeamId || event.passedTeam.id === selectedTeamId), [events, selectedTeamId]);
 
   return <div>
-    <PageMeta title="The Goal Horn | GLDHL" description="Live NHL goals with GLDHL fantasy ownership" />
-    <PageBreadcrumb pageTitle="The Goal Horn" />
+    <PageMeta title="Around the Horn | GLDHL" description="Live NHL scoring and GLDHL fantasy updates" />
+    <PageBreadcrumb pageTitle="Around the Horn" />
     <div className="space-y-5">
-      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-red-950 via-slate-950 to-amber-950 p-6 text-white shadow-lg sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-amber-300">🚨 GLDHL Live Scoring</p><h1 className="mt-2 text-3xl font-black sm:text-5xl">The Goal Horn</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Every NHL goal, translated into GLDHL ownership. Scorers, helpers, fantasy franchises, and the live game situation in one place.</p></div><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${live ? "animate-pulse bg-red-400" : "bg-slate-500"}`} /><span className="text-xs font-black uppercase tracking-wider text-slate-300">{live ? "Games live · auto-refreshing" : `${games} ${games === 1 ? "game" : "games"}`}</span></div></div></section>
+      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-red-950 via-slate-950 to-sky-950 p-6 text-white shadow-lg sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.24em] text-amber-300">🚨 GLDHL Live Scoring</p><h1 className="mt-2 text-3xl font-black sm:text-5xl">Around the Horn</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">Goals, helpers, goalie wins, shutouts, and live fantasy production from around the league.</p></div><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${live ? "animate-pulse bg-red-400" : "bg-slate-500"}`} /><span className="text-xs font-black uppercase tracking-wider text-slate-300">{live ? "Games live · auto-refreshing" : `${games} ${games === 1 ? "game" : "games"}`}</span></div></div></section>
 
       <section className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:flex-row sm:items-end sm:justify-between sm:p-4"><div className="flex gap-2"><button type="button" onClick={() => setDate((current) => shiftDate(current, -1))} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-black text-gray-600 dark:bg-gray-800 dark:text-gray-300">← Previous</button><button type="button" onClick={() => setDate(today)} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-black text-gray-600 dark:bg-gray-800 dark:text-gray-300">Today</button><button type="button" disabled={date >= today} onClick={() => setDate((current) => shiftDate(current, 1))} className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-black text-gray-600 disabled:opacity-40 dark:bg-gray-800 dark:text-gray-300">Next →</button></div><div className="flex items-end gap-2"><label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Hockey Date<input type="date" max={today} value={date} onChange={(event) => setDate(event.target.value)} className="mt-1 block h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label><button type="button" disabled={refreshing} onClick={() => void load(true)} className="h-10 rounded-lg bg-red-600 px-4 text-sm font-black text-white disabled:opacity-60">{refreshing ? "Refreshing…" : "Refresh"}</button></div></section>
 
@@ -91,7 +136,7 @@ export default function GoalHorn() {
 
       {updatedAt && <p className="px-1 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-400">Updated {updatedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</p>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm font-semibold text-error-700">{error}</p>}
-      {loading ? <div className="space-y-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div> : filteredEvents.length ? <div className="space-y-3">{filteredEvents.map((event) => <GoalCard key={event.key} event={event} />)}</div> : <section className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center dark:border-gray-700 dark:bg-white/[0.02]"><div className="text-5xl">🥅</div><h2 className="mt-4 text-xl font-black text-gray-900 dark:text-white">The horn is quiet</h2><p className="mt-2 text-sm text-gray-500">{selectedTeamId != null ? "No goals or assists involve this fantasy team on the selected date." : games ? "No goals have been scored yet." : "No NHL games are scheduled for this hockey date."}</p></section>}
+      {loading ? <div className="space-y-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div> : filteredEvents.length ? <div className="space-y-3">{filteredEvents.map((event) => event.kind === "goal" ? <GoalCard key={event.key} event={event} /> : event.kind === "goalie" ? <GoalieCard key={event.key} event={event} /> : <StandingsCard key={event.key} event={event} />)}</div> : <section className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center dark:border-gray-700 dark:bg-white/[0.02]"><div className="text-5xl">🥅</div><h2 className="mt-4 text-xl font-black text-gray-900 dark:text-white">The horn is quiet</h2><p className="mt-2 text-sm text-gray-500">{selectedTeamId != null ? "No scoring events involve this fantasy team on the selected date." : games ? "No scoring events yet." : "No NHL games are scheduled for this hockey date."}</p></section>}
     </div>
   </div>;
 }

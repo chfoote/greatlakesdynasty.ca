@@ -63,7 +63,7 @@ const leagueItems: NavItem[] = [
 const leaguePulseItems: NavItem[] = [
   {
     icon: <GoalHornIcon />,
-    name: "The Goal Horn",
+    name: "Around the Horn",
     path: "/goal-horn",
   },
   {
