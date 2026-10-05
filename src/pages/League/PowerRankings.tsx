@@ -30,7 +30,7 @@ const positions: Position[] = ["C", "LW", "RW", "D", "G"];
 const positionNames: Record<Position, string> = { C: "Centres", LW: "Left Wings", RW: "Right Wings", D: "Defence", G: "Goalies" };
 const scoringLimits: Record<Position, number> = { C: 3, LW: 3, RW: 3, D: 6, G: 2 };
 const seasonOptions = playedAndCurrentSeasons;
-const periodStartBySeason: Record<number, string> = { 2026: "2025-10-06", 2027: "2026-10-05" };
+const periodStartBySeason: Record<number, string> = { 2026: "2025-10-06", 2027: "2026-09-29" };
 const periodsPerSeason = 14;
 const monthNames = ["October", "November", "December", "January", "February", "March", "April"];
 const currencyFormatter = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
@@ -100,6 +100,9 @@ function monthRange(season: number, monthIndex: number) {
   const start = season === 2027 && monthIndex === 0 ? `${year}-09-29` : formatDate(new Date(year, calendarMonth - 1, 1));
   const end = formatDate(new Date(year, calendarMonth, 0));
   return { start, end };
+}
+function monthLabel(season: number, monthIndex: number) {
+  return season === 2027 && monthIndex === 0 ? "September / October" : monthNames[monthIndex];
 }
 function rangeLabel(start: string, end: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", { month: "short", day: "numeric", year: "numeric" });
@@ -207,7 +210,7 @@ export default function PowerRankings() {
   const [tab, setTab] = useState<"players" | "teams">("players");
   const [season, setSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [mode, setMode] = useState<PeriodMode>("period");
-  const [period, setPeriod] = useState(() => latestPeriod(2026));
+  const [period, setPeriod] = useState(() => latestPeriod(CURRENT_LEAGUE_SEASON));
   const [month, setMonth] = useState(0);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
@@ -229,7 +232,7 @@ export default function PowerRankings() {
     const priorMonth = month > 0 ? monthRange(season, month - 1) : null;
     const currentStart = mode === "month" ? selectedMonth.start : periodStart(season, period);
     const currentEnd = mode === "month" ? selectedMonth.end : periodEnd(currentStart);
-    const previousStart = mode === "month" ? priorMonth?.start : shiftDate(currentStart, -14);
+    const previousStart = mode === "month" ? priorMonth?.start : period > 1 ? shiftDate(currentStart, -14) : undefined;
     const previousEnd = mode === "month" ? priorMonth?.end : previousStart ? periodEnd(previousStart) : undefined;
     Promise.all([
       fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season), fetchLeagueTransactions(),
@@ -253,7 +256,7 @@ export default function PowerRankings() {
     : mode === "month"
       ? monthRange(season, month).end
       : `${season}-04-30`;
-  const previousRankingEndDate = mode === "period"
+  const previousRankingEndDate = mode === "period" && period > 1
     ? shiftDate(periodStart(season, period), -1)
     : mode === "month" && month > 0
       ? monthRange(season, month - 1).end
@@ -339,11 +342,11 @@ export default function PowerRankings() {
             <label className="text-xs font-bold uppercase text-gray-500">Season<select value={season} onChange={(event) => changeSeason(Number(event.target.value))} className="mt-1 block h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></label>
             <div className="flex h-10 rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setMode("period")} className={`rounded-md px-3 text-xs font-bold ${mode === "period" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "text-gray-500"}`}>Periods</button><button type="button" onClick={() => setMode("month")} className={`rounded-md px-3 text-xs font-bold ${mode === "month" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "text-gray-500"}`}>Months</button><button type="button" onClick={() => setMode("season")} className={`rounded-md px-3 text-xs font-bold ${mode === "season" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "text-gray-500"}`}>Full Season</button></div>
             {mode === "period" && <label className="text-xs font-bold uppercase text-gray-500">Scoring period<select value={period} onChange={(event) => setPeriod(Number(event.target.value))} className="mt-1 block h-10 min-w-56 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium normal-case text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{Array.from({ length: periodsPerSeason }, (_, index) => index + 1).map((number) => { const start = periodStart(season, number); return <option key={number} value={number}>Period {number} · {periodLabel(start)}</option>; })}</select></label>}
-            {mode === "month" && <label className="text-xs font-bold uppercase text-gray-500">Month<select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="mt-1 block h-10 min-w-40 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium normal-case text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{monthNames.map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label>}
+            {mode === "month" && <label className="text-xs font-bold uppercase text-gray-500">Month<select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="mt-1 block h-10 min-w-40 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium normal-case text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{monthNames.map((name, index) => <option key={name} value={index}>{monthLabel(season, index)}</option>)}</select></label>}
           </div>
         </div>
-        {mode === "period" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">Period {period}: {periodLabel(selectedPeriodStart)} <span className="ml-2 font-normal text-gray-400">· Movement compares the previous two-week period</span></p>}
-        {mode === "month" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">{monthNames[month]}: {rangeLabel(selectedMonthRange.start, selectedMonthRange.end)} <span className="ml-2 font-normal text-gray-400">· Movement compares the previous month</span></p>}
+        {mode === "period" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">Period {period}: {periodLabel(selectedPeriodStart)} <span className="ml-2 font-normal text-gray-400">· {period > 1 ? "Movement compares the previous two-week period" : "Opening period — no previous-period comparison"}</span></p>}
+        {mode === "month" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">{monthLabel(season, month)}: {rangeLabel(selectedMonthRange.start, selectedMonthRange.end)} <span className="ml-2 font-normal text-gray-400">· {month > 0 ? "Movement compares the previous month" : "Opening award month — no previous-month comparison"}</span></p>}
       </section>
       {loading ? <div className="grid animate-pulse gap-5"><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /></div> : error ? <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : tab === "players" ? <div className="space-y-5"><PlayerHighlights rows={playerRankings} mode={mode} tandem={goalieTandems[0]} headshots={headshots} />{positions.map((pos) => <PlayerPositionCard key={pos} position={pos} rows={playerRankings.filter((row) => row.position === pos)} />)}</div> : <div className="space-y-5"><div><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Overall team rankings</h2><TeamTable rows={teamRankings} /></div><div className="pt-2"><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Positional unit rankings</h2><div className="space-y-5">{positions.map((pos) => <UnitCard key={pos} position={pos} teams={teamRankings} />)}</div></div></div>}
       {!loading && !error && <p className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400"><strong>How this works:</strong> Rankings reconstruct each player’s fantasy team as of the end of the selected period or month using the league transaction history. Team rankings count the highest-scoring 3 C, 3 LW, 3 RW, 6 D and 2 G from that historical roster. Extra roster players remain eligible for individual Player Rankings but do not add to team or positional-unit totals. Team GP is the combined number of NHL appearances by those scoring players, and FPPG is their fantasy points divided by those appearances. Players with zero games are excluded from Bottom 5 lists.</p>}

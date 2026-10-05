@@ -33,6 +33,9 @@ function monthRange(season: number, index: number) {
     end: formatDate(new Date(year, calendarMonth, 0)),
   };
 }
+function monthLabel(season: number, month: string) {
+  return season === 2027 && month === "October" ? "September / October" : month;
+}
 function playerName(row: PlayerSeasonWithRelations) { return row.player?.full_name || [row.player?.first_name, row.player?.last_name].filter(Boolean).join(" ") || "Unknown player"; }
 function readHeadshotCache(): Record<string, CachedHeadshot> {
   try { return JSON.parse(localStorage.getItem(headshotCacheKey) || "{}") as Record<string, CachedHeadshot>; }
@@ -121,13 +124,13 @@ export default function MonthlyHonours() {
   }, [winnerIds]);
 
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"><div><h2 className="text-xl font-black text-gray-900 dark:text-white">Monthly Honours</h2><p className="mt-1 text-sm text-gray-500">Automatically awarded from official fantasy points for each calendar month.</p></div><label className="text-xs font-bold uppercase text-gray-500">Season<select value={season} onChange={(event) => setSeason(Number(event.target.value))} className="mt-1 block h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{seasons.map((year) => <option key={year}>{year}</option>)}</select></label></div>
+    <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"><div><h2 className="text-xl font-black text-gray-900 dark:text-white">Monthly Honours</h2><p className="mt-1 text-sm text-gray-500">Automatically awarded from official fantasy points for each award month.</p></div><label className="text-xs font-bold uppercase text-gray-500">Season<select value={season} onChange={(event) => setSeason(Number(event.target.value))} className="mt-1 block h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{seasons.map((year) => <option key={year}>{year}</option>)}</select></label></div>
     {loading && <div className="grid animate-pulse gap-5 md:grid-cols-3"><div className="h-56 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-56 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-56 rounded-2xl bg-gray-100 dark:bg-gray-800" /></div>}
     {error && <p role="alert" className="rounded-xl bg-error-50 p-4 text-sm text-error-700 dark:bg-error-500/10 dark:text-error-400">{error}</p>}
     {!loading && !error && [...months].reverse().map((month) => {
       const monthWinners = winners.filter((winner) => winner.month === month);
       if (!monthWinners.length) return null;
-      return <section key={month} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600 dark:text-amber-300">{season} Monthly Honours</p><h3 className="text-xl font-black text-gray-900 dark:text-white">{month}</h3></div><div className="grid divide-y divide-gray-200 md:grid-cols-3 md:divide-x md:divide-y-0 dark:divide-gray-800">{monthWinners.map((winner) => {
+      return <section key={month} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-600 dark:text-amber-300">{season} Monthly Honours</p><h3 className="text-xl font-black text-gray-900 dark:text-white">{monthLabel(season, month)}</h3></div><div className="grid divide-y divide-gray-200 md:grid-cols-3 md:divide-x md:divide-y-0 dark:divide-gray-800">{monthWinners.map((winner) => {
         const apiId = winner.season.player?.player_api_id || "";
         const style = categoryStyle[winner.category];
         const countAtThisWin = winners.filter((candidate) => candidate.season.player?.player_api_id === apiId && candidate.monthIndex <= winner.monthIndex).length;
