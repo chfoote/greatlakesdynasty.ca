@@ -28,11 +28,11 @@ import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/league
 const statsSeasons = playedAndCurrentSeasons;
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
-type SkaterSortKey = "player" | "position" | "goals" | "assists" | "plusMinus" | "penaltyMinutes" | "ppGoals" | "ppAssists" | "shGoals" | "shAssists" | "gameWinningGoals" | "shots" | "blockedShots" | "hits" | "faceoffWins" | "score" | "fantasyPointsPerGame";
+type SkaterSortKey = "player" | "position" | "gamesPlayed" | "goals" | "assists" | "plusMinus" | "penaltyMinutes" | "ppGoals" | "ppAssists" | "shGoals" | "shAssists" | "gameWinningGoals" | "shots" | "blockedShots" | "hits" | "faceoffWins" | "score" | "fantasyPointsPerGame";
 type SortDirection = "asc" | "desc";
 
 const skaterColumns: { label: string; key: SkaterSortKey }[] = [
-  { label: "PLAYER", key: "player" }, { label: "POS", key: "position" },
+  { label: "PLAYER", key: "player" }, { label: "POS", key: "position" }, { label: "GP", key: "gamesPlayed" },
   { label: "G", key: "goals" }, { label: "A", key: "assists" },
   { label: "+/-", key: "plusMinus" }, { label: "PIMs", key: "penaltyMinutes" },
   { label: "PPG", key: "ppGoals" }, { label: "PPA", key: "ppAssists" },
@@ -194,7 +194,7 @@ export default function SkaterStats() {
                   return <tr key={record.playerId} className="hover:bg-gray-50 dark:hover:bg-white/[0.03]">
                     <td className="px-3 py-3"><NhlPlayerCell playerName={record.skaterFullName} playerId={record.playerId} teamAbbreviation={record.teamAbbrevs} birthDate={record.birthDate} fantasySeason={fantasySeasons.get(String(record.playerId))} prospectRight={getProspectRight(prospectRights, record.playerId, record.skaterFullName)} awards={fantasySeasons.get(String(record.playerId))?.player?.id ? awardsByPlayer.get(fantasySeasons.get(String(record.playerId))!.player!.id) || [] : []} leadershipRole={fantasySeasons.get(String(record.playerId))?.id ? leadershipByPlayerSeason.get(fantasySeasons.get(String(record.playerId))!.id) : undefined} leadingAction={tradeInterest.canExpressInterest(fantasySeasons.get(String(record.playerId))) ? <PlayerInterestButton interested={tradeInterest.isInterested(fantasySeasons.get(String(record.playerId))!.id)} busy={tradeInterest.busyPlayerSeasonId === fantasySeasons.get(String(record.playerId))!.id} onClick={() => void tradeInterest.toggleInterest(fantasySeasons.get(String(record.playerId))!)} /> : undefined} />{fantasySeasons.get(String(record.playerId))?.id && tradeBlockIds.has(fantasySeasons.get(String(record.playerId))!.id) && <TradeBlockBadge className="mt-1" />}</td>
                     <td className="px-3 py-3 text-center"><PositionBadge position={record.positionCode} /></td>
-                    {[record.goals,record.assists,record.plusMinus,record.penaltyMinutes,record.ppGoals,record.ppPoints-record.ppGoals,record.shGoals,record.shPoints-record.shGoals,record.gameWinningGoals,record.shots,record.blockedShots,record.hits,record.totalFaceoffWins].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
+                    {[record.gamesPlayed,record.goals,record.assists,record.plusMinus,record.penaltyMinutes,record.ppGoals,record.ppPoints-record.ppGoals,record.shGoals,record.shPoints-record.shGoals,record.gameWinningGoals,record.shots,record.blockedShots,record.hits,record.totalFaceoffWins].map((value, index) => <td key={index} className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{formatNhlStat(value)}</td>)}
                     <td className="px-3 py-3 text-center font-semibold text-gray-800 dark:text-white/90">{formatFantasyPoints(score)}</td>
                     <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.gamesPlayed ? formatFantasyPoints(score / record.gamesPlayed) : '—'}</td>
                   </tr>;
