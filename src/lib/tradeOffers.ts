@@ -17,6 +17,7 @@ export type TradeOfferPlayer = {
   player_season_id: number;
   from_team_id: number;
   to_team_id: number;
+  retention_requested: boolean;
   created_at: string;
   player_season: PlayerSeasonWithRelations | null;
   from_team: FantasyTeam | null;
@@ -119,6 +120,7 @@ export async function createTradeOffer({
   notes,
   parentTradeOfferId,
   playerMoves,
+  retentionRequestedPlayerSeasonIds = [],
 }: {
   seasonYear: number;
   fromTeamId: number;
@@ -131,6 +133,7 @@ export async function createTradeOffer({
     fromTeamId: number;
     toTeamId: number;
   }>;
+  retentionRequestedPlayerSeasonIds?: number[];
 }) {
   const { data: offer, error: offerError } = await supabase
     .from("trade_offers")
@@ -157,6 +160,7 @@ export async function createTradeOffer({
           player_season_id: move.playerSeasonId,
           from_team_id: move.fromTeamId,
           to_team_id: move.toTeamId,
+          retention_requested: retentionRequestedPlayerSeasonIds.includes(move.playerSeasonId),
         })),
       );
 
@@ -180,12 +184,14 @@ export async function createAdminTradeOffer({
   toTeamId,
   notes,
   playerMoves,
+  retentionRequestedPlayerSeasonIds = [],
 }: {
   seasonYear: number;
   fromTeamId: number;
   toTeamId: number;
   notes: string | null;
   playerMoves: Array<{ playerSeasonId: number; fromTeamId: number; toTeamId: number }>;
+  retentionRequestedPlayerSeasonIds?: number[];
 }) {
   const { data, error } = await supabase.rpc("create_admin_trade_offer", {
     p_season_year: seasonYear,
@@ -195,6 +201,7 @@ export async function createAdminTradeOffer({
     p_player_moves: playerMoves,
   });
   if (error) throw error;
+  if (retentionRequestedPlayerSeasonIds.length) await setTradeRetentionRequests(data.id, retentionRequestedPlayerSeasonIds);
   return data as TradeOffer;
 }
 
@@ -205,6 +212,7 @@ export async function createAdminThreeTeamTrade({
   team3Id,
   notes,
   playerMoves,
+  retentionRequestedPlayerSeasonIds = [],
 }: {
   seasonYear: number;
   team1Id: number;
@@ -212,6 +220,7 @@ export async function createAdminThreeTeamTrade({
   team3Id: number;
   notes: string | null;
   playerMoves: Array<{ playerSeasonId: number; fromTeamId: number; toTeamId: number }>;
+  retentionRequestedPlayerSeasonIds?: number[];
 }) {
   const { data, error } = await supabase.rpc("create_admin_three_team_trade", {
     p_season_year: seasonYear,
@@ -222,22 +231,33 @@ export async function createAdminThreeTeamTrade({
     p_player_moves: playerMoves,
   });
   if (error) throw error;
+  if (retentionRequestedPlayerSeasonIds.length) await setTradeRetentionRequests(data.id, retentionRequestedPlayerSeasonIds);
   return data;
 }
 
 export async function createThreeTeamTradeOffer({
-  seasonYear, team1Id, team2Id, team3Id, notes, playerMoves,
+  seasonYear, team1Id, team2Id, team3Id, notes, playerMoves, retentionRequestedPlayerSeasonIds = [],
 }: {
   seasonYear: number; team1Id: number; team2Id: number; team3Id: number; notes: string | null;
   playerMoves: Array<{ playerSeasonId: number; fromTeamId: number; toTeamId: number }>;
+  retentionRequestedPlayerSeasonIds?: number[];
 }) {
   const { data, error } = await supabase.rpc("create_three_team_trade_offer", {
     p_season_year: seasonYear, p_team_1_id: team1Id, p_team_2_id: team2Id,
     p_team_3_id: team3Id, p_notes: notes, p_player_moves: playerMoves,
   });
   if (error) throw error;
+  if (retentionRequestedPlayerSeasonIds.length) await setTradeRetentionRequests(data.id, retentionRequestedPlayerSeasonIds);
   wakeTradeEmailWorker();
   return data as TradeOffer;
+}
+
+async function setTradeRetentionRequests(tradeOfferId: number, playerSeasonIds: number[]) {
+  const { error } = await supabase.rpc("set_trade_retention_requests", {
+    p_trade_offer_id: tradeOfferId,
+    p_player_season_ids: playerSeasonIds,
+  });
+  if (error) throw error;
 }
 
 export async function respondToThreeTeamTradeOffer(tradeOfferId: number, accept: boolean) {
@@ -293,10 +313,19 @@ export async function updateTradeOfferStatus({
   return data as TradeOffer;
 }
 
-export async function approveTradeOffer(tradeOfferId: number, transactionDate: string) {
+export type TradeRetentionInput = {
+  playerSeasonId: number;
+  retainedAmount: number;
+};
+
+export async function approveTradeOffer(tradeOfferId: number, transactionDate: string, retentions: TradeRetentionInput[] = []) {
   const { data, error } = await supabase.rpc("approve_trade_offer_with_date", {
     p_trade_offer_id: tradeOfferId,
     p_transaction_date: transactionDate,
+    p_retentions: retentions.map((retention) => ({
+      player_season_id: retention.playerSeasonId,
+      retained_amount: retention.retainedAmount,
+    })),
   });
 
   if (error) throw error;

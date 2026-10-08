@@ -318,6 +318,7 @@ function TradeOfferPlayerList({ players }: { players: TradeOfferPlayer[] }) {
             ({player.from_team?.abbreviation || "?"} to{" "}
             {player.to_team?.abbreviation || "?"})
           </span>
+          {player.retention_requested && <span className="ml-2 inline-flex rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black uppercase text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">Retention requested</span>}
         </li>
       ))}
     </ul>
@@ -492,6 +493,8 @@ type TeamColumnProps = {
   destinationTeams?: FantasyTeam[];
   destinations?: Record<number, string>;
   onDestinationChange?: (playerSeasonId: number, teamId: string) => void;
+  retentionRequestedIds: Set<number>;
+  onRetentionRequestedChange: (playerSeasonId: number, requested: boolean) => void;
 };
 
 function TeamColumn({
@@ -520,6 +523,8 @@ function TeamColumn({
   destinationTeams,
   destinations,
   onDestinationChange,
+  retentionRequestedIds,
+  onRetentionRequestedChange,
 }: TeamColumnProps) {
   const selectedTeam = teams.find((team) => String(team.id) === selectedTeamId);
   const tradeableRoster = useMemo(() => getTradeableRoster(roster), [roster]);
@@ -725,6 +730,12 @@ function TeamColumn({
                         </select>
                       </div>
                     )}
+                    {checked && (season.salary || 0) > 0 && (
+                      <label className="mt-3 flex items-start gap-2 rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
+                        <input type="checkbox" checked={retentionRequestedIds.has(season.id)} onChange={(event) => onRetentionRequestedChange(season.id, event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-violet-300 text-violet-600" />
+                        <span><strong className="block">Request retained salary</strong><span className="mt-0.5 block opacity-80">Admin will set the final amount, up to 25% of {formatCurrency(season.salary)}.</span></span>
+                      </label>
+                    )}
                   </div>
                 </div>
               );
@@ -775,6 +786,7 @@ export default function TradeManager() {
   );
   const [team3SelectedIds, setTeam3SelectedIds] = useState<Set<number>>(() => new Set());
   const [playerDestinations, setPlayerDestinations] = useState<Record<number, string>>({});
+  const [retentionRequestedIds, setRetentionRequestedIds] = useState<Set<number>>(() => new Set());
   const [tradeNotes, setTradeNotes] = useState("");
   const [nhlPlayerStats, setNhlPlayerStats] = useState<NhlPlayerStatMaps>(
     emptyNhlPlayerStatMaps,
@@ -1119,6 +1131,7 @@ export default function TradeManager() {
       else next.delete(playerSeasonId);
       return next;
     });
+    if (!checked) setRetentionRequestedIds((current) => { const next = new Set(current); next.delete(playerSeasonId); return next; });
   }
 
   function toggleTeam2Player(playerSeasonId: number, checked: boolean) {
@@ -1128,12 +1141,23 @@ export default function TradeManager() {
       else next.delete(playerSeasonId);
       return next;
     });
+    if (!checked) setRetentionRequestedIds((current) => { const next = new Set(current); next.delete(playerSeasonId); return next; });
   }
 
   function toggleTeam3Player(playerSeasonId: number, checked: boolean) {
     setTeam3SelectedIds((current) => {
       const next = new Set(current);
       if (checked) next.add(playerSeasonId); else next.delete(playerSeasonId);
+      return next;
+    });
+    if (!checked) setRetentionRequestedIds((current) => { const next = new Set(current); next.delete(playerSeasonId); return next; });
+  }
+
+  function setRetentionRequest(playerSeasonId: number, requested: boolean, roster: PlayerSeasonWithRelations[]) {
+    setRetentionRequestedIds((current) => {
+      const next = new Set(current);
+      roster.forEach((season) => next.delete(season.id));
+      if (requested) next.add(playerSeasonId);
       return next;
     });
   }
@@ -1199,6 +1223,7 @@ export default function TradeManager() {
           toTeamId: Number(playerDestinations[season.id]),
         }))
       : twoTeamMoves;
+    const retentionRequestedPlayerSeasonIds = playerMoves.map((move) => move.playerSeasonId).filter((id) => retentionRequestedIds.has(id));
 
     if (playerMoves.length === 0 && !tradeNotes.trim()) {
       setError("Select at least one player or add trade notes before sending an offer.");
@@ -1218,6 +1243,7 @@ export default function TradeManager() {
           team3Id: Number(team3Id),
           notes: tradeNotes.trim() || null,
           playerMoves,
+          retentionRequestedPlayerSeasonIds,
         });
       } else if (threeTeamMode && !counteringOffer) {
         await createThreeTeamTradeOffer({
@@ -1227,6 +1253,7 @@ export default function TradeManager() {
           team3Id: Number(team3Id),
           notes: tradeNotes.trim() || null,
           playerMoves,
+          retentionRequestedPlayerSeasonIds,
         });
       } else if (isAdmin && !counteringOffer) {
         await createAdminTradeOffer({
@@ -1235,6 +1262,7 @@ export default function TradeManager() {
           toTeamId: Number(team2Id),
           notes: tradeNotes.trim() || null,
           playerMoves,
+          retentionRequestedPlayerSeasonIds,
         });
       } else {
         await createTradeOffer({
@@ -1245,6 +1273,7 @@ export default function TradeManager() {
           notes: tradeNotes.trim() || null,
           parentTradeOfferId: counteringOffer?.id ?? null,
           playerMoves,
+          retentionRequestedPlayerSeasonIds,
         });
       }
 
@@ -1259,6 +1288,7 @@ export default function TradeManager() {
       setTeam2SelectedIds(new Set());
       setTeam3SelectedIds(new Set());
       setPlayerDestinations({});
+      setRetentionRequestedIds(new Set());
       setTradeNotes("");
       setCounteringOffer(null);
       setSuccess(
@@ -1635,6 +1665,8 @@ export default function TradeManager() {
             destinationTeams={threeTeamMode ? teams.filter((team) => ![team1Id].includes(String(team.id)) && teamIds.includes(String(team.id))) : undefined}
             destinations={playerDestinations}
             onDestinationChange={setDestination}
+            retentionRequestedIds={retentionRequestedIds}
+            onRetentionRequestedChange={(playerSeasonId, requested) => setRetentionRequest(playerSeasonId, requested, team1Roster)}
           />
 
           <TeamColumn
@@ -1663,6 +1695,8 @@ export default function TradeManager() {
             destinationTeams={threeTeamMode ? teams.filter((team) => ![team2Id].includes(String(team.id)) && teamIds.includes(String(team.id))) : undefined}
             destinations={playerDestinations}
             onDestinationChange={setDestination}
+            retentionRequestedIds={retentionRequestedIds}
+            onRetentionRequestedChange={(playerSeasonId, requested) => setRetentionRequest(playerSeasonId, requested, team2Roster)}
           />
 
           {threeTeamMode && (
@@ -1692,6 +1726,8 @@ export default function TradeManager() {
               destinationTeams={teams.filter((team) => String(team.id) !== team3Id && teamIds.includes(String(team.id)))}
               destinations={playerDestinations}
               onDestinationChange={setDestination}
+              retentionRequestedIds={retentionRequestedIds}
+              onRetentionRequestedChange={(playerSeasonId, requested) => setRetentionRequest(playerSeasonId, requested, team3Roster)}
             />
           )}
         </div>

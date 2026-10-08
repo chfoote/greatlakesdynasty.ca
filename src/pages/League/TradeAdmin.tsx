@@ -47,6 +47,8 @@ function TradeAdminOfferCard({
   onApprove,
   onDecline,
   impacts,
+  retentionAmounts,
+  onRetentionAmountChange,
 }: {
   offer: TradeOffer;
   busy: boolean;
@@ -55,12 +57,23 @@ function TradeAdminOfferCard({
   onApprove: () => void;
   onDecline: () => void;
   impacts: Record<number, TeamImpact>;
+  retentionAmounts: Record<number, string>;
+  onRetentionAmountChange: (playerSeasonId: number, amount: string) => void;
 }) {
   const participatingTeams = [offer.from_team, offer.to_team, offer.third_team].filter(Boolean);
-  const complianceReady = participatingTeams.length > 0 && participatingTeams.every((team) => team && impacts[team.id]);
+  const adjustedImpacts = Object.fromEntries(Object.entries(impacts).map(([teamId, impact]) => [teamId, { ...impact }]));
+  offer.trade_offer_players.forEach((move) => {
+    const amount = Number(retentionAmounts[move.player_season_id]) || 0;
+    if (amount > 0) {
+      if (adjustedImpacts[move.from_team_id]) adjustedImpacts[move.from_team_id].projectedPayroll += amount;
+      if (adjustedImpacts[move.to_team_id]) adjustedImpacts[move.to_team_id].projectedPayroll -= amount;
+    }
+  });
+  const complianceReady = participatingTeams.length > 0 && participatingTeams.every((team) => team && adjustedImpacts[team.id]);
+  const retentionRequestComplete = offer.trade_offer_players.every((move) => !move.retention_requested || Number(retentionAmounts[move.player_season_id]) > 0);
   const tradeCompliant = complianceReady && participatingTeams.every((team) => {
     if (!team) return false;
-    const impact = impacts[team.id];
+    const impact = adjustedImpacts[team.id];
     return impact.projectedPayroll <= impact.cap && impact.projectedRoster <= rosterLimit;
   });
   return (
@@ -97,10 +110,10 @@ function TradeAdminOfferCard({
           <button
             type="button"
             onClick={onApprove}
-            disabled={busy || offer.status !== "accepted" || !transactionDate}
+            disabled={busy || offer.status !== "accepted" || !transactionDate || !tradeCompliant || !retentionRequestComplete}
             className="rounded-lg bg-success-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Approve & Move Players
+            {!retentionRequestComplete ? "Enter Retention Amount" : tradeCompliant ? "Approve & Move Players" : "Resolve Limit Issue"}
           </button>
           <button
             type="button"
@@ -118,9 +131,18 @@ function TradeAdminOfferCard({
           <div key={team.id}>
             <p className="mb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{team.team_name} receives</p>
             <ul className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-              {offer.trade_offer_players.filter((player) => player.to_team_id === team.id).map((player) => (
-                <li key={player.id}>{player.player_season?.player?.full_name || "Unknown Player"}</li>
-              ))}
+              {offer.trade_offer_players.filter((player) => player.to_team_id === team.id).map((player) => {
+                const salary = player.player_season?.salary || 0;
+                const maximum = Math.round(salary * 0.25);
+                const anotherFromTeamRetention = offer.trade_offer_players.some((candidate) => candidate.from_team_id === player.from_team_id && candidate.player_season_id !== player.player_season_id && Number(retentionAmounts[candidate.player_season_id]) > 0);
+                return <li key={player.id} className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 dark:border-gray-700 dark:bg-gray-950/30">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">{player.player_season?.player?.full_name || "Unknown Player"}</span><span className="flex items-center gap-2">{player.retention_requested && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-black uppercase text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">Manager requested retention</span>}<span className="text-xs text-gray-500">{money.format(salary)} AAV</span></span></div>
+                  {salary > 0 && <label className="mt-2 block text-[10px] font-black uppercase tracking-wide text-violet-600 dark:text-violet-300">Annual salary retained {player.retention_requested ? "(required)" : "(optional)"}
+                    <input type="number" min="0" max={maximum} step="1" value={retentionAmounts[player.player_season_id] || ""} disabled={anotherFromTeamRetention} onChange={(event) => onRetentionAmountChange(player.player_season_id, event.target.value)} placeholder={`Up to ${money.format(maximum)}`} className="mt-1 h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                    <span className="mt-1 block font-normal normal-case tracking-normal text-gray-500">Maximum 25%. One retained contract per team this season.</span>
+                  </label>}
+                </li>;
+              })}
             </ul>
           </div>
         ))}
@@ -129,7 +151,7 @@ function TradeAdminOfferCard({
       <section className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-800 dark:bg-gray-950/30">
         <div className="mb-3"><p className="text-xs font-black uppercase tracking-wide text-gray-700 dark:text-gray-200">Post-trade compliance</p><p className="mt-0.5 text-[11px] text-gray-500">Includes active contracts, buyout penalties, and retained-salary adjustments.</p></div>
         <div className={`grid gap-3 ${participatingTeams.length === 3 ? "xl:grid-cols-3" : "lg:grid-cols-2"}`}>
-          {participatingTeams.map((team) => team && <div key={team.id} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900"><p className="mb-2 text-xs font-bold text-gray-800 dark:text-white">{team.team_name}</p>{impacts[team.id] ? <div className="grid gap-2 sm:grid-cols-2"><ComplianceMetric label="Payroll" current={impacts[team.id].currentPayroll} projected={impacts[team.id].projectedPayroll} limit={impacts[team.id].cap} format={(value) => money.format(value)} /><ComplianceMetric label="Active roster" current={impacts[team.id].currentRoster} projected={impacts[team.id].projectedRoster} limit={rosterLimit} /></div> : <p className="text-xs text-gray-400">Compliance data unavailable.</p>}</div>)}
+          {participatingTeams.map((team) => team && <div key={team.id} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900"><p className="mb-2 text-xs font-bold text-gray-800 dark:text-white">{team.team_name}</p>{adjustedImpacts[team.id] ? <div className="grid gap-2 sm:grid-cols-2"><ComplianceMetric label="Payroll" current={adjustedImpacts[team.id].currentPayroll} projected={adjustedImpacts[team.id].projectedPayroll} limit={adjustedImpacts[team.id].cap} format={(value) => money.format(value)} /><ComplianceMetric label="Active roster" current={adjustedImpacts[team.id].currentRoster} projected={adjustedImpacts[team.id].projectedRoster} limit={rosterLimit} /></div> : <p className="text-xs text-gray-400">Compliance data unavailable.</p>}</div>)}
         </div>
       </section>
 
@@ -156,6 +178,7 @@ export default function TradeAdmin() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [offerImpacts, setOfferImpacts] = useState<Record<number, Record<number, TeamImpact>>>({});
+  const [retentionAmounts, setRetentionAmounts] = useState<Record<number, Record<number, string>>>({});
 
   async function loadOffers() {
     setLoading(true);
@@ -216,7 +239,13 @@ export default function TradeAdmin() {
     try {
       const transactionDate = transactionDates[offer.id];
       if (!transactionDate) throw new Error("Date of Transaction is required.");
-      await approveTradeOffer(offer.id, transactionDate);
+      const retentions = Object.entries(retentionAmounts[offer.id] || {}).filter(([, amount]) => Number(amount) > 0).map(([playerSeasonId, amount]) => ({ playerSeasonId: Number(playerSeasonId), retainedAmount: Number(amount) }));
+      for (const retention of retentions) {
+        const move = offer.trade_offer_players.find((candidate) => candidate.player_season_id === retention.playerSeasonId);
+        const maximum = Math.round((move?.player_season?.salary || 0) * 0.25);
+        if (!Number.isInteger(retention.retainedAmount) || retention.retainedAmount <= 0 || retention.retainedAmount > maximum) throw new Error(`Retention must be a whole-dollar amount no greater than ${money.format(maximum)}.`);
+      }
+      await approveTradeOffer(offer.id, transactionDate, retentions);
       setSuccess(`Trade #${offer.id} approved and posted with a ${transactionDate} transaction date.`);
       await loadOffers();
     } catch (err) {
@@ -320,6 +349,8 @@ export default function TradeAdmin() {
                 onApprove={() => handleApprove(offer)}
                 onDecline={() => handleDecline(offer)}
                 impacts={offerImpacts[offer.id] || {}}
+                retentionAmounts={retentionAmounts[offer.id] || {}}
+                onRetentionAmountChange={(playerSeasonId, amount) => setRetentionAmounts((current) => ({ ...current, [offer.id]: { ...(current[offer.id] || {}), [playerSeasonId]: amount } }))}
               />
             ))}
           </div>
