@@ -112,6 +112,13 @@ export async function postSigningTransaction(
     throw new Error("Choose a fantasy team before posting a signing transaction.");
   }
 
+  if (action === "claimed") {
+    const { error: carryoverError } = await supabase.rpc("carry_claimed_contract_forward", {
+      p_player_season_id: season.id,
+    });
+    if (carryoverError) throw carryoverError;
+  }
+
   const { data, error } = await supabase
     .from("league_transactions")
     .insert({
