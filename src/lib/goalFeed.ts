@@ -3,6 +3,7 @@ import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
 import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights } from "./prospectRights";
 import { fetchNhlDailyStats, fetchNhlLiveSeasonStats, getGoalieScore, getNhlStatsDate, getSkaterScore } from "./nhl";
+import { fetchRecordBookData, type FranchiseStatLine } from "./recordBook";
 
 type Localized = { default?: string };
 type ScoreTeam = { id?: number; abbrev?: string; score?: number; logo?: string; commonName?: Localized; placeName?: Localized };
@@ -60,6 +61,129 @@ export type GoalieFeedEvent = {
 
 export type FeedStanding = { team: FantasyTeam; rank: number; points: number };
 
+export type RecordMovement = {
+  scope: "league" | "franchise";
+  category: "Goals" | "Assists" | "Points" | "Game-Winning Goals" | "Wins" | "Shutouts";
+  abbreviation: "G" | "A" | "P" | "GWG" | "W" | "SO";
+  beforeRank: number | null;
+  afterRank: number;
+  value: number;
+  moved: boolean;
+  tied: boolean;
+  passedNames: string[];
+  tiedNames: string[];
+  team: FantasyTeam | null;
+};
+
+export type RecordMovementEvent = {
+  key: string;
+  player: GoalFeedPlayer;
+  movements: RecordMovement[];
+  sortValue: number;
+};
+
+type RecordMetric = {
+  category: RecordMovement["category"];
+  abbreviation: RecordMovement["abbreviation"];
+  kind: "skater" | "goalie";
+  value: (line: FranchiseStatLine) => number;
+  dailyValue: (row: Record<string, unknown>) => number;
+};
+
+const recordMetrics: RecordMetric[] = [
+  { category: "Goals", abbreviation: "G", kind: "skater", value: (line) => line.skater?.goals || 0, dailyValue: (row) => Number(row.goals || 0) },
+  { category: "Assists", abbreviation: "A", kind: "skater", value: (line) => line.skater?.assists || 0, dailyValue: (row) => Number(row.assists || 0) },
+  { category: "Points", abbreviation: "P", kind: "skater", value: (line) => line.skater?.points || 0, dailyValue: (row) => Number(row.goals || 0) + Number(row.assists || 0) },
+  { category: "Game-Winning Goals", abbreviation: "GWG", kind: "skater", value: (line) => line.skater?.gameWinningGoals || 0, dailyValue: (row) => Number(row.gameWinningGoals || 0) },
+  { category: "Wins", abbreviation: "W", kind: "goalie", value: (line) => line.goalie?.wins || 0, dailyValue: (row) => Number(row.wins || 0) },
+  { category: "Shutouts", abbreviation: "SO", kind: "goalie", value: (line) => line.goalie?.shutouts || 0, dailyValue: (row) => Number(row.shutouts || 0) },
+];
+
+const recordBookCache = new Map<string, { expiresAt: number; request: ReturnType<typeof fetchRecordBookData> }>();
+
+function fetchDatedRecordBook(date: string) {
+  const cached = recordBookCache.get(date);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+  const request = fetchRecordBookData(null, null, date);
+  recordBookCache.set(date, { expiresAt: Date.now() + (date === getNhlStatsDate() ? 60_000 : 15 * 60_000), request });
+  request.catch(() => { if (recordBookCache.get(date)?.request === request) recordBookCache.delete(date); });
+  return request;
+}
+
+function competitionRank(values: number[], value: number) {
+  return 1 + values.filter((candidate) => candidate > value).length;
+}
+
+function buildRecordMovements(
+  lines: FranchiseStatLine[],
+  dailySkaters: Record<string, unknown>[],
+  dailyGoalies: Record<string, unknown>[],
+  players: Map<string, GoalFeedPlayer>,
+  metricSortValues: Map<string, number>,
+  ownerByPlayer: Map<string, number | null>,
+) {
+  const dailyByKind = {
+    skater: new Map(dailySkaters.map((row) => [String(row.playerId), row])),
+    goalie: new Map(dailyGoalies.map((row) => [String(row.playerId), row])),
+  };
+  const results: RecordMovementEvent[] = [];
+
+  players.forEach((player, playerId) => {
+    const playerLines = lines.filter((line) => line.playerId === playerId);
+    const teamId = player.fantasyTeam?.id;
+    if (!playerLines.length || !teamId) return;
+    const movementsByEvent = new Map<number, RecordMovement[]>();
+
+    recordMetrics.forEach((metric) => {
+      const dailyRow = dailyByKind[metric.kind].get(playerId);
+      const dailyValue = dailyRow ? metric.dailyValue(dailyRow) : 0;
+      if (dailyValue <= 0) return;
+
+      (["league", "franchise"] as const).forEach((scope) => {
+        const scopedLines = scope === "league" ? lines : lines.filter((line) => line.team?.id === teamId);
+        const grouped = new Map<string, { name: string; current: number; before: number }>();
+        scopedLines.forEach((line) => {
+          const current = grouped.get(line.playerId) || { name: line.playerName, current: 0, before: 0 };
+          const value = metric.value(line);
+          current.current += value;
+          current.before += value;
+          grouped.set(line.playerId, current);
+        });
+        grouped.forEach((row, candidateId) => {
+          const candidateDaily = dailyByKind[metric.kind].get(candidateId);
+          if (!candidateDaily) return;
+          if (scope === "league" || ownerByPlayer.get(candidateId) === teamId) row.before -= metric.dailyValue(candidateDaily);
+        });
+        const subject = grouped.get(playerId);
+        if (!subject || subject.current < dailyValue) return;
+        const beforeValues = [...grouped.values()].map((row) => row.before);
+        const currentValues = [...grouped.values()].map((row) => row.current);
+        const beforeRank = competitionRank(beforeValues, subject.before);
+        const afterRank = competitionRank(currentValues, subject.current);
+        if (afterRank > 5) return;
+        const moved = afterRank < beforeRank;
+        const passedNames = [...grouped.entries()].filter(([id, row]) => id !== playerId && row.before > subject.before && row.current < subject.current).map(([, row]) => row.name);
+        const tiedNames = [...grouped.entries()].filter(([id, row]) => id !== playerId && row.current === subject.current).map(([, row]) => row.name);
+        const sortValue = metricSortValues.get(`${playerId}:${metric.abbreviation}`);
+        if (sortValue == null) return;
+        const movement: RecordMovement = {
+          scope, category: metric.category, abbreviation: metric.abbreviation,
+          beforeRank: beforeRank <= 5 ? beforeRank : null, afterRank, value: subject.current,
+          moved, tied: tiedNames.length > 0, passedNames: passedNames.slice(0, 2), tiedNames: tiedNames.slice(0, 2),
+          team: scope === "franchise" ? player.fantasyTeam : null,
+        };
+        movementsByEvent.set(sortValue, [...(movementsByEvent.get(sortValue) || []), movement]);
+      });
+    });
+
+    movementsByEvent.forEach((movements, sortValue) => {
+      const signature = movements.map((movement) => `${movement.scope}:${movement.abbreviation}:${movement.afterRank}:${movement.value}`).join("|");
+      results.push({ key: `records:${playerId}:${signature}`, player, movements, sortValue: sortValue + 0.5 });
+    });
+  });
+  return results;
+}
+
 function seasonForDate(date: string) {
   const [year, month] = date.split("-").map(Number);
   return month >= 9 ? year + 1 : year;
@@ -104,7 +228,7 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
   return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
 }
 
-export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
+export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; recordEvents: RecordMovementEvent[]; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
     fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
@@ -193,6 +317,41 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       sortValue: latestPlay + 1,
     } satisfies GoalieFeedEvent];
   });
+  let recordEvents: RecordMovementEvent[] = [];
+  try {
+    const recordBook = await fetchDatedRecordBook(date);
+    const feedPlayers = new Map<string, GoalFeedPlayer>();
+    const metricSortValues = new Map<string, number>();
+    const noteMetric = (player: GoalFeedPlayer, abbreviation: RecordMovement["abbreviation"], sortValue: number) => {
+      feedPlayers.set(player.playerId, player);
+      const key = `${player.playerId}:${abbreviation}`;
+      metricSortValues.set(key, Math.max(metricSortValues.get(key) || 0, sortValue));
+    };
+    events.forEach((event) => {
+      noteMetric(event.scorer, "G", event.sortValue);
+      noteMetric(event.scorer, "P", event.sortValue);
+      noteMetric(event.scorer, "GWG", event.sortValue);
+      event.assists.forEach((player) => {
+        noteMetric(player, "A", event.sortValue);
+        noteMetric(player, "P", event.sortValue);
+      });
+    });
+    goalieEvents.forEach((event) => {
+      noteMetric(event.goalie, "W", event.sortValue);
+      noteMetric(event.goalie, "SO", event.sortValue);
+    });
+    recordEvents = buildRecordMovements(
+      recordBook.franchiseStatLines,
+      dailyStats.skaters as unknown as Record<string, unknown>[],
+      dailyStats.goalies as unknown as Record<string, unknown>[],
+      feedPlayers,
+      metricSortValues,
+      new Map([...fantasyPlayers].map(([playerId, value]) => [playerId, value.team?.id || null])),
+    );
+  } catch {
+    // Record movement is an enhancement; live scoring should remain available
+    // if the historical record book cannot be loaded.
+  }
   const skaterScores = new Map(seasonStats?.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]) ?? []);
   const goalieScores = new Map(seasonStats?.goalies.map((record) => [String(record.playerId), getGoalieScore(record)]) ?? []);
   const dailySkaterScores = new Map(dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]));
@@ -211,5 +370,5 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((row, index) => ({ ...row, rank: index + 1 }));
   const standings = seasonStats ? rankTeams(skaterScores, goalieScores) : [];
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
-  return { events, goalieEvents, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
+  return { events, goalieEvents, recordEvents, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }

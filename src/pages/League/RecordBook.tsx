@@ -31,7 +31,7 @@ const contractPositionSections = [
 const contractMoney = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 
 const skaterRecordMetrics = [
-  ["GP", "gamesPlayed"], ["G", "goals"], ["A", "assists"], ["+/-", "plusMinus"], ["PIM", "penaltyMinutes"], ["S", "shots"],
+  ["GP", "gamesPlayed"], ["G", "goals"], ["A", "assists"], ["P", "points"], ["+/-", "plusMinus"], ["PIM", "penaltyMinutes"], ["S", "shots"],
   ["PPG", "ppGoals"], ["PPA", "ppAssists"], ["SHG", "shGoals"], ["SHA", "shAssists"], ["GWG", "gameWinningGoals"],
   ["B", "blockedShots"], ["H", "hits"], ["FOW", "faceoffWins"], ["SCORE", "fantasyPoints"], ["FPPG", "pointsPerGame"],
 ] as const;

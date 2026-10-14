@@ -3,7 +3,7 @@ import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type Fa
 import { fetchPlayerSeasons, fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchLeagueTransactions } from "./transactions";
 import { fetchPlayerAwards } from "./awards";
-import { fetchNhlGoalieStats, fetchNhlGoalieStatsForPeriod, fetchNhlSkaterStats, fetchNhlSkaterStatsForPeriod, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "./nhl";
+import { fetchNhlGoalieStats, fetchNhlGoalieStatsForPeriod, fetchNhlSkaterStats, fetchNhlSkaterStatsForPeriod, getGoalieScore, getNhlStatsDate, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "./nhl";
 import { fetchSeasonLeadership } from "./teamLeadership";
 
 export type RecordBookEntry = {
@@ -54,7 +54,7 @@ export type FranchiseStatLine = {
   team: FantasyTeam | null;
   currentTeam: FantasyTeam | null;
   skater: {
-    gamesPlayed: number; goals: number; assists: number; plusMinus: number; penaltyMinutes: number; shots: number;
+    gamesPlayed: number; goals: number; assists: number; points: number; plusMinus: number; penaltyMinutes: number; shots: number;
     ppGoals: number; ppAssists: number; shGoals: number; shAssists: number; gameWinningGoals: number;
     blockedShots: number; hits: number; faceoffWins: number; fantasyPoints: number; pointsPerGame: number;
   } | null;
@@ -96,7 +96,7 @@ function fantasySeasonForDate(date: string) {
 
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
-export async function fetchRecordBookData(teamId?: number | null, seasonYear?: number | null) {
+export async function fetchRecordBookData(teamId?: number | null, seasonYear?: number | null, asOfDate?: string) {
   let teamQuery = supabase.from("daily_team_performances").select("*");
   let playerQuery = supabase.from("daily_player_performances").select("*");
   let historyQuery = supabase.from("record_history").select("*").order("achieved_at", { ascending: false }).limit(50);
@@ -105,10 +105,14 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
   if (seasonYear) { teamQuery = teamQuery.eq("season_year", seasonYear); playerQuery = playerQuery.eq("season_year", seasonYear); }
   if (seasonYear) historyQuery = historyQuery.eq("season_year", seasonYear);
 
-  const performanceSeason = seasonYear || 2026;
+  const performanceSeason = seasonYear || (asOfDate ? fantasySeasonForDate(asOfDate) : 2026);
+  const useDatedStats = Boolean(asOfDate && asOfDate < getNhlStatsDate());
+  const seasonStart = `${performanceSeason - 1}-07-01`;
+  const performanceSkaters = useDatedStats ? fetchNhlSkaterStatsForPeriod(nhlSeasonId(performanceSeason), seasonStart, asOfDate!) : fetchNhlSkaterStats(nhlSeasonId(performanceSeason));
+  const performanceGoalies = useDatedStats ? fetchNhlGoalieStatsForPeriod(nhlSeasonId(performanceSeason), seasonStart, asOfDate!) : fetchNhlGoalieStats(nhlSeasonId(performanceSeason));
   const [{ data: teamDays, error: teamError }, { data: playerDays, error: playerError }, { data: history, error: historyError }, { data: rookies, error: rookieError }, teams, brandingHistory, allSeasons, transactions, awards, seasonSkaters, seasonGoalies] = await Promise.all([
     teamQuery, playerQuery, historyQuery, supabase.from("rookie_eligibility").select("season_year,player_id").eq("season_year", performanceSeason), fetchFantasyTeams(true), fetchTeamBrandingHistory(), fetchPlayerSeasons(), fetchLeagueTransactions(), fetchPlayerAwards(seasonYear || undefined, false),
-    fetchNhlSkaterStats(nhlSeasonId(performanceSeason)), fetchNhlGoalieStats(nhlSeasonId(performanceSeason)),
+    performanceSkaters, performanceGoalies,
   ]);
   if (teamError) throw teamError;
   if (playerError) throw playerError;
@@ -189,7 +193,7 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
   }).filter((contract) => (!seasonYear || contract.startSeason === seasonYear) && (!teamId || contract.signingTeam?.id === teamId));
   const topContracts = (["C", "LW", "RW", "D", "G"] as const).flatMap((position) => contracts.filter((contract) => contract.position === position).sort((a, b) => b.totalValue - a.totalValue || b.aav - a.aav).slice(0, 5));
 
-  const leaderYears = [...new Set(allSeasons.map((row) => row.season_year))].filter((year) => !seasonYear || year === seasonYear).sort((a, b) => a - b);
+  const leaderYears = [...new Set(allSeasons.map((row) => row.season_year))].filter((year) => (!seasonYear || year === seasonYear) && (!asOfDate || year <= performanceSeason)).sort((a, b) => a - b);
   const leaderStats = await Promise.all(leaderYears.map(async (year) => {
     if (year === performanceSeason) return { year, skaters: seasonSkaters, goalies: seasonGoalies };
     const [skaters, goalies] = await Promise.all([fetchNhlSkaterStats(nhlSeasonId(year)), fetchNhlGoalieStats(nhlSeasonId(year))]);
@@ -233,7 +237,7 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
   };
   const franchiseLeaderRows = (await Promise.all(leaderYears.map(async (year) => {
     const seasonStart = `${year - 1}-07-01`;
-    const seasonEnd = `${year}-06-30`;
+    const seasonEnd = asOfDate && year === performanceSeason && asOfDate < `${year}-06-30` ? asOfDate : `${year}-06-30`;
     const yearRows = leaderRows.filter((item) => item.row.season_year === year);
     const playerIds = new Set(yearRows.map((item) => item.row.player_id));
     const tradeDates = [...new Set(tradeMoves.filter((move) => playerIds.has(move.playerId) && move.date >= seasonStart && move.date <= seasonEnd).map((move) => move.date))].sort();
@@ -299,7 +303,8 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
       team: creditedTeam ? applyTeamBranding(creditedTeam, brandingHistory, latest.row.season_year) : null,
       currentTeam: currentSeason?.fantasy_team_id ? teamMap.get(currentSeason.fantasy_team_id) || null : null,
       skater: skaters.length ? {
-        gamesPlayed, goals: sumSkater(skaters, "goals"), assists: sumSkater(skaters, "assists"), plusMinus: sumSkater(skaters, "plusMinus"),
+        gamesPlayed, goals: sumSkater(skaters, "goals"), assists: sumSkater(skaters, "assists"),
+        points: sumSkater(skaters, "goals") + sumSkater(skaters, "assists"), plusMinus: sumSkater(skaters, "plusMinus"),
         penaltyMinutes: sumSkater(skaters, "penaltyMinutes"), shots: sumSkater(skaters, "shots"), ppGoals: sumSkater(skaters, "ppGoals"),
         ppAssists: sumSkater(skaters, "ppPoints") - sumSkater(skaters, "ppGoals"), shGoals: sumSkater(skaters, "shGoals"),
         shAssists: sumSkater(skaters, "shPoints") - sumSkater(skaters, "shGoals"), gameWinningGoals: sumSkater(skaters, "gameWinningGoals"),

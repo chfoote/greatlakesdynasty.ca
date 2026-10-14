@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
-import { fetchGoalFeed, type FeedStanding, type GoalieFeedEvent, type GoalFeedEvent, type GoalFeedPlayer } from "../../lib/goalFeed";
+import { fetchGoalFeed, type FeedStanding, type GoalieFeedEvent, type GoalFeedEvent, type GoalFeedPlayer, type RecordMovementEvent } from "../../lib/goalFeed";
 import { getNhlStatsDate } from "../../lib/nhl";
 import type { FantasyTeam } from "../../lib/fantasyTeams";
+import { useAuth } from "../../context/AuthContext";
+import { fetchLatestUserTeamAssignment, fetchUserTeamAssignment } from "../../lib/teamUserAssignments";
 
 function shiftDate(date: string, days: number) {
   const value = new Date(`${date}T12:00:00Z`);
@@ -26,12 +28,13 @@ function FantasyOwnership({ player, primary = false }: { player: GoalFeedPlayer;
   </div>;
 }
 
-function GoalieCard({ event }: { event: GoalieFeedEvent }) {
+function GoalieCard({ event, records = [], viewerTeamId }: { event: GoalieFeedEvent; records?: RecordFeedEvent[]; viewerTeamId: number | null }) {
+  const highlighted = event.goalie.fantasyTeam?.id === viewerTeamId;
   return <article className="relative overflow-hidden rounded-2xl border border-sky-200 bg-white shadow-theme-xs dark:border-sky-900/70 dark:bg-white/[0.03]">
     <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-sky-500 via-blue-500 to-indigo-500" />
     <div className="grid gap-4 p-4 pl-5 sm:p-5 sm:pl-6 lg:grid-cols-[190px_minmax(260px,1fr)_165px] lg:items-center">
       <div className="flex items-center gap-3">{event.nhlTeam.logo && <img src={event.nhlTeam.logo} alt={`${event.nhlTeam.abbreviation} logo`} className="h-11 w-11 object-contain" />}<div><p className="text-xs font-black uppercase tracking-[0.18em] text-sky-600">{event.shutout ? "Shutout" : "Goalie Win"}</p><p className="mt-1 text-xs font-semibold text-gray-500">Final · {event.saves} saves</p></div></div>
-      <div className="rounded-xl bg-gradient-to-r from-sky-50 to-indigo-50 p-3 dark:from-sky-500/10 dark:to-indigo-500/10"><p className="mb-2 text-[9px] font-black uppercase tracking-[0.16em] text-sky-600">{event.shutout ? `Shuts the door · ${event.saves}-save shutout` : `Earns the win · ${event.saves} saves`}</p><FantasyOwnership player={event.goalie} primary /></div>
+      <div className={`rounded-xl p-3 ${highlighted ? "bg-gradient-to-r from-amber-100 to-yellow-50 ring-1 ring-amber-300 dark:from-amber-500/20 dark:to-yellow-500/10 dark:ring-amber-700" : "bg-gray-50 dark:bg-gray-900/60"}`}><p className={`mb-2 text-[9px] font-black uppercase tracking-[0.16em] ${highlighted ? "text-amber-700 dark:text-amber-300" : "text-sky-600"}`}>{event.shutout ? `Shuts the door · ${event.saves}-save shutout` : `Earns the win · ${event.saves} saves`}</p><FantasyOwnership player={event.goalie} primary /><PlayerRecordLines events={records} playerId={event.goalie.playerId} /></div>
       <div className="flex items-center justify-center gap-2 rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-900/70"><span className="text-xs font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-xl font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span><span className="text-xs font-black text-gray-500">{event.homeTeam.abbreviation}</span><span className="ml-1 text-[8px] font-black uppercase text-gray-400">Final</span></div>
     </div>
   </article>;
@@ -40,7 +43,20 @@ function GoalieCard({ event }: { event: GoalieFeedEvent }) {
 type AroundHornEvent = ({ kind: "goal" } & GoalFeedEvent) | ({ kind: "goalie" } & GoalieFeedEvent);
 
 type StandingsFeedEvent = { kind: "standings"; key: string; team: FantasyTeam; passedTeam: FantasyTeam; rank: number; points: number; sortValue: number };
-type DisplayFeedEvent = AroundHornEvent | StandingsFeedEvent;
+type RecordFeedEvent = { kind: "record" } & RecordMovementEvent;
+type DisplayFeedEvent = AroundHornEvent | StandingsFeedEvent | RecordFeedEvent;
+
+function PlayerRecordLines({ events, playerId }: { events: RecordFeedEvent[]; playerId: string }) {
+  const movements = events.filter((event) => event.player.playerId === playerId).flatMap((event) => event.movements);
+  if (!movements.length) return null;
+  return <div className="mt-3 space-y-1.5 border-t border-gray-200/80 pt-2.5 dark:border-gray-700/80">
+    <Link to="/record-book" className="flex w-fit items-center gap-1 text-[8px] font-black uppercase tracking-[0.14em] text-amber-700 hover:text-amber-600 dark:text-amber-300"><span>🏆</span><span>Record Book</span></Link>
+    {movements.map((movement) => {
+      const league = movement.scope === "league";
+      return <Link key={`${movement.scope}:${movement.abbreviation}`} to="/record-book" className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-1.5 text-[10px] transition hover:-translate-y-px hover:shadow-sm ${league ? "border-rose-200 bg-gradient-to-r from-rose-50 to-orange-50 dark:border-rose-900/70 dark:from-rose-500/10 dark:to-orange-500/10" : "border-violet-200 bg-gradient-to-r from-violet-50 to-indigo-50 dark:border-violet-900/70 dark:from-violet-500/10 dark:to-indigo-500/10"}`}><span className={`font-black ${league ? "text-rose-700 dark:text-rose-300" : "text-violet-700 dark:text-violet-300"}`}>{league ? "League" : "Franchise"} ({movement.abbreviation})</span><span className="flex items-center gap-1.5"><span className={`rounded-md px-1.5 py-0.5 font-black text-white shadow-sm ${league ? "bg-gradient-to-r from-red-600 to-rose-500" : "bg-gradient-to-r from-violet-600 to-indigo-500"}`}>{movement.tied ? "T-" : ""}#{movement.afterRank}</span><span className="font-bold text-gray-500">({movement.value})</span></span></Link>;
+    })}
+  </div>;
+}
 
 function StandingsCard({ event }: { event: StandingsFeedEvent }) {
   const place = event.rank === 1 ? "1st" : event.rank === 2 ? "2nd" : event.rank === 3 ? "3rd" : `${event.rank}th`;
@@ -50,19 +66,21 @@ function StandingsCard({ event }: { event: StandingsFeedEvent }) {
   </article>;
 }
 
-function GoalCard({ event }: { event: GoalFeedEvent }) {
+function GoalCard({ event, records = [], viewerTeamId }: { event: GoalFeedEvent; records?: RecordFeedEvent[]; viewerTeamId: number | null }) {
   const final = ["OFF", "FINAL"].includes(event.gameState);
+  const scorerHighlighted = event.scorer.fantasyTeam?.id === viewerTeamId;
   return <article className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
     <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-red-500 via-amber-400 to-yellow-300" />
     <div className="grid gap-4 p-4 pl-5 sm:p-5 sm:pl-6 lg:grid-cols-[190px_minmax(190px,1fr)_minmax(260px,1.35fr)_165px] lg:items-center"><div className="flex items-center gap-3">{event.nhlTeam.logo && <img src={event.nhlTeam.logo} alt={`${event.nhlTeam.abbreviation} logo`} className="h-11 w-11 object-contain" />}<div><div className="flex items-center gap-2"><span className="text-xs font-black uppercase tracking-[0.18em] text-red-500">Goal</span>{event.strength && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">{event.strength}</span>}</div><p className="mt-1 text-xs font-semibold text-gray-500">{periodLabel(event)} · {event.timeInPeriod}</p>{event.shotType && <p className="mt-0.5 text-[10px] capitalize text-gray-400">{event.shotType.replace(/-/g, " ")}</p>}</div></div>
-      <div className="rounded-xl bg-gradient-to-r from-red-50 to-amber-50 p-3 dark:from-red-500/10 dark:to-amber-500/10"><p className="mb-2 text-[9px] font-black uppercase tracking-[0.16em] text-red-500">Scored by</p><FantasyOwnership player={event.scorer} primary /></div>
-      <div><p className="mb-2 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">Assists</p>{event.assists.length ? <div className="grid gap-2 sm:grid-cols-2">{event.assists.map((assist) => <div key={assist.playerId} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/50"><FantasyOwnership player={assist} /></div>)}</div> : <p className="text-xs font-semibold text-gray-400">Unassisted</p>}</div>
+      <div className={`rounded-xl p-3 ${scorerHighlighted ? "bg-gradient-to-r from-amber-100 to-yellow-50 ring-1 ring-amber-300 dark:from-amber-500/20 dark:to-yellow-500/10 dark:ring-amber-700" : "bg-gray-50 dark:bg-gray-900/60"}`}><p className={`mb-2 text-[9px] font-black uppercase tracking-[0.16em] ${scorerHighlighted ? "text-amber-700 dark:text-amber-300" : "text-gray-400"}`}>Scored by</p><FantasyOwnership player={event.scorer} primary /><PlayerRecordLines events={records} playerId={event.scorer.playerId} /></div>
+      <div><p className="mb-2 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">Assists</p>{event.assists.length ? <div className="grid h-full gap-2 sm:grid-cols-2">{event.assists.map((assist) => { const highlighted = assist.fantasyTeam?.id === viewerTeamId; return <div key={assist.playerId} className={`rounded-lg border px-3 py-2 ${highlighted ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-500/10" : "border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50"}`}><FantasyOwnership player={assist} /><PlayerRecordLines events={records} playerId={assist.playerId} /></div>; })}</div> : <p className="text-xs font-semibold text-gray-400">Unassisted</p>}</div>
       <div className="flex items-center justify-center gap-2 rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-900/70"><span className="text-xs font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-xl font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span><span className="text-xs font-black text-gray-500">{event.homeTeam.abbreviation}</span>{final && <span className="ml-1 text-[8px] font-black uppercase text-gray-400">Final</span>}</div>
     </div>
   </article>;
 }
 
 export default function GoalHorn() {
+  const { user } = useAuth();
   const today = getNhlStatsDate();
   const [date, setDate] = useState(today);
   const [events, setEvents] = useState<DisplayFeedEvent[]>([]);
@@ -74,6 +92,7 @@ export default function GoalHorn() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [viewerTeamId, setViewerTeamId] = useState<number | null>(null);
   const feedOrder = useRef(new Map<string, number>());
   const feedOrderDate = useRef("");
   const previousStandings = useRef<FeedStanding[]>([]);
@@ -103,6 +122,7 @@ export default function GoalHorn() {
       const nextEvents: DisplayFeedEvent[] = [
         ...result.events.map((event) => ({ ...event, kind: "goal" as const })),
         ...result.goalieEvents.map((event) => ({ ...event, kind: "goalie" as const })),
+        ...result.recordEvents.map((event) => ({ ...event, kind: "record" as const })),
         ...standingsEvents.current,
       ];
       if (firstLoad) {
@@ -126,11 +146,21 @@ export default function GoalHorn() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    let active = true;
+    if (!user) { setViewerTeamId(null); return; }
+    const [year, month] = date.split("-").map(Number);
+    const season = month >= 9 ? year + 1 : year;
+    fetchUserTeamAssignment(user.id, season).then((assignment) => assignment || fetchLatestUserTeamAssignment(user.id)).then((assignment) => { if (active) setViewerTeamId(assignment?.fantasy_team_id ?? null); }).catch(() => { if (active) setViewerTeamId(null); });
+    return () => { active = false; };
+  }, [date, user]);
+  useEffect(() => {
     if (date !== today) return;
     const timer = window.setInterval(() => void load(true), 30_000);
     return () => window.clearInterval(timer);
   }, [date, today, load]);
-  const filteredEvents = useMemo(() => selectedTeamId == null ? events : events.filter((event) => event.kind === "goal" ? [event.scorer, ...event.assists].some((player) => player.fantasyTeam?.id === selectedTeamId) : event.kind === "goalie" ? event.goalie.fantasyTeam?.id === selectedTeamId : event.team.id === selectedTeamId || event.passedTeam.id === selectedTeamId), [events, selectedTeamId]);
+  const filteredEvents = useMemo(() => selectedTeamId == null ? events : events.filter((event) => event.kind === "goal" ? [event.scorer, ...event.assists].some((player) => player.fantasyTeam?.id === selectedTeamId) : event.kind === "goalie" ? event.goalie.fantasyTeam?.id === selectedTeamId : event.kind === "record" ? event.player.fantasyTeam?.id === selectedTeamId : event.team.id === selectedTeamId || event.passedTeam.id === selectedTeamId), [events, selectedTeamId]);
+  const visibleEvents = useMemo(() => filteredEvents.filter((event) => event.kind !== "record"), [filteredEvents]);
+  const recordsFor = useCallback((event: GoalFeedEvent | GoalieFeedEvent) => filteredEvents.filter((candidate): candidate is RecordFeedEvent => candidate.kind === "record" && Math.abs(candidate.sortValue - event.sortValue - 0.5) < 0.001), [filteredEvents]);
 
   return <div>
     <PageMeta title="Around the Horn | GLDHL" description="Live NHL scoring and GLDHL fantasy updates" />
@@ -144,7 +174,7 @@ export default function GoalHorn() {
 
       {updatedAt && <p className="px-1 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-400">Updated {updatedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</p>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm font-semibold text-error-700">{error}</p>}
-      {loading ? <div className="space-y-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div> : filteredEvents.length ? <div className="space-y-3">{filteredEvents.map((event) => event.kind === "goal" ? <GoalCard key={event.key} event={event} /> : event.kind === "goalie" ? <GoalieCard key={event.key} event={event} /> : <StandingsCard key={event.key} event={event} />)}</div> : <section className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center dark:border-gray-700 dark:bg-white/[0.02]"><div className="text-5xl">🥅</div><h2 className="mt-4 text-xl font-black text-gray-900 dark:text-white">The horn is quiet</h2><p className="mt-2 text-sm text-gray-500">{selectedTeamId != null ? "No scoring events involve this fantasy team on the selected date." : games ? "No scoring events yet." : "No NHL games are scheduled for this hockey date."}</p></section>}
+      {loading ? <div className="space-y-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div> : visibleEvents.length ? <div className="space-y-3">{visibleEvents.map((event) => event.kind === "goal" ? <GoalCard key={event.key} event={event} records={recordsFor(event)} viewerTeamId={viewerTeamId} /> : event.kind === "goalie" ? <GoalieCard key={event.key} event={event} records={recordsFor(event)} viewerTeamId={viewerTeamId} /> : <StandingsCard key={event.key} event={event} />)}</div> : <section className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center dark:border-gray-700 dark:bg-white/[0.02]"><div className="text-5xl">🥅</div><h2 className="mt-4 text-xl font-black text-gray-900 dark:text-white">The horn is quiet</h2><p className="mt-2 text-sm text-gray-500">{selectedTeamId != null ? "No scoring events involve this fantasy team on the selected date." : games ? "No scoring events yet." : "No NHL games are scheduled for this hockey date."}</p></section>}
     </div>
   </div>;
 }
