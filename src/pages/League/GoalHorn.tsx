@@ -93,17 +93,21 @@ export default function GoalHorn() {
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [viewerTeamId, setViewerTeamId] = useState<number | null>(null);
+  const [recordsLoading, setRecordsLoading] = useState(false);
   const feedOrder = useRef(new Map<string, number>());
   const feedOrderDate = useRef("");
   const previousStandings = useRef<FeedStanding[]>([]);
   const standingsEvents = useRef<StandingsFeedEvent[]>([]);
+  const recordEvents = useRef<RecordFeedEvent[]>([]);
+  const recordRequest = useRef(0);
 
   const load = useCallback(async (background = false) => {
+    const requestId = ++recordRequest.current;
     if (background) setRefreshing(true); else setLoading(true);
     setError("");
     try {
       const result = await fetchGoalFeed(date);
-      if (feedOrderDate.current !== date) { feedOrder.current.clear(); feedOrderDate.current = date; previousStandings.current = []; standingsEvents.current = []; }
+      if (feedOrderDate.current !== date) { feedOrder.current.clear(); feedOrderDate.current = date; previousStandings.current = []; standingsEvents.current = []; recordEvents.current = []; }
       if (!previousStandings.current.length) previousStandings.current = result.baselineStandings;
       if (previousStandings.current.length && result.standings.length) {
         const previousByTeam = new Map(previousStandings.current.map((row) => [row.team.id, row]));
@@ -122,7 +126,7 @@ export default function GoalHorn() {
       const nextEvents: DisplayFeedEvent[] = [
         ...result.events.map((event) => ({ ...event, kind: "goal" as const })),
         ...result.goalieEvents.map((event) => ({ ...event, kind: "goalie" as const })),
-        ...result.recordEvents.map((event) => ({ ...event, kind: "record" as const })),
+        ...recordEvents.current,
         ...standingsEvents.current,
       ];
       if (firstLoad) {
@@ -139,6 +143,14 @@ export default function GoalHorn() {
       }
       setEvents(nextEvents.sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
       setTeams(result.teams); setGames(result.games); setLive(result.live); setUpdatedAt(new Date());
+      setRecordsLoading(true);
+      void result.recordEventsPromise.then((rows) => {
+        if (recordRequest.current !== requestId || feedOrderDate.current !== date) return;
+        const nextRecords = rows.map((event) => ({ ...event, kind: "record" as const }));
+        recordEvents.current = nextRecords;
+        setEvents((current) => [...current.filter((event) => event.kind !== "record"), ...nextRecords].sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
+        setRecordsLoading(false);
+      });
     }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load Around the Horn."); }
     finally { setLoading(false); setRefreshing(false); }
@@ -172,7 +184,7 @@ export default function GoalHorn() {
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"><div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-500">Fantasy Team Filter</p><p className="mt-0.5 text-xs text-gray-500">Show goals scored or assisted by a franchise</p></div>{selectedTeamId != null && <button type="button" onClick={() => setSelectedTeamId(null)} className="text-xs font-black text-brand-500 hover:underline">Clear filter</button>}</div><div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"><button type="button" onClick={() => setSelectedTeamId(null)} className={`flex h-14 min-w-14 shrink-0 items-center justify-center rounded-xl border px-3 text-[10px] font-black uppercase transition ${selectedTeamId == null ? "border-brand-500 bg-brand-50 text-brand-600 ring-2 ring-brand-500/20 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 bg-gray-50 text-gray-500 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900"}`}>All</button>{teams.map((team) => <button key={team.id} type="button" title={team.team_name} aria-label={`Filter by ${team.team_name}`} onClick={() => setSelectedTeamId((current) => current === team.id ? null : team.id)} className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border p-1.5 transition ${selectedTeamId === team.id ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/20 dark:bg-brand-500/10" : "border-gray-200 bg-gray-50 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900"}`}>{team.logo ? <img src={team.logo} alt={`${team.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-[9px] font-black text-gray-500">{team.abbreviation}</span>}</button>)}</div></section>
 
-      {updatedAt && <p className="px-1 text-right text-[10px] font-semibold uppercase tracking-wider text-gray-400">Updated {updatedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</p>}
+      {updatedAt && <div className="flex items-center justify-end gap-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{recordsLoading && <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />Loading record notes</span>}<span>Updated {updatedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</span></div>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm font-semibold text-error-700">{error}</p>}
       {loading ? <div className="space-y-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div> : visibleEvents.length ? <div className="space-y-3">{visibleEvents.map((event) => event.kind === "goal" ? <GoalCard key={event.key} event={event} records={recordsFor(event)} viewerTeamId={viewerTeamId} /> : event.kind === "goalie" ? <GoalieCard key={event.key} event={event} records={recordsFor(event)} viewerTeamId={viewerTeamId} /> : <StandingsCard key={event.key} event={event} />)}</div> : <section className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center dark:border-gray-700 dark:bg-white/[0.02]"><div className="text-5xl">🥅</div><h2 className="mt-4 text-xl font-black text-gray-900 dark:text-white">The horn is quiet</h2><p className="mt-2 text-sm text-gray-500">{selectedTeamId != null ? "No scoring events involve this fantasy team on the selected date." : games ? "No scoring events yet." : "No NHL games are scheduled for this hockey date."}</p></section>}
     </div>

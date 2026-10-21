@@ -228,7 +228,7 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
   return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
 }
 
-export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; recordEvents: RecordMovementEvent[]; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
+export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; recordEventsPromise: Promise<RecordMovementEvent[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
     fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
@@ -317,41 +317,43 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       sortValue: latestPlay + 1,
     } satisfies GoalieFeedEvent];
   });
-  let recordEvents: RecordMovementEvent[] = [];
-  try {
-    const recordBook = await fetchDatedRecordBook(date);
-    const feedPlayers = new Map<string, GoalFeedPlayer>();
-    const metricSortValues = new Map<string, number>();
-    const noteMetric = (player: GoalFeedPlayer, abbreviation: RecordMovement["abbreviation"], sortValue: number) => {
-      feedPlayers.set(player.playerId, player);
-      const key = `${player.playerId}:${abbreviation}`;
-      metricSortValues.set(key, Math.max(metricSortValues.get(key) || 0, sortValue));
-    };
-    events.forEach((event) => {
-      noteMetric(event.scorer, "G", event.sortValue);
-      noteMetric(event.scorer, "P", event.sortValue);
-      noteMetric(event.scorer, "GWG", event.sortValue);
-      event.assists.forEach((player) => {
-        noteMetric(player, "A", event.sortValue);
-        noteMetric(player, "P", event.sortValue);
+  const recordEventsPromise = events.length || goalieEvents.length ? (async () => {
+    try {
+      const recordBook = await fetchDatedRecordBook(date);
+      const feedPlayers = new Map<string, GoalFeedPlayer>();
+      const metricSortValues = new Map<string, number>();
+      const noteMetric = (player: GoalFeedPlayer, abbreviation: RecordMovement["abbreviation"], sortValue: number) => {
+        feedPlayers.set(player.playerId, player);
+        const key = `${player.playerId}:${abbreviation}`;
+        metricSortValues.set(key, Math.max(metricSortValues.get(key) || 0, sortValue));
+      };
+      events.forEach((event) => {
+        noteMetric(event.scorer, "G", event.sortValue);
+        noteMetric(event.scorer, "P", event.sortValue);
+        noteMetric(event.scorer, "GWG", event.sortValue);
+        event.assists.forEach((player) => {
+          noteMetric(player, "A", event.sortValue);
+          noteMetric(player, "P", event.sortValue);
+        });
       });
-    });
-    goalieEvents.forEach((event) => {
-      noteMetric(event.goalie, "W", event.sortValue);
-      noteMetric(event.goalie, "SO", event.sortValue);
-    });
-    recordEvents = buildRecordMovements(
-      recordBook.franchiseStatLines,
-      dailyStats.skaters as unknown as Record<string, unknown>[],
-      dailyStats.goalies as unknown as Record<string, unknown>[],
-      feedPlayers,
-      metricSortValues,
-      new Map([...fantasyPlayers].map(([playerId, value]) => [playerId, value.team?.id || null])),
-    );
-  } catch {
-    // Record movement is an enhancement; live scoring should remain available
-    // if the historical record book cannot be loaded.
-  }
+      goalieEvents.forEach((event) => {
+        noteMetric(event.goalie, "W", event.sortValue);
+        noteMetric(event.goalie, "SO", event.sortValue);
+      });
+      return buildRecordMovements(
+        recordBook.franchiseStatLines,
+        dailyStats.skaters as unknown as Record<string, unknown>[],
+        dailyStats.goalies as unknown as Record<string, unknown>[],
+        feedPlayers,
+        metricSortValues,
+        new Map([...fantasyPlayers].map(([playerId, value]) => [playerId, value.team?.id || null])),
+      );
+    } catch {
+      // Record movement is an enhancement; live scoring should remain available
+      // if the historical record book cannot be loaded.
+      return [];
+    }
+  })() : Promise.resolve([] as RecordMovementEvent[]);
   const skaterScores = new Map(seasonStats?.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]) ?? []);
   const goalieScores = new Map(seasonStats?.goalies.map((record) => [String(record.playerId), getGoalieScore(record)]) ?? []);
   const dailySkaterScores = new Map(dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]));
@@ -370,5 +372,5 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((row, index) => ({ ...row, rank: index + 1 }));
   const standings = seasonStats ? rankTeams(skaterScores, goalieScores) : [];
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
-  return { events, goalieEvents, recordEvents, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
+  return { events, goalieEvents, recordEventsPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }
