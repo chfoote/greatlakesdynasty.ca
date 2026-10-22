@@ -96,6 +96,18 @@ export type RecordChase = {
   team: FantasyTeam | null;
 };
 
+export type MilestoneWatchItem = {
+  key: string;
+  player: GoalFeedPlayer;
+  category: "Goals" | "Assists" | "Points" | "Wins" | "Shutouts" | "Career FPTS";
+  abbreviation: "G" | "A" | "P" | "W" | "SO" | "FPTS";
+  target: number;
+  value: number;
+  remaining: number;
+  achievedTonight: boolean;
+  recognition: "standard" | "major" | "bronze" | "silver" | "gold" | "legendary";
+};
+
 type RecordMetric = {
   category: RecordMovement["category"];
   abbreviation: RecordMovement["abbreviation"];
@@ -236,6 +248,44 @@ function buildRecordChases(lines: FranchiseStatLine[], rosterPlayers: Map<string
   return chases.sort((a, b) => a.needed - b.needed || a.targetRank - b.targetRank || a.player.name.localeCompare(b.player.name)).slice(0, 12);
 }
 
+function buildMilestoneWatch(lines: FranchiseStatLine[], dailySkaters: Record<string, unknown>[], dailyGoalies: Record<string, unknown>[], rosterPlayers: Map<string, GoalFeedPlayer>) {
+  const skaterDays = new Map(dailySkaters.map((row) => [String(row.playerId), row]));
+  const goalieDays = new Map(dailyGoalies.map((row) => [String(row.playerId), row]));
+  const metrics = [
+    { category: "Goals", abbreviation: "G", standard: [50,100,150,200,250,300,350,400,450], major: [500,600,700,800,900], tiers: { bronze: 100, silver: 250, gold: 500, legendary: 700 }, watch: 5, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.goals || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) },
+    { category: "Assists", abbreviation: "A", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_200,1_500], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 10, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.assists || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.assists || 0) },
+    { category: "Points", abbreviation: "P", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_250,1_500,1_750,2_000], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 10, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.points || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) + Number(skaterDays.get(id)?.assists || 0) },
+    { category: "Wins", abbreviation: "W", standard: [25,50,100,150,200,250,300,350], major: [400,500,600,700], tiers: { bronze: 100, silver: 250, gold: 400, legendary: 600 }, watch: 5, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.wins || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.wins || 0) },
+    { category: "Shutouts", abbreviation: "SO", standard: [10,20,25,30,40], major: [50,60,70,80,90,100], tiers: { bronze: 10, silver: 25, gold: 50, legendary: 100 }, watch: 2, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.shutouts || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.shutouts || 0) },
+  ] as const;
+  const linesByPlayer = new Map<string, FranchiseStatLine[]>();
+  lines.forEach((line) => linesByPlayer.set(line.playerId, [...(linesByPlayer.get(line.playerId) || []), line]));
+  const achieved: MilestoneWatchItem[] = [];
+  const upcoming: MilestoneWatchItem[] = [];
+  rosterPlayers.forEach((player, playerId) => {
+    const playerLines = linesByPlayer.get(playerId) || [];
+    metrics.forEach((metric) => {
+      const value = metric.value(playerLines);
+      const before = value - metric.daily(playerId);
+      const thresholds = [...new Set([...metric.standard, ...metric.major, ...Object.values(metric.tiers)])].sort((a, b) => a - b);
+      const recognition = (target: number): MilestoneWatchItem["recognition"] => {
+        const tier = Object.entries(metric.tiers).find(([, threshold]) => threshold === target)?.[0] as "bronze" | "silver" | "gold" | "legendary" | undefined;
+        return tier || (metric.major.includes(target as never) ? "major" : "standard");
+      };
+      thresholds.filter((target) => before < target && value >= target).forEach((target) => achieved.push({ key: `${playerId}:${metric.abbreviation}:${target}`, player, category: metric.category, abbreviation: metric.abbreviation, target, value, remaining: 0, achievedTonight: true, recognition: recognition(target) }));
+      const target = thresholds.find((threshold) => threshold > value);
+      if (target) upcoming.push({ key: `${playerId}:${metric.abbreviation}:${target}`, player, category: metric.category, abbreviation: metric.abbreviation, target, value, remaining: target - value, achievedTonight: false, recognition: recognition(target) });
+    });
+  });
+  const nearby = upcoming.filter((item) => {
+    const metric = metrics.find((candidate) => candidate.abbreviation === item.abbreviation);
+    return item.remaining <= (metric?.watch || 0);
+  });
+  const closestByCategory = metrics.map((metric) => upcoming.filter((item) => item.abbreviation === metric.abbreviation).sort((a, b) => a.remaining - b.remaining || a.player.name.localeCompare(b.player.name))[0]).filter((item): item is MilestoneWatchItem => Boolean(item));
+  const selected = new Map([...closestByCategory, ...nearby].map((item) => [item.key, item]));
+  return [...achieved.sort((a, b) => a.category.localeCompare(b.category)), ...selected.values()].sort((a, b) => Number(b.achievedTonight) - Number(a.achievedTonight) || a.remaining - b.remaining || a.player.name.localeCompare(b.player.name)).slice(0, 15);
+}
+
 function seasonForDate(date: string) {
   const [year, month] = date.split("-").map(Number);
   return month >= 9 ? year + 1 : year;
@@ -280,7 +330,7 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
   return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
 }
 
-export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; nightlyStars: GoalFeedPlayer[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
+export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; nightlyStars: GoalFeedPlayer[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; milestoneWatchPromise: Promise<MilestoneWatchItem[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
     fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
@@ -411,15 +461,16 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
         rosterPlayers.set(playerId, { playerId, name: value.row.player?.full_name || "Unknown player", fantasyTeam: value.team || prospectRight?.team || null, prospect: ["PROSPECT", "AP"].includes((value.row.position || "").toUpperCase()), tonightPoints: tonightPoints.get(playerId) ?? null });
       });
       feedPlayers.forEach((player, playerId) => rosterPlayers.set(playerId, player));
-      return { movements, chases: buildRecordChases(recordBook.franchiseStatLines, rosterPlayers) };
+      return { movements, chases: buildRecordChases(recordBook.franchiseStatLines, rosterPlayers), milestones: buildMilestoneWatch(recordBook.franchiseStatLines, dailyStats.skaters as unknown as Record<string, unknown>[], dailyStats.goalies as unknown as Record<string, unknown>[], rosterPlayers) };
     } catch {
       // Record movement is an enhancement; live scoring should remain available
       // if the historical record book cannot be loaded.
-      return { movements: [] as RecordMovementEvent[], chases: [] as RecordChase[] };
+      return { movements: [] as RecordMovementEvent[], chases: [] as RecordChase[], milestones: [] as MilestoneWatchItem[] };
     }
   })();
   const recordEventsPromise = recordInsightsPromise.then((result) => result.movements);
   const recordChasesPromise = recordInsightsPromise.then((result) => result.chases);
+  const milestoneWatchPromise = recordInsightsPromise.then((result) => result.milestones);
   const skaterScores = new Map(seasonStats?.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]) ?? []);
   const goalieScores = new Map(seasonStats?.goalies.map((record) => [String(record.playerId), getGoalieScore(record)]) ?? []);
   const dailySkaterScores = new Map(dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]));
@@ -438,5 +489,5 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((row, index) => ({ ...row, rank: index + 1 }));
   const standings = seasonStats ? rankTeams(skaterScores, goalieScores) : [];
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
-  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
+  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, milestoneWatchPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }
