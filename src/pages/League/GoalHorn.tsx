@@ -67,20 +67,16 @@ function StandingsCard({ event }: { event: StandingsFeedEvent }) {
   </article>;
 }
 
-function NightlyRecap({ events, records, date }: { events: DisplayFeedEvent[]; records: RecordFeedEvent[]; date: string }) {
+function NightlyRecap({ events, records, stars, date }: { events: DisplayFeedEvent[]; records: RecordFeedEvent[]; stars: GoalFeedPlayer[]; date: string }) {
   const goals = events.filter((event): event is Extract<AroundHornEvent, { kind: "goal" }> => event.kind === "goal");
   const goalies = events.filter((event): event is Extract<AroundHornEvent, { kind: "goalie" }> => event.kind === "goalie");
   const standings = events.filter((event): event is StandingsFeedEvent => event.kind === "standings");
-  const players = new Map<string, GoalFeedPlayer>();
-  goals.forEach((event) => [event.scorer, ...event.assists].forEach((player) => players.set(player.playerId, player)));
-  goalies.forEach((event) => players.set(event.goalie.playerId, event.goalie));
-  const star = [...players.values()].filter((player) => player.tonightPoints != null).sort((a, b) => (b.tonightPoints || 0) - (a.tonightPoints || 0))[0];
   const movementCount = records.reduce((sum, event) => sum + event.movements.filter((movement) => movement.moved || movement.beforeRank == null).length, 0);
   const label = new Date(`${date}T12:00:00`).toLocaleDateString("en-CA", { weekday: "long", month: "short", day: "numeric" });
   return <section className="overflow-hidden rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white shadow-sm">
-    <div className="flex flex-col gap-4 p-5 sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-300">Nightly Recap · {label}</p><h2 className="mt-1 text-xl font-black">The night at a glance</h2></div>{star && <Link to={`/player-profile?playerId=${star.playerId}`} className="hidden items-center gap-2 rounded-xl bg-white/10 px-3 py-2 sm:flex">{star.headshot && <img src={star.headshot} alt="" className="h-9 w-9 rounded-full bg-white/10 object-cover object-top" />}<span><span className="block text-[9px] font-black uppercase tracking-wider text-amber-300">Night's leader</span><span className="block text-xs font-black">{star.name} · {star.tonightPoints?.toFixed(2)} FPTS</span></span></Link>}</div>
+    <div className="flex flex-col gap-4 p-5 sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-300">Nightly Recap · {label}</p><h2 className="mt-1 text-xl font-black">The night at a glance</h2></div>{stars.length > 0 && <span className="rounded-full bg-amber-400/15 px-3 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-amber-300">⭐ Three Stars</span>}</div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><div className="rounded-xl bg-white/[0.07] p-3"><p className="text-2xl font-black text-red-400">{goals.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Goals tracked</p></div><div className="rounded-xl bg-white/[0.07] p-3"><p className="text-2xl font-black text-sky-300">{goalies.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Goalie wins</p></div><div className="rounded-xl bg-white/[0.07] p-3"><p className="text-2xl font-black text-amber-300">{movementCount}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Record moves</p></div><div className="rounded-xl bg-white/[0.07] p-3"><p className="text-2xl font-black text-violet-300">{standings.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Standings moves</p></div></div>
-      {star && <Link to={`/player-profile?playerId=${star.playerId}`} className="flex items-center gap-2 rounded-xl bg-white/[0.07] px-3 py-2 sm:hidden">{star.headshot && <img src={star.headshot} alt="" className="h-9 w-9 rounded-full object-cover object-top" />}<span className="text-xs font-black"><span className="mr-2 text-[9px] uppercase tracking-wider text-amber-300">Night's leader</span>{star.name} · {star.tonightPoints?.toFixed(2)} FPTS</span></Link>}
+      {stars.length > 0 && <div><p className="mb-2 text-[9px] font-black uppercase tracking-[0.18em] text-amber-300">Three stars of the night</p><div className="grid gap-2 sm:grid-cols-3">{stars.map((star, index) => <Link key={star.playerId} to={`/player-profile?playerId=${star.playerId}`} className="flex min-w-0 items-center gap-2.5 rounded-xl bg-white/[0.07] px-3 py-2 transition hover:bg-white/[0.12]"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black ${index === 0 ? "bg-amber-400 text-slate-950" : index === 1 ? "bg-slate-300 text-slate-900" : "bg-orange-700 text-white"}`}>{index + 1}</span>{star.headshot && <img src={star.headshot} alt="" className="h-9 w-9 shrink-0 rounded-full bg-white/10 object-cover object-top" />}<span className="min-w-0"><span className="block truncate text-xs font-black">{star.name}</span><span className="block text-[9px] font-bold uppercase tracking-wide text-sky-300">{star.tonightPoints?.toFixed(2)} FPTS{star.fantasyTeam ? ` · ${star.fantasyTeam.abbreviation}` : ""}</span></span></Link>)}</div></div>}
     </div>
   </section>;
 }
@@ -125,6 +121,9 @@ export default function GoalHorn() {
   const [viewerTeamId, setViewerTeamId] = useState<number | null>(null);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordChases, setRecordChases] = useState<RecordChase[]>([]);
+  const [nightlyStars, setNightlyStars] = useState<GoalFeedPlayer[]>([]);
+  const [showNightlyRecap, setShowNightlyRecap] = useState(() => typeof window === "undefined" || window.localStorage.getItem("around-horn:show-nightly-recap") !== "false");
+  const [showRecordChases, setShowRecordChases] = useState(() => typeof window === "undefined" || window.localStorage.getItem("around-horn:show-record-chases") !== "false");
   const feedOrder = useRef(new Map<string, number>());
   const feedOrderDate = useRef("");
   const previousStandings = useRef<FeedStanding[]>([]);
@@ -173,7 +172,7 @@ export default function GoalHorn() {
         });
       }
       setEvents(nextEvents.sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
-      setTeams(result.teams); setGames(result.games); setLive(result.live); setUpdatedAt(new Date());
+      setTeams(result.teams); setGames(result.games); setLive(result.live); setNightlyStars(result.nightlyStars); setUpdatedAt(new Date());
       setRecordsLoading(true);
       void Promise.all([result.recordEventsPromise, result.recordChasesPromise]).then(([rows, chases]) => {
         if (recordRequest.current !== requestId || feedOrderDate.current !== date) return;
@@ -202,10 +201,13 @@ export default function GoalHorn() {
     const timer = window.setInterval(() => void load(true), 30_000);
     return () => window.clearInterval(timer);
   }, [date, today, load]);
+  useEffect(() => { window.localStorage.setItem("around-horn:show-nightly-recap", String(showNightlyRecap)); }, [showNightlyRecap]);
+  useEffect(() => { window.localStorage.setItem("around-horn:show-record-chases", String(showRecordChases)); }, [showRecordChases]);
   const filteredEvents = useMemo(() => selectedTeamId == null ? events : events.filter((event) => event.kind === "goal" ? [event.scorer, ...event.assists].some((player) => player.fantasyTeam?.id === selectedTeamId) : event.kind === "goalie" ? event.goalie.fantasyTeam?.id === selectedTeamId : event.kind === "record" ? event.player.fantasyTeam?.id === selectedTeamId : event.team.id === selectedTeamId || event.passedTeam.id === selectedTeamId), [events, selectedTeamId]);
   const visibleEvents = useMemo(() => filteredEvents.filter((event) => event.kind !== "record"), [filteredEvents]);
   const recordsFor = useCallback((event: GoalFeedEvent | GoalieFeedEvent) => filteredEvents.filter((candidate): candidate is RecordFeedEvent => candidate.kind === "record" && Math.abs(candidate.sortValue - event.sortValue - 0.5) < 0.001), [filteredEvents]);
   const filteredChases = useMemo(() => selectedTeamId == null ? recordChases : recordChases.filter((chase) => chase.player.fantasyTeam?.id === selectedTeamId), [recordChases, selectedTeamId]);
+  const filteredStars = useMemo(() => (selectedTeamId == null ? nightlyStars : nightlyStars.filter((player) => player.fantasyTeam?.id === selectedTeamId)).slice(0, 3), [nightlyStars, selectedTeamId]);
 
   return <div>
     <PageMeta title="Around the Horn | GLDHL" description="Live NHL scoring and GLDHL fantasy updates" />
@@ -217,8 +219,10 @@ export default function GoalHorn() {
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"><div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-[10px] font-black uppercase tracking-[0.16em] text-brand-500">Fantasy Team Filter</p><p className="mt-0.5 text-xs text-gray-500">Show goals scored or assisted by a franchise</p></div>{selectedTeamId != null && <button type="button" onClick={() => setSelectedTeamId(null)} className="text-xs font-black text-brand-500 hover:underline">Clear filter</button>}</div><div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"><button type="button" onClick={() => setSelectedTeamId(null)} className={`flex h-14 min-w-14 shrink-0 items-center justify-center rounded-xl border px-3 text-[10px] font-black uppercase transition ${selectedTeamId == null ? "border-brand-500 bg-brand-50 text-brand-600 ring-2 ring-brand-500/20 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 bg-gray-50 text-gray-500 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900"}`}>All</button>{teams.map((team) => <button key={team.id} type="button" title={team.team_name} aria-label={`Filter by ${team.team_name}`} onClick={() => setSelectedTeamId((current) => current === team.id ? null : team.id)} className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border p-1.5 transition ${selectedTeamId === team.id ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/20 dark:bg-brand-500/10" : "border-gray-200 bg-gray-50 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900"}`}>{team.logo ? <img src={team.logo} alt={`${team.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-[9px] font-black text-gray-500">{team.abbreviation}</span>}</button>)}</div></section>
 
-      {!loading && visibleEvents.length > 0 && <NightlyRecap events={visibleEvents} records={filteredEvents.filter((event): event is RecordFeedEvent => event.kind === "record")} date={date} />}
-      {!recordsLoading && <RecordChaseBoard chases={filteredChases} />}
+      <section className="flex flex-wrap items-center gap-2 px-1"><span className="mr-1 text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">Page features</span><button type="button" onClick={() => setShowNightlyRecap((value) => !value)} aria-pressed={showNightlyRecap} className={`rounded-full border px-3 py-1.5 text-[10px] font-black transition ${showNightlyRecap ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-500/10 dark:text-sky-300" : "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-900"}`}><span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${showNightlyRecap ? "bg-sky-500" : "bg-gray-400"}`} />Nightly Recap · {showNightlyRecap ? "On" : "Off"}</button><button type="button" onClick={() => setShowRecordChases((value) => !value)} aria-pressed={showRecordChases} className={`rounded-full border px-3 py-1.5 text-[10px] font-black transition ${showRecordChases ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-500/10 dark:text-amber-300" : "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-900"}`}><span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${showRecordChases ? "bg-amber-500" : "bg-gray-400"}`} />Record Chases · {showRecordChases ? "On" : "Off"}</button></section>
+
+      {showNightlyRecap && !loading && visibleEvents.length > 0 && <NightlyRecap events={visibleEvents} records={filteredEvents.filter((event): event is RecordFeedEvent => event.kind === "record")} stars={filteredStars} date={date} />}
+      {showRecordChases && !recordsLoading && <RecordChaseBoard chases={filteredChases} />}
 
       {updatedAt && <div className="flex items-center justify-end gap-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{recordsLoading && <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />Loading record notes</span>}<span>Updated {updatedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</span></div>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm font-semibold text-error-700">{error}</p>}

@@ -280,7 +280,7 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
   return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
 }
 
-export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
+export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; nightlyStars: GoalFeedPlayer[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
     fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
@@ -369,6 +369,11 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       sortValue: latestPlay + 1,
     } satisfies GoalieFeedEvent];
   });
+  const nightlyStars = [...fantasyPlayers.keys()].map((playerId) => {
+    const game = playByPlay.find(({ data }) => data?.rosterSpots?.some((spot) => String(spot.playerId) === playerId));
+    return game ? playerForGame(game.data, Number(playerId)) : null;
+  }).filter((player): player is GoalFeedPlayer => player?.tonightPoints != null && player.tonightPoints > 0)
+    .sort((a, b) => (b.tonightPoints || 0) - (a.tonightPoints || 0) || a.name.localeCompare(b.name));
   const recordInsightsPromise = (async () => {
     try {
       const recordBook = await fetchDatedRecordBook(date);
@@ -433,5 +438,5 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((row, index) => ({ ...row, rank: index + 1 }));
   const standings = seasonStats ? rankTeams(skaterScores, goalieScores) : [];
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
-  return { events, goalieEvents, recordEventsPromise, recordChasesPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
+  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }
