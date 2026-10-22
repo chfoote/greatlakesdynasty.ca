@@ -6,13 +6,13 @@ import { fetchFantasyPlayerByApiId, fetchPlayerSeasonsByPlayer, type FantasyPlay
 import { fetchNhlPlayerLanding, fetchNhlPlayerSeasonStats, formatFantasyPoints, formatNhlStat, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlPlayerLanding, type NhlSkaterRecord } from "../../lib/nhl";
 import { fetchPlayerAwards, type PlayerAward } from "../../lib/awards";
 import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
-import { applyTeamBranding, fetchTeamBrandingHistory } from "../../lib/fantasyTeams";
+import { applyTeamBranding, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { CURRENT_LEAGUE_SEASON, FIRST_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import { TradeTransactionDetails } from "./Transactions";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import PlayerInterestButton from "./PlayerInterestButton";
 import { fetchPlayerLeadership } from "../../lib/teamLeadership";
-import { fetchRecordBookData, type ScoringLeader } from "../../lib/recordBook";
+import { fetchRecordBookData, type FranchiseStatLine, type ScoringLeader } from "../../lib/recordBook";
 import PositionBadge from "../../components/hockey/PositionBadge";
 import CountryFlagBadge from "../../components/hockey/CountryFlagBadge";
 import PlayerAwardBadges from "./PlayerAwardBadges";
@@ -113,6 +113,98 @@ function FranchiseScoringHistory({ rows }: { rows: ScoringLeader[] }) {
   </section>;
 }
 
+type PlayerRecordPlacement = { key: string; scope: "league" | "franchise"; label: string; rank: number; value: number; team: FantasyTeam | null; format: "number" | "decimal" | "percentage" };
+type RecordMetric = { label: string; kind: "skater" | "goalie"; field: string; format?: PlayerRecordPlacement["format"]; lower?: boolean };
+
+const playerRecordMetrics: RecordMetric[] = [
+  { label: "Games Played", kind: "skater", field: "gamesPlayed" }, { label: "Goals", kind: "skater", field: "goals" }, { label: "Assists", kind: "skater", field: "assists" }, { label: "Points", kind: "skater", field: "points" },
+  { label: "+/-", kind: "skater", field: "plusMinus" }, { label: "Penalty Minutes", kind: "skater", field: "penaltyMinutes" }, { label: "Shots", kind: "skater", field: "shots" }, { label: "Power-Play Goals", kind: "skater", field: "ppGoals" },
+  { label: "Power-Play Assists", kind: "skater", field: "ppAssists" }, { label: "Short-Handed Goals", kind: "skater", field: "shGoals" }, { label: "Short-Handed Assists", kind: "skater", field: "shAssists" }, { label: "Game-Winning Goals", kind: "skater", field: "gameWinningGoals" },
+  { label: "Blocked Shots", kind: "skater", field: "blockedShots" }, { label: "Hits", kind: "skater", field: "hits" }, { label: "Faceoff Wins", kind: "skater", field: "faceoffWins" }, { label: "Fantasy Score", kind: "skater", field: "fantasyPoints", format: "decimal" },
+  { label: "Games Played", kind: "goalie", field: "gamesPlayed" }, { label: "Games Started", kind: "goalie", field: "gamesStarted" }, { label: "Wins", kind: "goalie", field: "wins" }, { label: "Losses", kind: "goalie", field: "losses" },
+  { label: "Overtime Losses", kind: "goalie", field: "otLosses" }, { label: "Goals Against", kind: "goalie", field: "goalsAgainst" }, { label: "Saves", kind: "goalie", field: "saves" }, { label: "Shutouts", kind: "goalie", field: "shutouts" },
+  { label: "Penalty Minutes", kind: "goalie", field: "penaltyMinutes" }, { label: "Goals", kind: "goalie", field: "goals" }, { label: "Assists", kind: "goalie", field: "assists" }, { label: "Save Percentage", kind: "goalie", field: "savePct", format: "percentage" },
+  { label: "Goals-Against Average", kind: "goalie", field: "goalsAgainstAverage", format: "decimal", lower: true }, { label: "Fantasy Score", kind: "goalie", field: "fantasyPoints", format: "decimal" },
+];
+
+function recordMetricValue(lines: FranchiseStatLine[], metric: RecordMetric) {
+  const eligible = lines.map((line) => line[metric.kind] as unknown as Record<string, number> | null).filter((row): row is Record<string, number> => Boolean(row));
+  if (!eligible.length) return null;
+  if (metric.field === "savePct") {
+    const saves = eligible.reduce((sum, row) => sum + Number(row.saves || 0), 0);
+    const goalsAgainst = eligible.reduce((sum, row) => sum + Number(row.goalsAgainst || 0), 0);
+    return saves + goalsAgainst ? saves / (saves + goalsAgainst) : 0;
+  }
+  if (metric.field === "goalsAgainstAverage") {
+    const games = eligible.reduce((sum, row) => sum + Number(row.gamesPlayed || 0), 0);
+    return games ? eligible.reduce((sum, row) => sum + Number(row.goalsAgainstAverage || 0) * Number(row.gamesPlayed || 0), 0) / games : 0;
+  }
+  return eligible.reduce((sum, row) => sum + Number(row[metric.field as keyof typeof row] || 0), 0);
+}
+
+function buildPlayerRecordPlacements(lines: FranchiseStatLine[], playerId: string) {
+  const placements: PlayerRecordPlacement[] = [];
+  playerRecordMetrics.forEach((metric) => {
+    const leagueGroups = new Map<string, FranchiseStatLine[]>();
+    lines.forEach((line) => leagueGroups.set(line.playerId, [...(leagueGroups.get(line.playerId) || []), line]));
+    const leagueValues = [...leagueGroups.entries()].map(([id, rows]) => ({ id, value: recordMetricValue(rows, metric) })).filter((row): row is { id: string; value: number } => row.value != null);
+    const leaguePlayer = leagueValues.find((row) => row.id === playerId);
+    if (leaguePlayer) {
+      const rank = 1 + leagueValues.filter((row) => metric.lower ? row.value < leaguePlayer.value : row.value > leaguePlayer.value).length;
+      if (rank <= 5) placements.push({ key: `league:${metric.kind}:${metric.field}`, scope: "league", label: metric.label, rank, value: leaguePlayer.value, team: null, format: metric.format || "number" });
+    }
+    lines.filter((line) => line.playerId === playerId && line.team).forEach((playerLine) => {
+      const teamLines = lines.filter((line) => line.team?.id === playerLine.team?.id);
+      const playerValue = recordMetricValue([playerLine], metric);
+      if (playerValue == null) return;
+      const values = teamLines.map((line) => ({ id: line.playerId, value: recordMetricValue([line], metric) })).filter((row): row is { id: string; value: number } => row.value != null);
+      const rank = 1 + values.filter((row) => metric.lower ? row.value < playerValue : row.value > playerValue).length;
+      if (rank <= 10) placements.push({ key: `franchise:${playerLine.team!.id}:${metric.kind}:${metric.field}`, scope: "franchise", label: metric.label, rank, value: playerValue, team: playerLine.team, format: metric.format || "number" });
+    });
+  });
+  return placements.sort((a, b) => a.scope.localeCompare(b.scope) || a.rank - b.rank || a.label.localeCompare(b.label));
+}
+
+function PlayerRecords({ records }: { records: PlayerRecordPlacement[] }) {
+  const league = records.filter((record) => record.scope === "league");
+  const franchise = records.filter((record) => record.scope === "franchise");
+  const formatValue = (record: PlayerRecordPlacement) => record.format === "percentage" ? record.value.toFixed(3).replace(/^0/, "") : record.value.toLocaleString("en-CA", { maximumFractionDigits: record.format === "decimal" ? 2 : 0 });
+  const section = (title: string, subtitle: string, rows: PlayerRecordPlacement[], tone: "rose" | "violet") => <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className={`text-[10px] font-black uppercase tracking-[0.18em] ${tone === "rose" ? "text-rose-600 dark:text-rose-300" : "text-violet-600 dark:text-violet-300"}`}>{subtitle}</p><h2 className="text-lg font-black text-gray-900 dark:text-white">{title}</h2></div>{rows.length ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">{rows.map((record) => <article key={record.key} className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${tone === "rose" ? "border-rose-200 bg-rose-50/70 dark:border-rose-900/60 dark:bg-rose-500/10" : "border-violet-200 bg-violet-50/70 dark:border-violet-900/60 dark:bg-violet-500/10"}`}><div className="min-w-0"><p className="truncate text-sm font-black text-gray-900 dark:text-white">{record.label}</p>{record.team && <p className="mt-1 flex items-center gap-1.5 text-[10px] font-bold text-gray-500">{record.team.logo && <img src={record.team.logo} alt="" className="h-4 w-4 object-contain" />}{record.team.team_name}</p>}</div><div className="shrink-0 text-right"><span className={`inline-flex rounded-lg px-2 py-1 text-xs font-black text-white ${tone === "rose" ? "bg-gradient-to-r from-red-600 to-rose-500" : "bg-gradient-to-r from-violet-600 to-indigo-500"}`}>#{record.rank}</span><p className="mt-1 text-xs font-black text-gray-600 dark:text-gray-300">{formatValue(record)}</p></div></article>)}</div> : <p className="p-5 text-sm text-gray-500">No current {tone === "rose" ? "top-five league" : "top-ten franchise"} placements.</p>}</section>;
+  return <div className="space-y-5"><section className="grid gap-3 sm:grid-cols-2"><div className="rounded-2xl bg-gradient-to-br from-rose-600 to-orange-500 p-5 text-white shadow-sm"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-rose-100">League Record Book</p><p className="mt-2 text-4xl font-black">{league.length}</p><p className="mt-1 text-sm font-bold text-rose-100">Top-five league placements</p></div><div className="rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 p-5 text-white shadow-sm"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">Franchise Record Books</p><p className="mt-2 text-4xl font-black">{franchise.length}</p><p className="mt-1 text-sm font-bold text-violet-100">Top-ten franchise placements</p></div></section>{section("League Records", "All-Time GLDHL · Top 5", league, "rose")}{section("Franchise Records", "Credited by ownership · Top 10", franchise, "violet")}<p className="px-1 text-xs text-gray-400">Counts include every all-time Record Book category except fantasy points per game. League books track five places; franchise books track ten.</p></div>;
+}
+
+function PlayerResume({ records, awards, franchises, seasons, leadership }: { records: PlayerRecordPlacement[]; awards: PlayerAward[]; franchises: ScoringLeader[]; seasons: PlayerSeasonWithRelations[]; leadership: Map<number, "C" | "A"> }) {
+  const leagueRecords = records.filter((record) => record.scope === "league" && record.rank === 1);
+  const franchiseRecords = records.filter((record) => record.scope === "franchise" && record.rank === 1);
+  const seasonalAwards = awards.filter((award) => !award.is_monthly);
+  const monthlyHonours = awards.filter((award) => award.is_monthly);
+  const careerPoints = franchises.reduce((sum, row) => sum + row.fantasyPoints, 0);
+  const teams = new Map(franchises.filter((row) => row.team).map((row) => [row.team!.id, row.team!]));
+  const captaincies = seasons.filter((season) => leadership.get(season.id) === "C");
+  const firstSeason = Math.min(...seasons.map((season) => season.season_year));
+  const lastSeason = Math.max(...seasons.map((season) => season.season_year));
+  const leagueLabels = new Set(records.filter((record) => record.scope === "league").map((record) => record.label));
+  const badgePlacements = records.filter((record) => record.scope === "league" || record.rank <= 5);
+  const franchiseNumberOnes = new Map<number, number>();
+  franchiseRecords.forEach((record) => { if (record.team) franchiseNumberOnes.set(record.team.id, (franchiseNumberOnes.get(record.team.id) || 0) + 1); });
+  const iconTeamId = [...franchiseNumberOnes.entries()].find(([, count]) => count >= 3)?.[0];
+  const iconTeam = franchises.find((row) => row.team?.id === iconTeamId)?.team || null;
+  const badges = [
+    leagueRecords.length ? { key: "league-holder", icon: "👑", title: "League Record Holder", detail: `#1 in ${leagueRecords.length} league ${leagueRecords.length === 1 ? "category" : "categories"}`, tone: "rose" } : null,
+    franchiseRecords.length ? { key: "franchise-holder", icon: "🏛️", title: "Franchise Record Holder", detail: `#1 in ${franchiseRecords.length} franchise ${franchiseRecords.length === 1 ? "category" : "categories"}`, tone: "violet" } : null,
+    badgePlacements.length >= 5 ? { key: "regular", icon: "📚", title: "Record Book Regular", detail: `${badgePlacements.length} current top-five placements`, tone: "sky" } : null,
+    badgePlacements.length >= 10 ? { key: "collector", icon: "🔥", title: "Record Collector", detail: `${badgePlacements.length} current top-five placements`, tone: "amber" } : null,
+    ["Goals", "Assists", "Points"].every((label) => leagueLabels.has(label)) ? { key: "triple-threat", icon: "🏒", title: "Triple Threat", detail: "League top five in Goals, Assists and Points", tone: "emerald" } : null,
+    ["Wins", "Shutouts"].every((label) => leagueLabels.has(label)) ? { key: "goalie-great", icon: "🥅", title: "Goalie Great", detail: "League top five in Wins and Shutouts", tone: "cyan" } : null,
+    iconTeam ? { key: "franchise-icon", icon: "⭐", title: "Franchise Icon", detail: `Owns 3+ records for ${iconTeam.team_name}`, tone: "indigo", logo: iconTeam.logo } : null,
+  ].filter((badge): badge is NonNullable<typeof badge> => Boolean(badge));
+  const highlights = [...seasonalAwards.map((award) => ({ key: `award:${award.id}`, icon: "🏆", title: award.award?.name || "League award", detail: `Season ${award.season_year}` })), ...leagueRecords.slice(0, 4).map((record) => ({ key: record.key, icon: "👑", title: `League ${record.label} leader`, detail: record.value.toLocaleString("en-CA", { maximumFractionDigits: 2 }) })), ...captaincies.map((season) => ({ key: `captain:${season.id}`, icon: "C", title: `Captain · ${season.fantasy_team?.team_name || "GLDHL"}`, detail: `Season ${season.season_year}` }))];
+  return <div className="space-y-5"><section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 p-5 text-white shadow-lg sm:p-7"><p className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300">Career Résumé</p><div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-2xl font-black">GLDHL legacy at a glance</h2><p className="mt-1 text-sm text-slate-300">{Number.isFinite(firstSeason) ? firstSeason === lastSeason ? `Season ${firstSeason}` : `Seasons ${firstSeason}–${lastSeason}` : "No league seasons yet"} · {teams.size} {teams.size === 1 ? "franchise" : "franchises"}</p></div><p className="text-3xl font-black text-sky-300">{formatFantasyPoints(careerPoints)} <span className="text-[10px] uppercase tracking-wider text-slate-400">Career FPTS</span></p></div><div className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-4"><div className="rounded-xl bg-white/10 p-3"><p className="text-2xl font-black text-rose-300">{leagueRecords.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-300">League #1 records</p></div><div className="rounded-xl bg-white/10 p-3"><p className="text-2xl font-black text-violet-300">{franchiseRecords.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-300">Franchise #1 records</p></div><div className="rounded-xl bg-white/10 p-3"><p className="text-2xl font-black text-amber-300">{seasonalAwards.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-300">Season awards</p></div><div className="rounded-xl bg-white/10 p-3"><p className="text-2xl font-black text-emerald-300">{monthlyHonours.length}</p><p className="text-[9px] font-black uppercase tracking-wider text-slate-300">Monthly honours</p></div></div></section>
+    <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="flex items-end justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-800"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-500">Record Book Badges</p><h3 className="text-lg font-black text-gray-900 dark:text-white">Earned distinctions</h3></div><span className="text-xs font-black text-gray-400">{badges.length} earned</span></div>{badges.length ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">{badges.map((badge) => <article key={badge.key} className={`flex items-center gap-3 rounded-xl border p-3 ${badge.tone === "rose" ? "border-rose-200 bg-rose-50 dark:border-rose-900/60 dark:bg-rose-500/10" : badge.tone === "violet" ? "border-violet-200 bg-violet-50 dark:border-violet-900/60 dark:bg-violet-500/10" : badge.tone === "amber" ? "border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-500/10" : badge.tone === "emerald" ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-500/10" : badge.tone === "cyan" ? "border-cyan-200 bg-cyan-50 dark:border-cyan-900/60 dark:bg-cyan-500/10" : badge.tone === "indigo" ? "border-indigo-200 bg-indigo-50 dark:border-indigo-900/60 dark:bg-indigo-500/10" : "border-sky-200 bg-sky-50 dark:border-sky-900/60 dark:bg-sky-500/10"}`}><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-xl shadow-sm ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/10">{badge.logo ? <img src={badge.logo} alt="" className="h-8 w-8 object-contain" /> : badge.icon}</span><div className="min-w-0"><p className="text-sm font-black text-gray-900 dark:text-white">{badge.title}</p><p className="mt-0.5 text-[10px] font-semibold leading-4 text-gray-500 dark:text-gray-400">{badge.detail}</p></div></article>)}</div> : <p className="p-5 text-sm text-gray-500">No Record Book badges yet. A top-five placement earns the first step toward one.</p>}</section>
+    <div className="grid gap-5 lg:grid-cols-[1.25fr_.75fr]"><section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-500">Signature achievements</p><h3 className="text-lg font-black text-gray-900 dark:text-white">Career highlights</h3></div>{highlights.length ? <div className="divide-y divide-gray-100 dark:divide-gray-800">{highlights.map((item) => <div key={item.key} className="flex items-center gap-3 px-5 py-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-sm font-black text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">{item.icon}</span><div><p className="text-sm font-black text-gray-900 dark:text-white">{item.title}</p><p className="text-xs text-gray-500">{item.detail}</p></div></div>)}</div> : <p className="p-5 text-sm text-gray-500">The résumé is just getting started.</p>}</section><section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">Franchise journey</p><h3 className="text-lg font-black text-gray-900 dark:text-white">Teams represented</h3><div className="mt-4 space-y-3">{[...teams.values()].map((team) => { const points = franchises.filter((row) => row.team?.id === team.id).reduce((sum, row) => sum + row.fantasyPoints, 0); return <Link key={team.id} to={`/teams/${team.id}`} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 p-3 hover:bg-gray-100 dark:bg-gray-900/70 dark:hover:bg-gray-800"> <span className="flex min-w-0 items-center gap-2">{team.logo && <img src={team.logo} alt="" className="h-8 w-8 object-contain" />}<span className="truncate text-xs font-black text-gray-900 dark:text-white">{team.team_name}</span></span><span className="shrink-0 text-xs font-black text-brand-500">{formatFantasyPoints(points)} FPTS</span></Link>; })}{!teams.size && <p className="text-sm text-gray-500">No franchise scoring yet.</p>}</div></section></div>
+  </div>;
+}
+
 export default function PlayerProfile() {
   const playerApiId = new URLSearchParams(useLocation().search).get("playerId") || "";
   const [landing, setLanding] = useState<NhlPlayerLanding | null>(null);
@@ -129,7 +221,8 @@ export default function PlayerProfile() {
   const [error, setError] = useState("");
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [franchiseScoring, setFranchiseScoring] = useState<ScoringLeader[]>([]);
-  const [profileTab, setProfileTab] = useState<"history" | "trophies" | "franchises" | "transactions">("history");
+  const [playerRecords, setPlayerRecords] = useState<PlayerRecordPlacement[]>([]);
+  const [profileTab, setProfileTab] = useState<"resume" | "history" | "trophies" | "records" | "franchises" | "transactions">("history");
   const [tabLoading, setTabLoading] = useState(false);
   const tradeInterest = usePlayerTradeInterest(CURRENT_LEAGUE_SEASON);
 
@@ -155,7 +248,7 @@ export default function PlayerProfile() {
         setSkater(currentStats.skater); setGoalie(currentStats.goalie);
         setStatsSeason(CURRENT_LEAGUE_SEASON);
         setAwards(playerRow ? allAwards.filter((award) => award.player_id === playerRow.id) : []);
-        setTransactions([]); setFranchiseScoring([]);
+        setTransactions([]); setFranchiseScoring([]); setPlayerRecords([]);
       } catch (err) { if (active) setError(err instanceof Error ? err.message : "Unable to load player profile."); }
       finally { if (active) setLoading(false); }
     }
@@ -185,9 +278,9 @@ export default function PlayerProfile() {
   }, [profileTab, fantasyPlayer]);
 
   useEffect(() => {
-    if (profileTab !== "franchises") return;
+    if (profileTab !== "franchises" && profileTab !== "records" && profileTab !== "resume") return;
     let active = true; setTabLoading(true);
-    fetchRecordBookData().then((data) => { if (active) setFranchiseScoring(data.franchisePositionLeaders.filter((row) => row.playerId === playerApiId)); }).catch(() => { if (active) setFranchiseScoring([]); }).finally(() => { if (active) setTabLoading(false); });
+    fetchRecordBookData().then((data) => { if (active) { setFranchiseScoring(data.franchisePositionLeaders.filter((row) => row.playerId === playerApiId)); setPlayerRecords(buildPlayerRecordPlacements(data.franchiseStatLines, playerApiId)); } }).catch(() => { if (active) { setFranchiseScoring([]); setPlayerRecords([]); } }).finally(() => { if (active) setTabLoading(false); });
     return () => { active = false; };
   }, [profileTab, playerApiId]);
 
@@ -214,8 +307,10 @@ export default function PlayerProfile() {
         <nav aria-label="Player profile sections" className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4">
           <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 lg:flex-wrap lg:overflow-visible">
             {([
+              ["resume", "Career Résumé", playerRecords.filter((record) => record.rank === 1).length + awards.length],
               ["history", "League History & Stats", historicalStats.length],
               ["trophies", "Trophy Case", awards.length],
+              ["records", "Records", playerRecords.length],
               ["franchises", "Points by Franchise", franchiseScoring.length],
               ["transactions", "Transactions", transactions.length],
             ] as const).map(([key, label, count]) => <button key={key} type="button" onClick={() => setProfileTab(key)} aria-pressed={profileTab === key} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold transition ${profileTab === key ? "bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"}`}>{label}<span className={`ml-2 rounded-full px-1.5 py-0.5 text-[9px] ${profileTab === key ? "bg-white/20 dark:bg-gray-900/10" : "bg-white dark:bg-gray-900"}`}>{count}</span></button>)}
@@ -225,7 +320,9 @@ export default function PlayerProfile() {
         {profileTab === "history" && historyLoading && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading previous league seasons…</div>}
         {profileTab === "history" && !historyLoading && <SeasonHistory rows={historicalStats} seasons={seasons} awards={awards} leadership={leadershipByPlayerSeason} />}
         {profileTab === "trophies" && <PlayerTrophyCase awards={awards} />}
-        {tabLoading && (profileTab === "franchises" || profileTab === "transactions") && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading {profileTab === "franchises" ? "franchise scoring" : "transactions"}…</div>}
+        {tabLoading && (profileTab === "resume" || profileTab === "records" || profileTab === "franchises" || profileTab === "transactions") && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading {profileTab === "resume" ? "career résumé" : profileTab === "records" ? "record-book placements" : profileTab === "franchises" ? "franchise scoring" : "transactions"}…</div>}
+        {!tabLoading && profileTab === "resume" && <PlayerResume records={playerRecords} awards={awards} franchises={franchiseScoring} seasons={seasons} leadership={leadershipByPlayerSeason} />}
+        {!tabLoading && profileTab === "records" && <PlayerRecords records={playerRecords} />}
         {!tabLoading && profileTab === "franchises" && <FranchiseScoringHistory rows={franchiseScoring} />}
         {!tabLoading && profileTab === "transactions" && <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"><h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Transaction History</h2><div className="mt-4 space-y-4">{transactions.length ? transactions.map((transaction) => <PlayerTransactionCard key={transaction.id} transaction={transaction} fallbackPosition={position} />) : <p className="text-sm text-gray-500">No transactions have been posted for this player.</p>}</div></section>}
       </>}

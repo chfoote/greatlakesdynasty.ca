@@ -82,6 +82,20 @@ export type RecordMovementEvent = {
   sortValue: number;
 };
 
+export type RecordChase = {
+  key: string;
+  player: GoalFeedPlayer;
+  scope: "league" | "franchise";
+  category: RecordMovement["category"];
+  abbreviation: RecordMovement["abbreviation"];
+  rank: number;
+  value: number;
+  needed: number;
+  targetRank: number;
+  targetNames: string[];
+  team: FantasyTeam | null;
+};
+
 type RecordMetric = {
   category: RecordMovement["category"];
   abbreviation: RecordMovement["abbreviation"];
@@ -140,6 +154,7 @@ function buildRecordMovements(
       if (dailyValue <= 0) return;
 
       (["league", "franchise"] as const).forEach((scope) => {
+        const recordLimit = scope === "league" ? 5 : 10;
         const scopedLines = scope === "league" ? lines : lines.filter((line) => line.team?.id === teamId);
         const grouped = new Map<string, { name: string; current: number; before: number }>();
         scopedLines.forEach((line) => {
@@ -160,7 +175,7 @@ function buildRecordMovements(
         const currentValues = [...grouped.values()].map((row) => row.current);
         const beforeRank = competitionRank(beforeValues, subject.before);
         const afterRank = competitionRank(currentValues, subject.current);
-        if (afterRank > 5) return;
+        if (afterRank > recordLimit) return;
         const moved = afterRank < beforeRank;
         const passedNames = [...grouped.entries()].filter(([id, row]) => id !== playerId && row.before > subject.before && row.current < subject.current).map(([, row]) => row.name);
         const tiedNames = [...grouped.entries()].filter(([id, row]) => id !== playerId && row.current === subject.current).map(([, row]) => row.name);
@@ -168,7 +183,7 @@ function buildRecordMovements(
         if (sortValue == null) return;
         const movement: RecordMovement = {
           scope, category: metric.category, abbreviation: metric.abbreviation,
-          beforeRank: beforeRank <= 5 ? beforeRank : null, afterRank, value: subject.current,
+          beforeRank: beforeRank <= recordLimit ? beforeRank : null, afterRank, value: subject.current,
           moved, tied: tiedNames.length > 0, passedNames: passedNames.slice(0, 2), tiedNames: tiedNames.slice(0, 2),
           team: scope === "franchise" ? player.fantasyTeam : null,
         };
@@ -182,6 +197,43 @@ function buildRecordMovements(
     });
   });
   return results;
+}
+
+function buildRecordChases(lines: FranchiseStatLine[], rosterPlayers: Map<string, GoalFeedPlayer>) {
+  const chases: RecordChase[] = [];
+  recordMetrics.forEach((metric) => {
+    const leagueGroups = new Map<string, { name: string; value: number; team: FantasyTeam | null }>();
+    lines.forEach((line) => {
+      const current = leagueGroups.get(line.playerId) || { name: line.playerName, value: 0, team: line.currentTeam };
+      current.value += metric.value(line);
+      current.team = line.currentTeam || current.team;
+      leagueGroups.set(line.playerId, current);
+    });
+    const addChases = (scope: "league" | "franchise", groups: Map<string, { name: string; value: number; team: FantasyTeam | null }>, team: FantasyTeam | null) => {
+      const rows = [...groups.entries()].filter(([, row]) => row.value > 0);
+      const values = rows.map(([, row]) => row.value);
+      rows.forEach(([playerId, row]) => {
+        const player = rosterPlayers.get(playerId);
+        if (!player || (scope === "franchise" && player.fantasyTeam?.id !== team?.id)) return;
+        const rank = competitionRank(values, row.value);
+        if (rank > (scope === "league" ? 6 : 11)) return;
+        const nextValue = Math.min(...values.filter((value) => value > row.value));
+        if (!Number.isFinite(nextValue)) return;
+        const needed = nextValue - row.value + 1;
+        if (needed > 3) return;
+        const targetRank = competitionRank(values, nextValue);
+        const targetNames = rows.filter(([candidateId, candidate]) => candidateId !== playerId && candidate.value === nextValue).map(([, candidate]) => candidate.name).slice(0, 2);
+        chases.push({ key: `${scope}:${team?.id || "all"}:${metric.abbreviation}:${playerId}`, player, scope, category: metric.category, abbreviation: metric.abbreviation, rank, value: row.value, needed, targetRank, targetNames, team: scope === "franchise" ? team : null });
+      });
+    };
+    addChases("league", leagueGroups, null);
+    const teams = new Map(lines.filter((line) => line.team).map((line) => [line.team!.id, line.team!]));
+    teams.forEach((team) => {
+      const groups = new Map(lines.filter((line) => line.team?.id === team.id).map((line) => [line.playerId, { name: line.playerName, value: metric.value(line), team: line.currentTeam }]));
+      addChases("franchise", groups, team);
+    });
+  });
+  return chases.sort((a, b) => a.needed - b.needed || a.targetRank - b.targetRank || a.player.name.localeCompare(b.player.name)).slice(0, 12);
 }
 
 function seasonForDate(date: string) {
@@ -228,7 +280,7 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
   return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
 }
 
-export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; recordEventsPromise: Promise<RecordMovementEvent[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
+export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
     fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
@@ -317,7 +369,7 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       sortValue: latestPlay + 1,
     } satisfies GoalieFeedEvent];
   });
-  const recordEventsPromise = events.length || goalieEvents.length ? (async () => {
+  const recordInsightsPromise = (async () => {
     try {
       const recordBook = await fetchDatedRecordBook(date);
       const feedPlayers = new Map<string, GoalFeedPlayer>();
@@ -340,20 +392,29 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
         noteMetric(event.goalie, "W", event.sortValue);
         noteMetric(event.goalie, "SO", event.sortValue);
       });
-      return buildRecordMovements(
+      const movements = events.length || goalieEvents.length ? buildRecordMovements(
         recordBook.franchiseStatLines,
         dailyStats.skaters as unknown as Record<string, unknown>[],
         dailyStats.goalies as unknown as Record<string, unknown>[],
         feedPlayers,
         metricSortValues,
         new Map([...fantasyPlayers].map(([playerId, value]) => [playerId, value.team?.id || null])),
-      );
+      ) : [];
+      const rosterPlayers = new Map<string, GoalFeedPlayer>();
+      fantasyPlayers.forEach((value, playerId) => {
+        const prospectRight = getProspectRight(eligibleProspectRights, Number(playerId), value.row.player?.full_name || "");
+        rosterPlayers.set(playerId, { playerId, name: value.row.player?.full_name || "Unknown player", fantasyTeam: value.team || prospectRight?.team || null, prospect: ["PROSPECT", "AP"].includes((value.row.position || "").toUpperCase()), tonightPoints: tonightPoints.get(playerId) ?? null });
+      });
+      feedPlayers.forEach((player, playerId) => rosterPlayers.set(playerId, player));
+      return { movements, chases: buildRecordChases(recordBook.franchiseStatLines, rosterPlayers) };
     } catch {
       // Record movement is an enhancement; live scoring should remain available
       // if the historical record book cannot be loaded.
-      return [];
+      return { movements: [] as RecordMovementEvent[], chases: [] as RecordChase[] };
     }
-  })() : Promise.resolve([] as RecordMovementEvent[]);
+  })();
+  const recordEventsPromise = recordInsightsPromise.then((result) => result.movements);
+  const recordChasesPromise = recordInsightsPromise.then((result) => result.chases);
   const skaterScores = new Map(seasonStats?.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]) ?? []);
   const goalieScores = new Map(seasonStats?.goalies.map((record) => [String(record.playerId), getGoalieScore(record)]) ?? []);
   const dailySkaterScores = new Map(dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]));
@@ -372,5 +433,5 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((row, index) => ({ ...row, rank: index + 1 }));
   const standings = seasonStats ? rankTeams(skaterScores, goalieScores) : [];
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
-  return { events, goalieEvents, recordEventsPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
+  return { events, goalieEvents, recordEventsPromise, recordChasesPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }
