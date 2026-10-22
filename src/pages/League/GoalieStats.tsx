@@ -56,6 +56,7 @@ export default function GoalieStats() {
   const [error, setError] = useState<string | null>(null);
   const [awardsByPlayer, setAwardsByPlayer] = useState<Map<number, PlayerAward[]>>(new Map());
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
+  const [playerSearch, setPlayerSearch] = useState("");
   const [rightsFilter, setRightsFilter] = useState<RightsFilter>("all");
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
@@ -125,11 +126,12 @@ export default function GoalieStats() {
     const prospectRight = getProspectRight(prospectRights, record.playerId, record.goalieFullName);
     const owned = Boolean(fantasySeason?.fantasy_team_id || prospectRight);
     const ownerTeamId = fantasySeason?.fantasy_team_id || prospectRight?.team.id;
+    if (playerSearch.trim() && !record.goalieFullName.toLocaleLowerCase().includes(playerSearch.trim().toLocaleLowerCase())) return false;
     if (rightsFilter === "owned" && !owned) return false;
     if (rightsFilter === "unowned" && owned) return false;
     if (selectedTeamIds.size && (!ownerTeamId || !selectedTeamIds.has(ownerTeamId))) return false;
     return true;
-  }), [records, fantasySeasons, prospectRights, rightsFilter, selectedTeamIds]);
+  }), [records, fantasySeasons, prospectRights, playerSearch, rightsFilter, selectedTeamIds]);
 
   const sortedRecords = useMemo(() => [...filteredRecords].sort((a, b) => {
     const aValue = goalieSortValue(a, sort.key);
@@ -155,12 +157,14 @@ export default function GoalieStats() {
           <div className="w-full sm:w-40"><label className="mb-1.5 block text-xs font-semibold uppercase text-gray-500">Season</label><select value={selectedSeason} onChange={(event) => { setSelectedSeason(Number(event.target.value)); setSelectedTeamIds(new Set()); }} className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900">{statsSeasons.map((season) => <option key={season}>{season}</option>)}</select></div>
         </div>
         <StatsRightsFilters
+          search={playerSearch}
+          onSearchChange={setPlayerSearch}
           rights={rightsFilter}
           onRightsChange={setRightsFilter}
           teams={teams}
           selectedTeamIds={selectedTeamIds}
           onToggleTeam={(teamId) => setSelectedTeamIds((current) => { const next = new Set(current); if (next.has(teamId)) next.delete(teamId); else next.add(teamId); return next; })}
-          onClear={() => { setRightsFilter("all"); setSelectedTeamIds(new Set()); }}
+          onClear={() => { setPlayerSearch(""); setRightsFilter("all"); setSelectedTeamIds(new Set()); }}
         />
         {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Loading goalie stats…</p>}
         {error && <p className="text-sm text-red-500">{error}</p>}
@@ -182,6 +186,7 @@ export default function GoalieStats() {
                   <td className="px-3 py-3 text-center text-gray-600 dark:text-gray-300">{record.gamesPlayed ? formatFantasyPoints(score / record.gamesPlayed) : '—'}</td>
                 </tr>;
               })}
+              {!sortedRecords.length && <tr><td colSpan={goalieColumns.length} className="px-4 py-12 text-center text-sm font-medium text-gray-500 dark:text-gray-400">No goalies match your search and filters.</td></tr>}
             </tbody>
           </table>
         </div>}
