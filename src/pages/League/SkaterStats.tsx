@@ -15,7 +15,7 @@ import {
 import NhlPlayerCell from "./NhlPlayerCell";
 import { fetchPlayerAwards, mapAwardsByPlayer, type PlayerAward } from "../../lib/awards";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
-import StatsRightsFilters, { type RightsFilter } from "./StatsRightsFilters";
+import StatsRightsFilters, { type PlayerTypeFilter, type RightsFilter } from "./StatsRightsFilters";
 import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "../../lib/prospectRights";
 import { fetchTradeBlockListings } from "../../lib/tradeMarket";
 import TradeBlockBadge from "./TradeBlockBadge";
@@ -65,6 +65,7 @@ export default function SkaterStats() {
   const [playerSearch, setPlayerSearch] = useState("");
   const [positionFilter, setPositionFilter] = useState("all");
   const [rightsFilter, setRightsFilter] = useState<RightsFilter>("all");
+  const [playerTypeFilter, setPlayerTypeFilter] = useState<PlayerTypeFilter>("all");
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
   const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
@@ -134,15 +135,20 @@ export default function SkaterStats() {
     const displayPosition = record.positionCode === "L" ? "LW" : record.positionCode === "R" ? "RW" : record.positionCode;
     const fantasySeason = fantasySeasons.get(String(record.playerId));
     const prospectRight = getProspectRight(prospectRights, record.playerId, record.skaterFullName);
+    const prospectPosition = ["PROSPECT", "AP"].includes((fantasySeason?.position || "").toUpperCase());
+    const rostered = Boolean(fantasySeason?.fantasy_team_id && !prospectPosition);
+    const prospect = Boolean(prospectRight && !rostered);
     const owned = Boolean(fantasySeason?.fantasy_team_id || prospectRight);
     const ownerTeamId = fantasySeason?.fantasy_team_id || prospectRight?.team.id;
     if (playerSearch.trim() && !record.skaterFullName.toLocaleLowerCase().includes(playerSearch.trim().toLocaleLowerCase())) return false;
     if (positionFilter !== "all" && displayPosition !== positionFilter) return false;
     if (rightsFilter === "owned" && !owned) return false;
     if (rightsFilter === "unowned" && owned) return false;
+    if (playerTypeFilter === "rostered" && !rostered) return false;
+    if (playerTypeFilter === "prospects" && !prospect) return false;
     if (selectedTeamIds.size && (!ownerTeamId || !selectedTeamIds.has(ownerTeamId))) return false;
     return true;
-  }), [records, fantasySeasons, prospectRights, playerSearch, positionFilter, rightsFilter, selectedTeamIds]);
+  }), [records, fantasySeasons, prospectRights, playerSearch, positionFilter, rightsFilter, playerTypeFilter, selectedTeamIds]);
 
   const sortedRecords = useMemo(() => [...filteredRecords].sort((a, b) => {
     const aValue = skaterSortValue(a, sort.key);
@@ -175,10 +181,12 @@ export default function SkaterStats() {
           onPositionChange={setPositionFilter}
           rights={rightsFilter}
           onRightsChange={setRightsFilter}
+          playerType={playerTypeFilter}
+          onPlayerTypeChange={setPlayerTypeFilter}
           teams={teams}
           selectedTeamIds={selectedTeamIds}
           onToggleTeam={(teamId) => setSelectedTeamIds((current) => { const next = new Set(current); if (next.has(teamId)) next.delete(teamId); else next.add(teamId); return next; })}
-          onClear={() => { setPlayerSearch(""); setPositionFilter("all"); setRightsFilter("all"); setSelectedTeamIds(new Set()); }}
+          onClear={() => { setPlayerSearch(""); setPositionFilter("all"); setRightsFilter("all"); setPlayerTypeFilter("all"); setSelectedTeamIds(new Set()); }}
         />
         {loading && <p className="text-sm text-gray-500 dark:text-gray-400">Loading skater stats…</p>}
         {error && <p className="text-sm text-red-500">{error}</p>}
