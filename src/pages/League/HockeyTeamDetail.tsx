@@ -65,6 +65,7 @@ const nonRosterSections = [
 ] as const;
 const activePositions = new Set(activeSections.map((section) => section.code));
 const capPositions = new Set([...activePositions, "W", "IR", "RETENTION"]);
+const ageRosterPositions = new Set([...activePositions, "W", "IR", "LTIR"]);
 const prospectPositions = new Set(["PROSPECT", "AP"]);
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 
@@ -86,6 +87,14 @@ function fantasyPlayerName(player: PlayerAward["player"]) {
 
 function playerApiId(season: PlayerSeasonWithRelations) {
   return season.player?.player_api_id || "";
+}
+
+function ageOnDate(birthDate: string, asOf: Date) {
+  const [year, month, day] = birthDate.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  let age = asOf.getFullYear() - year;
+  if (asOf.getMonth() + 1 < month || (asOf.getMonth() + 1 === month && asOf.getDate() < day)) age -= 1;
+  return age;
 }
 
 function position(season: PlayerSeasonWithRelations) {
@@ -133,10 +142,11 @@ function MobileRosterCard({ season, nhlTeam, awards, onTradeBlock, interestActio
   </article>;
 }
 
-function PayrollCard({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
+function PayrollCard({ label, value, danger = false, detail }: { label: string; value: string; danger?: boolean; detail?: string }) {
   return <div className={`rounded-lg border p-4 ${danger ? "border-error-200 bg-error-50 dark:border-error-500/30 dark:bg-error-500/10" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"}`}>
     <p className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">{label}</p>
     <p className={`mt-2 text-base font-semibold ${danger ? "text-error-700 dark:text-error-400" : "text-gray-800 dark:text-white/90"}`}>{value}</p>
+    {detail && <p className="mt-1 text-[10px] font-medium leading-4 text-gray-400">{detail}</p>}
   </div>;
 }
 
@@ -521,6 +531,7 @@ export default function HockeyTeamDetail() {
   const [lineupHeadshots, setLineupHeadshots] = useState<Map<string, string>>(new Map());
   const [nhlTeamsByPlayer, setNhlTeamsByPlayer] = useState<Map<string, string>>(new Map());
   const [birthCountriesByPlayer, setBirthCountriesByPlayer] = useState<Map<string, string>>(new Map());
+  const [birthDatesByPlayer, setBirthDatesByPlayer] = useState<Map<string, string>>(new Map());
   const [statsView, setStatsView] = useState<"season" | "today" | "yesterday">("season");
   const [dailySkaters, setDailySkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [dailyGoalies, setDailyGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
@@ -688,17 +699,18 @@ export default function HockeyTeamDetail() {
   useEffect(() => {
     let active = true;
     const metadataRows = [...roster, ...Object.values(multiYearRosters).flat()];
-    const missingIds = [...new Set(metadataRows.map(playerApiId))].filter((id) => id && (!lineupHeadshots.has(id) || !nhlTeamsByPlayer.has(id) || !birthCountriesByPlayer.has(id)));
+    const missingIds = [...new Set(metadataRows.map(playerApiId))].filter((id) => id && (!lineupHeadshots.has(id) || !nhlTeamsByPlayer.has(id) || !birthCountriesByPlayer.has(id) || !birthDatesByPlayer.has(id)));
     missingIds.forEach((id) => {
       void fetchNhlPlayerLanding(Number(id)).then((landing) => {
         if (!active) return;
         if (landing.headshot) setLineupHeadshots((current) => new Map(current).set(id, landing.headshot!));
         if (landing.currentTeamAbbrev) setNhlTeamsByPlayer((current) => new Map(current).set(id, landing.currentTeamAbbrev!));
         if (landing.birthCountry) setBirthCountriesByPlayer((current) => new Map(current).set(id, landing.birthCountry!));
+        if (landing.birthDate) setBirthDatesByPlayer((current) => new Map(current).set(id, landing.birthDate!));
       }).catch(() => {});
     });
     return () => { active = false; };
-  }, [roster, multiYearRosters, lineupHeadshots, nhlTeamsByPlayer, birthCountriesByPlayer]);
+  }, [roster, multiYearRosters, lineupHeadshots, nhlTeamsByPlayer, birthCountriesByPlayer, birthDatesByPlayer]);
 
   useEffect(() => {
     let active = true;
@@ -754,6 +766,10 @@ export default function HockeyTeamDetail() {
   const selectedManager = getManagerForSeason(managerTenures, selectedSeason);
   const displayTeam = team ? applyTeamBranding(team, brandingHistory, selectedSeason) : null;
   const rosterCount = roster.filter((season) => activePositions.has(position(season) as never)).length;
+  const ageRoster = roster.filter((season) => ageRosterPositions.has(position(season) as never));
+  const ageDate = selectedSeason === CURRENT_LEAGUE_SEASON ? new Date() : new Date(`${selectedSeason - 1}-10-01T12:00:00`);
+  const rosterAges = ageRoster.map((season) => birthDatesByPlayer.get(playerApiId(season))).filter((date): date is string => Boolean(date)).map((date) => ageOnDate(date, ageDate)).filter((age): age is number => age !== null);
+  const averageRosterAge = rosterAges.length ? rosterAges.reduce((sum, age) => sum + age, 0) / rosterAges.length : null;
   const buyoutPenaltyTotal = buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0);
   const retentionNet = retentionAdjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0);
   const capSalary = roster.filter((season) => capPositions.has(position(season) as never)).reduce((sum, season) => sum + (season.salary || 0), 0) + buyoutPenaltyTotal + retentionNet;
@@ -786,7 +802,7 @@ export default function HockeyTeamDetail() {
         <div className="mt-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">Roster &amp; Payroll</h3><p className="text-xs text-gray-500">Active roster limit: {ROSTER_LIMIT} players.</p></div><div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end"><div className="inline-flex min-h-11 flex-wrap rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setViewMode("lineup")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "lineup" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Lineup</button><button type="button" onClick={() => setViewMode("single")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "single" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Roster</button><button type="button" onClick={() => setViewMode("multi")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "multi" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Multi-Year</button></div><div className="w-full sm:w-44"><label htmlFor="season" className="mb-1 block text-sm font-medium">{viewMode === "multi" ? "Starting Season" : "Season"}</label><select id="season" value={selectedSeason} onChange={(event) => handleSeasonChange(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div></div></div>
           {viewMode === "single" && <div className="mt-4 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center"><div className="inline-flex rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setStatsView("season")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "season" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "text-gray-500"}`}>Season</button><button type="button" onClick={() => setStatsView("today")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "today" ? "bg-error-500 text-white" : "text-gray-500"}`}>Today</button><button type="button" onClick={() => setStatsView("yesterday")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "yesterday" ? "bg-brand-500 text-white" : "text-gray-500"}`}>Yesterday</button></div>{statsView !== "season" && <span className="text-xs text-gray-500">{dailyStatsLoading ? "Updating…" : statsView === "today" ? "Live provisional stats · updates every 30 seconds" : `${getNhlStatsDate(-1)} results`}</span>}</div>}
-          {viewMode === "single" && <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><PayrollCard label="Salary Cap" value={money.format(salaryCap)} /><PayrollCard label="Cap Salary" value={money.format(capSalary)} /><PayrollCard label="Buyout Penalties" value={money.format(buyoutPenaltyTotal)} /><PayrollCard label="Retention Net" value={money.format(retentionNet)} danger={retentionNet > 0} /><PayrollCard label={capSpace >= 0 ? "Cap Space" : "Over Cap"} value={money.format(Math.abs(capSpace))} danger={capSpace < 0} /><PayrollCard label="Active Roster" value={`${rosterCount} / ${ROSTER_LIMIT}`} danger={rosterCount > ROSTER_LIMIT} /></div>}
+          {viewMode === "single" && <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><PayrollCard label="Salary Cap" value={money.format(salaryCap)} /><PayrollCard label="Cap Salary" value={money.format(capSalary)} /><PayrollCard label="Buyout Penalties" value={money.format(buyoutPenaltyTotal)} /><PayrollCard label="Retention Net" value={money.format(retentionNet)} danger={retentionNet > 0} /><PayrollCard label={capSpace >= 0 ? "Cap Space" : "Over Cap"} value={money.format(Math.abs(capSpace))} danger={capSpace < 0} /><PayrollCard label="Active Roster" value={`${rosterCount} / ${ROSTER_LIMIT}`} danger={rosterCount > ROSTER_LIMIT} /><PayrollCard label="Average Age" value={averageRosterAge === null ? "Loading…" : `${averageRosterAge.toFixed(1)} years`} detail={`${ageRoster.length} active, IR, LTIR and waiver players`} /></div>}
           {viewMode === "single" && canManageLeadership && <TeamLeadershipEditor roster={roster} leadership={leadership} disabled={leadershipBusy} onChange={(slot, playerSeasonId) => void updateLeadership(slot, playerSeasonId)} />}
           {leadershipError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Team leadership: {leadershipError}</div>}
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
