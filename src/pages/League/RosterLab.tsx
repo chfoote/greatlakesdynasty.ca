@@ -28,6 +28,7 @@ type Production = { points: number; gamesPlayed: number; position: string };
 
 function position(row: PlayerSeasonWithRelations) { return (row.position || "").toUpperCase(); }
 function playerName(row: PlayerSeasonWithRelations) { return row.player?.full_name || [row.player?.first_name, row.player?.last_name].filter(Boolean).join(" ") || "Unknown player"; }
+function normalizedName(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function capForYear(year: number) { return year <= 2026 ? 45_000_000 : 50_000_000; }
 function cloneRows(rows: LabRow[]) { return rows.map((row) => ({ ...row, player: row.player ? { ...row.player } : null, fantasy_team: row.fantasy_team ? { ...row.fantasy_team } : null })); }
 
@@ -37,6 +38,7 @@ function SummaryMetric({ label, value, detail, danger }: { label: string; value:
 
 export default function RosterLab() {
   const { user } = useAuth();
+  const userId = user?.id || null;
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [baseRows, setBaseRows] = useState<LabRow[]>([]);
   const [rows, setRows] = useState<LabRow[]>([]);
@@ -44,6 +46,7 @@ export default function RosterLab() {
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
   const [rightsProspects, setRightsProspects] = useState<LabRow[]>([]);
   const [production, setProduction] = useState<Map<string, Production>>(new Map());
+  const [productionByName, setProductionByName] = useState<Map<string, Production>>(new Map());
   const [history, setHistory] = useState<Snapshot[]>([]);
   const [focusTeamId, setFocusTeamId] = useState<number | null>(null);
   const [year, setYear] = useState(CURRENT_LEAGUE_SEASON);
@@ -68,7 +71,7 @@ export default function RosterLab() {
       fetchProspectRights(CURRENT_LEAGUE_SEASON).catch(() => new Map()),
       fetchNhlLiveSeasonStats(CURRENT_LEAGUE_SEASON).catch(() => ({ skaters: [], goalies: [] })),
       Promise.all(years.map(async (seasonYear) => ({ seasonYear, buyouts: await fetchBuyoutPenalties(seasonYear).catch(() => []), retentions: await fetchRetentionAdjustments(seasonYear).catch(() => []) }))),
-      user ? fetchUserTeamAssignment(user.id, CURRENT_LEAGUE_SEASON).then((assignment) => assignment || fetchLatestUserTeamAssignment(user.id)).catch(() => null) : Promise.resolve(null),
+      userId ? fetchUserTeamAssignment(userId, CURRENT_LEAGUE_SEASON).then((assignment) => assignment || fetchLatestUserTeamAssignment(userId)).catch(() => null) : Promise.resolve(null),
     ]).then(([teamRows, seasonRows, prospectRights, liveStats, financialRows, assignment]) => {
       if (!active) return;
       // Keep historical rows in the sandbox as well: prospect rights are often
@@ -97,16 +100,18 @@ export default function RosterLab() {
       setTeams(teamRows); setBaseRows(labRows); setRows(cloneRows(labRows)); setBaseAdjustments(financialAdjustments); setAdjustments(financialAdjustments);
       setRightsProspects(rightRows);
       const liveProduction = new Map<string, Production>();
-      liveStats.skaters.forEach((record) => liveProduction.set(String(record.playerId), { points: getSkaterScore(record), gamesPlayed: record.gamesPlayed, position: record.positionCode || "" }));
-      liveStats.goalies.forEach((record) => liveProduction.set(String(record.playerId), { points: getGoalieScore(record), gamesPlayed: record.gamesPlayed, position: "G" }));
+      const namedProduction = new Map<string, Production>();
+      liveStats.skaters.forEach((record) => { const item = { points: getSkaterScore(record), gamesPlayed: record.gamesPlayed, position: record.positionCode || "" }; liveProduction.set(String(record.playerId), item); namedProduction.set(normalizedName(record.skaterFullName), item); });
+      liveStats.goalies.forEach((record) => { const item = { points: getGoalieScore(record), gamesPlayed: record.gamesPlayed, position: "G" }; liveProduction.set(String(record.playerId), item); namedProduction.set(normalizedName(record.goalieFullName), item); });
       setProduction(liveProduction);
+      setProductionByName(namedProduction);
       const preferred = assignment?.fantasy_team_id || teamRows[0]?.id || null;
       setFocusTeamId(preferred); setTradeSourceTeamId(preferred); setDestinationTeamId(teamRows.find((team) => team.id !== preferred)?.id || null);
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Unable to open the Roster Lab."); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [user]);
+  }, [userId]);
 
-  const playerProduction = useCallback((row: PlayerSeasonWithRelations) => production.get(row.player?.player_api_id || "") || { points: 0, gamesPlayed: 0, position: "" }, [production]);
+  const playerProduction = useCallback((row: PlayerSeasonWithRelations) => production.get(row.player?.player_api_id || "") || productionByName.get(normalizedName(playerName(row))) || { points: 0, gamesPlayed: 0, position: "" }, [production, productionByName]);
   const playerPosition = useCallback((row: PlayerSeasonWithRelations) => { const code = position(row); return ["PROSPECT", "AP"].includes(code) ? playerProduction(row).position || (row.contract_group && row.contract_group !== "PROSPECT_RIGHTS" ? row.contract_group : code) : code; }, [playerProduction]);
   const comparePlayers = useCallback((a: PlayerSeasonWithRelations, b: PlayerSeasonWithRelations) => { const positionDifference = positionOrder.indexOf(playerPosition(a)) - positionOrder.indexOf(playerPosition(b)); return positionDifference || playerProduction(b).points - playerProduction(a).points || playerName(a).localeCompare(playerName(b)); }, [playerPosition, playerProduction]);
   const focusRows = useMemo(() => rows.filter((row) => row.fantasy_team_id === focusTeamId && row.season_year === year).sort(comparePlayers), [rows, focusTeamId, year, comparePlayers]);
@@ -120,8 +125,9 @@ export default function RosterLab() {
     });
     return [...latestByPlayer.values()]
       .filter((row) => row.fantasy_team_id === focusTeamId && ["PROSPECT", "AP"].includes(position(row)))
+      .filter((row) => !baseRows.some((season) => season.player_id === row.player_id && season.fantasy_team_id && !["PROSPECT", "AP", "RETENTION"].includes(position(season))))
       .sort(comparePlayers);
-  }, [rows, rightsProspects, focusTeamId, year, comparePlayers]);
+  }, [rows, rightsProspects, baseRows, focusTeamId, year, comparePlayers]);
   const selectableRows = mode === "signing" ? freeAgents : mode === "trade" ? tradeRows : mode === "callup" ? prospectRows : focusRows;
   const selected = selectableRows.find((row) => row.labKey === playerKey) || null;
 
