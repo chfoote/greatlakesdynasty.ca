@@ -51,6 +51,7 @@ import RecordBook from "./pages/League/RecordBook";
 import Rulebook from "./pages/League/Rulebook";
 import CompetitiveBalanceDraft from "./pages/League/CompetitiveBalanceDraft";
 import GoalHorn from "./pages/League/GoalHorn";
+import RosterLab from "./pages/League/RosterLab";
 
 export default function App() {
   return (
@@ -82,6 +83,7 @@ export default function App() {
               <Route path="/pitcher-stats" element={<GoalieStats />} />
               <Route path="/player-profile" element={<PlayerProfile />} />
               <Route path="/trade-manager" element={<TradeManager />} />
+              <Route path="/roster-lab" element={<RosterLab />} />
               <Route path="/trade-market" element={<TradeMarket />} />
               <Route path="/auction-house" element={<AuctionHouse />} />
               <Route path="/league-dashboard" element={<LeagueDashboard />} />

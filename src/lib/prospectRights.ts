@@ -5,6 +5,8 @@ import { fetchNhlDraftPicks, fetchNhlPlayerLanding, type NhlDraftPick } from "./
 
 export type ProspectRight = {
   playerApiId?: string;
+  playerName?: string;
+  positionCode?: string;
   team: FantasyTeam;
   source: "farm_system" | "prospect_record" | "call_up" | "draft_match";
 };
@@ -129,7 +131,7 @@ export async function fetchProspectRights(seasonYear: number) {
   draftResults.forEach(({ picks }) => picks.forEach((pick) => {
     const owner = fantasyTeams.find((team) => farmAbbreviations(team).has(pick.teamAbbrev));
     const playerName = draftPickName(pick);
-    if (owner && playerName) rights.set(nameKey(playerName), { team: owner, source: "farm_system" });
+    if (owner && playerName) rights.set(nameKey(playerName), { playerName, positionCode: pick.positionCode, team: owner, source: "farm_system" });
   }));
 
   const prospectRows = (prospectResult.data ?? []) as PlayerSeasonWithRelations[];
@@ -138,7 +140,7 @@ export async function fetchProspectRights(seasonYear: number) {
     .forEach((row) => {
       const apiId = row.player?.player_api_id;
       if (apiId && row.fantasy_team && !rights.has(apiId)) {
-        const right = { playerApiId: apiId, team: row.fantasy_team, source: "prospect_record" as const };
+        const right = { playerApiId: apiId, playerName: row.player?.full_name || undefined, positionCode: row.position || undefined, team: row.fantasy_team, source: "prospect_record" as const };
         rights.set(apiId, right);
         if (row.player) rights.set(nameKey(row.player.full_name || [row.player.first_name, row.player.last_name].filter(Boolean).join(" ")), right);
       }
@@ -150,7 +152,7 @@ export async function fetchProspectRights(seasonYear: number) {
   futureTransactions.filter((row) => row.action === "called_up").forEach((row) => {
       const apiId = row.player?.player_api_id;
       if (apiId && row.fantasy_team && !rights.has(apiId)) {
-        const right = { playerApiId: apiId, team: row.fantasy_team, source: "call_up" as const };
+        const right = { playerApiId: apiId, playerName: row.player?.full_name || undefined, team: row.fantasy_team, source: "call_up" as const };
         rights.set(apiId, right);
         rights.set(nameKey(row.player?.full_name || ""), right);
       }
@@ -164,7 +166,7 @@ export async function fetchProspectRights(seasonYear: number) {
       const landing = await playerLanding(playerId);
       const draftTeam = landing.draftDetails?.teamAbbrev;
       if (draftTeam && farmAbbreviations(row.fantasy_team).has(draftTeam)) {
-        const right = { playerApiId: apiId, team: row.fantasy_team, source: "draft_match" as const };
+        const right = { playerApiId: apiId, playerName: row.player?.full_name || undefined, team: row.fantasy_team, source: "draft_match" as const };
         rights.set(apiId, right);
         rights.set(nameKey(row.player?.full_name || ""), right);
       }

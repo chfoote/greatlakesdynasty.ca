@@ -124,6 +124,11 @@ const gmToolItems: NavItem[] = [
     name: "Trade Manager",
     path: "/trade-manager",
   },
+  {
+    icon: <DashboardIcon />,
+    name: "Roster Lab",
+    path: "/roster-lab",
+  },
 ];
 
 const communityItems: NavItem[] = [
