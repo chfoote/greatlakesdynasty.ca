@@ -143,28 +143,51 @@ function MobileRosterCard({ season, nhlTeam, awards, onTradeBlock, interestActio
 }
 
 function PayrollCard({ label, value, danger = false, detail }: { label: string; value: string; danger?: boolean; detail?: string }) {
-  return <div className={`rounded-lg border p-4 ${danger ? "border-error-200 bg-error-50 dark:border-error-500/30 dark:bg-error-500/10" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"}`}>
-    <p className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">{label}</p>
-    <p className={`mt-2 text-base font-semibold ${danger ? "text-error-700 dark:text-error-400" : "text-gray-800 dark:text-white/90"}`}>{value}</p>
-    {detail && <p className="mt-1 text-[10px] font-medium leading-4 text-gray-400">{detail}</p>}
+  return <div className={`rounded-lg border px-3 py-2.5 ${danger ? "border-error-200 bg-error-50 dark:border-error-500/30 dark:bg-error-500/10" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"}`}>
+    <p className="text-[9px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+    <p className={`mt-1 text-sm font-black ${danger ? "text-error-700 dark:text-error-400" : "text-gray-800 dark:text-white/90"}`}>{value}</p>
+    {detail && <p className="mt-0.5 truncate text-[8px] font-medium text-gray-400" title={detail}>{detail}</p>}
   </div>;
 }
 
+const lineupCardTone: Record<string, string> = {
+  LW: "border-green-300 ring-green-100 shadow-[0_7px_20px_rgba(34,197,94,0.22)] dark:border-green-500/60 dark:ring-green-500/20",
+  C: "border-red-300 ring-red-100 shadow-[0_7px_20px_rgba(239,68,68,0.22)] dark:border-red-500/60 dark:ring-red-500/20",
+  RW: "border-blue-300 ring-blue-100 shadow-[0_7px_20px_rgba(59,130,246,0.22)] dark:border-blue-500/60 dark:ring-blue-500/20",
+  D: "border-teal-300 ring-teal-100 shadow-[0_7px_20px_rgba(20,184,166,0.22)] dark:border-teal-500/60 dark:ring-teal-500/20",
+  G: "border-purple-300 ring-purple-100 shadow-[0_7px_20px_rgba(168,85,247,0.22)] dark:border-purple-500/60 dark:ring-purple-500/20",
+};
+
 function LineupPlayerCard({ season, score, ppg, headshot, nhlTeam, birthCountry, role, isLive, contractYear, contractLength }: { season?: PlayerSeasonWithRelations; score?: number; ppg?: number; headshot?: string; nhlTeam?: string; birthCountry?: string; role?: "C" | "A"; isLive?: boolean; contractYear?: number; contractLength?: number }) {
-  if (!season) return <div className="min-h-28 rounded-xl border border-dashed border-gray-200 bg-white/40 dark:border-gray-700 dark:bg-gray-900/30" />;
+  if (!season) return <div className="h-[92px] rounded-2xl border border-dashed border-sky-200/80 bg-white/35 dark:border-sky-900/70 dark:bg-gray-950/30" />;
   const apiId = playerApiId(season);
-  return <Link to={apiId ? `/player-profile?playerId=${apiId}` : "#"} className="group relative flex min-h-28 items-end overflow-hidden rounded-xl border border-gray-200 bg-gradient-to-br from-white via-gray-50 to-brand-50 p-3 shadow-theme-xs transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-theme-md dark:border-gray-700 dark:from-gray-900 dark:via-gray-900 dark:to-brand-500/10">
-    <div className="absolute inset-y-0 right-0 flex w-[46%] items-end justify-center overflow-hidden opacity-95">
-      {headshot ? <img src={headshot} alt="" className="h-[95%] w-full object-contain object-bottom transition group-hover:scale-105" /> : <span className="mb-7 text-3xl font-black text-gray-200 dark:text-gray-700">{playerName(season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}
+  const cardTone = lineupCardTone[position(season)] || "border-gray-300 ring-gray-100 shadow-[0_7px_20px_rgba(100,116,139,0.2)] dark:border-gray-600 dark:ring-gray-700";
+  return <Link to={apiId ? `/player-profile?playerId=${apiId}` : "#"} className={`group relative flex h-[92px] min-w-0 overflow-hidden rounded-2xl border-2 bg-white/95 ring-2 transition hover:z-20 hover:-translate-y-1 hover:shadow-[0_13px_30px_rgba(15,23,42,0.24)] dark:bg-gray-900/95 ${cardTone}`}>
+    <div className="relative flex w-[66px] shrink-0 items-end justify-center overflow-hidden bg-gradient-to-b from-slate-100 to-slate-200 dark:from-gray-800 dark:to-gray-900">
+      {headshot ? <img src={headshot} alt="" className="h-[94%] w-full object-contain object-bottom transition group-hover:scale-105" /> : <span className="mb-5 text-xl font-black text-gray-300 dark:text-gray-700">{playerName(season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}
     </div>
-    <div className="relative z-10 w-[67%] min-w-0">
-      <div className="flex items-center gap-1.5"><PositionBadge position={position(season)} /><CountryFlagBadge countryCode={birthCountry} />{role && <LeadershipBadge role={role} />}{isLive && <span className="h-2 w-2 animate-pulse rounded-full bg-error-500" title="Live now" />}</div>
-      <p className="mt-2 line-clamp-2 text-sm font-black leading-tight text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-300">{playerName(season)}</p>
-      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">{nhlTeam?.split(",")[0] || "NHL"} · {money.format(season.salary || 0)} · {season.term_end_year || "—"}</p>
-      <div className="mt-1.5 flex items-end gap-2"><div><p className="text-[8px] font-black uppercase tracking-wider text-gray-400">Score</p><p className="text-xs font-black tabular-nums text-brand-600 dark:text-brand-300">{formatFantasyPoints(score || 0)}</p></div><span className="mb-0.5 text-gray-300 dark:text-gray-700">/</span><div><p className="text-[8px] font-black uppercase tracking-wider text-gray-400">PPG</p><p className="text-xs font-black tabular-nums text-gray-700 dark:text-gray-200">{(ppg || 0).toFixed(2)}</p></div></div>
-      {contractLength && contractYear ? <div className="mt-2" title={`Year ${contractYear} of ${contractLength}`}><div className="flex gap-1">{Array.from({ length: contractLength }, (_, index) => <span key={index} className={`h-1.5 flex-1 rounded-full ${index < contractYear ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-700"}`} />)}</div><p className="mt-1 text-[9px] font-black uppercase tracking-wide text-gray-400">Year {contractYear} of {contractLength}</p></div> : null}
+    <div className="relative min-w-0 flex-1 px-2.5 py-2">
+      <div className="flex items-start justify-between gap-1">
+        <div className="flex min-w-0 items-center gap-1"><PositionBadge position={position(season)} /><CountryFlagBadge countryCode={birthCountry} />{role && <LeadershipBadge role={role} />}{isLive && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-error-500" title="Live now" />}</div>
+        <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-1 text-[8px] font-black tabular-nums text-white dark:bg-brand-500">{formatFantasyPoints(score || 0)} <span className="text-white/65">({(ppg || 0).toFixed(2)})</span></span>
+      </div>
+      <p className="mt-1.5 truncate text-[13px] font-black leading-tight text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-300">{playerName(season)}</p>
+      <p className="mt-1 truncate text-[9px] font-bold uppercase tracking-wide text-gray-400">{nhlTeam?.split(",")[0] || "NHL"} · {money.format(season.salary || 0)} · {season.term_end_year || "—"}</p>
+      {contractLength && contractYear ? <div className="mt-1" title={`Year ${contractYear} of ${contractLength}`}><div className="flex max-w-28 gap-0.5">{Array.from({ length: contractLength }, (_, index) => <span key={index} className={`h-1 flex-1 rounded-full ${index < contractYear ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-700"}`} />)}</div><p className="mt-0.5 text-[8px] font-black uppercase tracking-wide text-gray-400">Year {contractYear} of {contractLength}</p></div> : null}
     </div>
   </Link>;
+}
+
+function IceRinkMarkings() {
+  return <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-t-3xl rounded-b-[12rem]">
+    <div className="absolute bottom-[13%] left-0 right-0 h-1 bg-red-500/30" />
+    <div className="absolute bottom-[3%] left-1/2 h-16 w-28 -translate-x-1/2 rounded-t-[50%] border-4 border-b-0 border-red-500/25" />
+    <div className="absolute bottom-[13%] left-1/2 h-16 w-32 -translate-x-1/2 rounded-t-full border-4 border-b-0 border-sky-500/20 bg-sky-200/10" />
+    <div className="absolute bottom-[24%] left-[22%] h-28 w-28 -translate-x-1/2 rounded-full border-[3px] border-red-500/20"><span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/30" /></div>
+    <div className="absolute bottom-[24%] right-[22%] h-28 w-28 translate-x-1/2 rounded-full border-[3px] border-red-500/20"><span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/30" /></div>
+    <div className="absolute left-0 right-0 top-[9%] h-1.5 bg-blue-500/30" />
+    <div className="absolute left-1/2 top-[4%] h-3 w-3 -translate-x-1/2 rounded-full bg-red-500/25" />
+  </div>;
 }
 
 function LineupPreview({ roster, contractHistory, seasonYear, skaters, goalies, headshots, nhlTeams, birthCountries, leadershipByPlayer, livePlayerIds, team }: { roster: PlayerSeasonWithRelations[]; contractHistory: PlayerSeasonWithRelations[]; seasonYear: number; skaters: Map<string, NhlSkaterRecord>; goalies: Map<string, NhlGoalieRecord>; headshots: Map<string, string>; nhlTeams: Map<string, string>; birthCountries: Map<string, string>; leadershipByPlayer: Map<number, "C" | "A">; livePlayerIds: Set<string>; team: FantasyTeam }) {
@@ -184,15 +207,40 @@ function LineupPreview({ roster, contractHistory, seasonYear, skaters, goalies, 
   };
   const card = (entry?: (typeof groups.C)[number]) => <LineupPlayerCard season={entry?.season} score={entry?.score} ppg={entry?.ppg} nhlTeam={entry?.nhlTeam} headshot={entry ? headshots.get(playerApiId(entry.season)) : undefined} birthCountry={entry ? birthCountries.get(playerApiId(entry.season)) : undefined} role={entry ? leadershipByPlayer.get(entry.season.id) : undefined} isLive={entry ? livePlayerIds.has(playerApiId(entry.season)) : false} {...(entry ? contractProgress(entry.season) : {})} />;
   const pressBox = [...groups.C.slice(3), ...groups.LW.slice(3), ...groups.RW.slice(3), ...groups.D.slice(6), ...groups.G.slice(2)];
-  return <div className="mt-5 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50/70 dark:border-gray-800 dark:bg-gray-950/40">
+  return <div className="mt-5 overflow-hidden rounded-3xl border border-gray-200 bg-slate-50/80 shadow-theme-sm dark:border-gray-800 dark:bg-gray-950/40">
     <div className="relative overflow-hidden border-b border-gray-200 px-5 py-5 dark:border-gray-800">
       <div className="absolute inset-0 opacity-[0.07]" style={{ background: `linear-gradient(120deg, ${team.primary_color || "#2563eb"}, transparent 65%, ${team.secondary_color || "#f97316"})` }} />
       <div className="relative flex items-center gap-3">{team.logo && <img src={team.logo} alt="" className="h-12 w-12 object-contain" />}<div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">Automatic scoring order</p><h3 className="text-xl font-black text-gray-900 dark:text-white">{team.team_name} Lineup Preview</h3><p className="mt-1 text-xs text-gray-500">Every player is active · ordered by season fantasy points</p></div></div>
     </div>
-    <div className="space-y-5 p-4 sm:p-5">
-      <section className="rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.025] sm:p-4"><div className="mb-4 flex items-center gap-3"><span className="h-6 w-1 rounded-full bg-gradient-to-b from-green-500 via-red-500 to-blue-500" /><h4 className="text-sm font-black uppercase tracking-[0.18em] text-gray-700 dark:text-gray-200">Forwards</h4></div><div className="space-y-3">{Array.from({ length: 3 }, (_, index) => <div key={index} className="rounded-xl border border-gray-200 bg-gray-50/80 p-2.5 dark:border-gray-800 dark:bg-gray-950/40"><p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">Line {index + 1}</p><div className="grid grid-cols-1 gap-2 sm:grid-cols-3">{card(groups.LW[index])}{card(groups.C[index])}{card(groups.RW[index])}</div></div>)}</div></section>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(230px,1fr)]"><section className="rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.025] sm:p-4"><div className="mb-4 flex items-center gap-3"><span className="h-6 w-1 rounded-full bg-teal-500" /><h4 className="text-sm font-black uppercase tracking-[0.18em] text-gray-700 dark:text-gray-200">Defence</h4></div><div className="space-y-3">{Array.from({ length: 3 }, (_, index) => <div key={index} className="rounded-xl border border-gray-200 bg-gray-50/80 p-2.5 dark:border-gray-800 dark:bg-gray-950/40"><p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">Pair {index + 1}</p><div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{card(groups.D[index * 2])}{card(groups.D[index * 2 + 1])}</div></div>)}</div></section><section className="rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.025] sm:p-4"><div className="mb-4 flex items-center gap-3"><span className="h-6 w-1 rounded-full bg-purple-500" /><h4 className="text-sm font-black uppercase tracking-[0.18em] text-gray-700 dark:text-gray-200">Goalies</h4></div><div className="space-y-3">{Array.from({ length: 2 }, (_, index) => <div key={index} className="rounded-xl border border-gray-200 bg-gray-50/80 p-2.5 dark:border-gray-800 dark:bg-gray-950/40"><p className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">Goalie {index + 1}</p>{card(groups.G[index])}</div>)}</div></section></div>
-      {pressBox.length > 0 && <section className="rounded-2xl border border-dashed border-gray-300 bg-white p-3 shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.025] sm:p-4"><div className="mb-4 flex items-end justify-between gap-3"><div><div className="flex items-center gap-3"><span className="h-6 w-1 rounded-full bg-gray-400" /><h4 className="text-sm font-black uppercase tracking-[0.18em] text-gray-700 dark:text-gray-200">Press Box</h4></div><p className="ml-4 mt-1 text-xs text-gray-500">Sorted C · LW · RW · D · G, then by FPTS</p></div><span className="rounded-full bg-gray-200 px-2.5 py-1 text-[10px] font-black text-gray-600 dark:bg-gray-800 dark:text-gray-300">{pressBox.length} players</span></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{pressBox.map((entry) => <div key={entry.season.id}>{card(entry)}</div>)}</div></section>}
+    <div className="space-y-5 p-3 sm:p-5">
+      <section className="relative mx-auto max-w-5xl overflow-x-auto rounded-t-[2.75rem] rounded-b-[6rem] border-4 border-sky-200 bg-gradient-to-b from-sky-50 via-white to-sky-100 p-2 shadow-inner dark:border-sky-900/70 dark:from-slate-950 dark:via-slate-900 dark:to-sky-950/50 sm:p-3">
+        <div className="relative min-w-[820px] overflow-hidden rounded-t-3xl rounded-b-[10rem] border border-sky-200/80 px-3 pb-9 pt-7 dark:border-sky-900/70 sm:px-4">
+          <IceRinkMarkings />
+          <div className="relative z-10 mx-auto max-w-4xl space-y-5">
+            <div className="space-y-2.5 rounded-3xl border border-white/80 bg-white/30 p-3 backdrop-blur-[2px] dark:border-white/10 dark:bg-slate-950/30">
+              {Array.from({ length: 3 }, (_, index) => <div key={index} className="grid grid-cols-3 gap-2.5"><div><p className="mb-1 text-center text-[8px] font-black text-slate-400">LW{index + 1}</p>{card(groups.LW[index])}</div><div><p className="mb-1 text-center text-[8px] font-black text-slate-400">C{index + 1}</p>{card(groups.C[index])}</div><div><p className="mb-1 text-center text-[8px] font-black text-slate-400">RW{index + 1}</p>{card(groups.RW[index])}</div></div>)}
+            </div>
+            <div className="space-y-2.5 rounded-3xl border border-white/80 bg-white/30 p-3 backdrop-blur-[2px] dark:border-white/10 dark:bg-slate-950/30">
+              <div className="grid grid-cols-3 gap-2.5">
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">D1</p>{card(groups.D[0])}</div>
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">Team</p><div className="flex h-[92px] items-center justify-center">{team.logo ? <img src={team.logo} alt={`${team.team_name} logo`} className="h-20 w-20 object-contain drop-shadow-[0_8px_12px_rgba(15,23,42,0.18)]" /> : <span className="text-center text-xs font-black uppercase tracking-wider text-slate-400">{team.team_name}</span>}</div></div>
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">D2</p>{card(groups.D[1])}</div>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">D3</p>{card(groups.D[2])}</div>
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">G1</p>{card(groups.G[0])}</div>
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">D4</p>{card(groups.D[3])}</div>
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">D5</p>{card(groups.D[4])}</div>
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">G2</p>{card(groups.G[1])}</div>
+                <div><p className="mb-1 text-center text-[8px] font-black text-slate-400">D6</p>{card(groups.D[5])}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      {pressBox.length > 0 && <section className="mx-auto w-full max-w-5xl rounded-2xl border border-dashed border-gray-300 bg-white p-3 shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.025]"><div className="mx-auto max-w-4xl"><div className="mb-4 flex items-end justify-between gap-3"><div><div className="flex items-center gap-3"><span className="h-6 w-1 rounded-full bg-gray-400" /><h4 className="text-sm font-black uppercase tracking-[0.18em] text-gray-700 dark:text-gray-200">Press Box</h4></div><p className="ml-4 mt-1 text-xs text-gray-500">Sorted C · LW · RW · D · G, then by FPTS</p></div><span className="rounded-full bg-gray-200 px-2.5 py-1 text-[10px] font-black text-gray-600 dark:bg-gray-800 dark:text-gray-300">{pressBox.length} players</span></div><div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">{pressBox.map((entry) => <div key={entry.season.id}>{card(entry)}</div>)}</div></div></section>}
     </div>
   </div>;
 }
@@ -203,10 +251,10 @@ function Medal({ icon, value, label, years, tone }: { icon: string; value: numbe
     silver: "border-gray-300 bg-gray-100 text-gray-800 dark:border-gray-600 dark:bg-gray-500/10 dark:text-gray-200",
     bronze: "border-orange-200 bg-orange-50 text-orange-800 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300",
   };
-  return <div className={`rounded-lg border p-4 text-center ${styles[tone]}`}>
-    <span className="text-2xl" aria-label={label}>{icon}</span>
-    <p className="mt-1 text-lg font-semibold">{value}</p>
-    <p className="mt-1 min-h-4 text-xs font-medium opacity-80">{years.length ? years.join(", ") : "—"}</p>
+  return <div className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-center ${styles[tone]}`}>
+    <span className="text-lg" aria-label={label}>{icon}</span>
+    <p className="text-base font-black">{value}</p>
+    <p className="truncate text-[10px] font-medium opacity-80">{years.length ? years.join(", ") : "—"}</p>
   </div>;
 }
 
@@ -519,6 +567,7 @@ export default function HockeyTeamDetail() {
     seasonOptions.includes(requestedSeason) ? requestedSeason : CURRENT_LEAGUE_SEASON,
   );
   const [viewMode, setViewMode] = useState<"single" | "lineup" | "multi">("lineup");
+  const [showTrophyCase, setShowTrophyCase] = useState(false);
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
   const [retentionAdjustments, setRetentionAdjustments] = useState<RetentionAdjustment[]>([]);
@@ -772,6 +821,8 @@ export default function HockeyTeamDetail() {
   const averageRosterAge = rosterAges.length ? rosterAges.reduce((sum, age) => sum + age, 0) / rosterAges.length : null;
   const buyoutPenaltyTotal = buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0);
   const retentionNet = retentionAdjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0);
+  const buyoutSlotsUsed = new Set(buyoutPenalties.map((penalty) => penalty.buyout_id)).size;
+  const retentionSlotsUsed = new Set(retentionAdjustments.filter((adjustment) => adjustment.adjustment_type === "charge").map((adjustment) => adjustment.retention_id)).size;
   const capSalary = roster.filter((season) => capPositions.has(position(season) as never)).reduce((sum, season) => sum + (season.salary || 0), 0) + buyoutPenaltyTotal + retentionNet;
   const salaryCap = salaryCapForSeason(selectedSeason);
   const capSpace = salaryCap - capSalary;
@@ -793,16 +844,16 @@ export default function HockeyTeamDetail() {
     {!loading && !team && !error && <div className="rounded-2xl border border-gray-200 p-10 text-center"><p>Team not found.</p><Link to="/teams" className="mt-4 inline-block text-brand-500">Back to Teams</Link></div>}
     {team && <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
       <div className="h-2" style={{ background: `linear-gradient(90deg, ${displayTeam?.primary_color || "#1d4ed8"}, ${displayTeam?.secondary_color || "#f97316"})` }} />
-      <div className="p-4 xl:p-6">
+      <div className="p-3 xl:p-4">
         <TeamIdentityCard team={displayTeam || team} season={selectedSeason} managerName={selectedManager?.manager_name || team.manager_name} />
-        <div className="mt-4 grid grid-cols-3 gap-3"><Medal icon="🥇" value={team.championships} label="Championships" years={finishYears(1)} tone="gold" /><Medal icon="🥈" value={team.runner_up_finishes} label="Runner-up finishes" years={finishYears(2)} tone="silver" /><Medal icon="🥉" value={team.third_place_finishes} label="Third-place finishes" years={finishYears(3)} tone="bronze" /></div>
-        <div className="mt-3 flex flex-wrap justify-end gap-3"><Link to={`/teams/${team.id}/farm-systems`} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700">🏒 View Farm Systems</Link><Link to={`/teams/${team.id}/records`} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700">📚 View Record Book</Link><a href="#trophy-case" className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600">🏆 View Trophy Case</a></div>
-        <TrophyCase team={displayTeam || team} finishes={teamFinishes} playerAwards={playerAwards} teamSeasons={teamPlayerSeasons} awards={awardDefinitions} />
+        <div className="mt-2 grid grid-cols-3 gap-2"><Medal icon="🥇" value={team.championships} label="Championships" years={finishYears(1)} tone="gold" /><Medal icon="🥈" value={team.runner_up_finishes} label="Runner-up finishes" years={finishYears(2)} tone="silver" /><Medal icon="🥉" value={team.third_place_finishes} label="Third-place finishes" years={finishYears(3)} tone="bronze" /></div>
+        <div className="mt-2 flex flex-wrap justify-end gap-2"><Link to={`/teams/${team.id}/farm-systems`} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700">🏒 Farm Systems</Link><Link to={`/teams/${team.id}/records`} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700">📚 Record Book</Link><button type="button" onClick={() => setShowTrophyCase((visible) => !visible)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-600">🏆 {showTrophyCase ? "Hide Trophy Case" : "View Trophy Case"}</button></div>
+        {showTrophyCase && <TrophyCase team={displayTeam || team} finishes={teamFinishes} playerAwards={playerAwards} teamSeasons={teamPlayerSeasons} awards={awardDefinitions} />}
 
-        <div className="mt-6 rounded-xl border border-gray-200 p-4 dark:border-gray-800">
+        <div className="mt-3 rounded-xl border border-gray-200 p-3 dark:border-gray-800">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">Roster &amp; Payroll</h3><p className="text-xs text-gray-500">Active roster limit: {ROSTER_LIMIT} players.</p></div><div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end"><div className="inline-flex min-h-11 flex-wrap rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setViewMode("lineup")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "lineup" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Lineup</button><button type="button" onClick={() => setViewMode("single")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "single" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Roster</button><button type="button" onClick={() => setViewMode("multi")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "multi" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Multi-Year</button></div><div className="w-full sm:w-44"><label htmlFor="season" className="mb-1 block text-sm font-medium">{viewMode === "multi" ? "Starting Season" : "Season"}</label><select id="season" value={selectedSeason} onChange={(event) => handleSeasonChange(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div></div></div>
           {viewMode === "single" && <div className="mt-4 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center"><div className="inline-flex rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setStatsView("season")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "season" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "text-gray-500"}`}>Season</button><button type="button" onClick={() => setStatsView("today")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "today" ? "bg-error-500 text-white" : "text-gray-500"}`}>Today</button><button type="button" onClick={() => setStatsView("yesterday")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "yesterday" ? "bg-brand-500 text-white" : "text-gray-500"}`}>Yesterday</button></div>{statsView !== "season" && <span className="text-xs text-gray-500">{dailyStatsLoading ? "Updating…" : statsView === "today" ? "Live provisional stats · updates every 30 seconds" : `${getNhlStatsDate(-1)} results`}</span>}</div>}
-          {viewMode !== "multi" && <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><PayrollCard label="Salary Cap" value={money.format(salaryCap)} /><PayrollCard label="Cap Salary" value={money.format(capSalary)} /><PayrollCard label="Buyout Penalties" value={money.format(buyoutPenaltyTotal)} /><PayrollCard label="Retention Net" value={money.format(retentionNet)} danger={retentionNet > 0} /><PayrollCard label={capSpace >= 0 ? "Cap Space" : "Over Cap"} value={money.format(Math.abs(capSpace))} danger={capSpace < 0} /><PayrollCard label="Active Roster" value={`${rosterCount} / ${ROSTER_LIMIT}`} danger={rosterCount > ROSTER_LIMIT} /><PayrollCard label="Average Age" value={averageRosterAge === null ? "Loading…" : `${averageRosterAge.toFixed(1)} years`} detail={`${ageRoster.length} active, IR, LTIR and waiver players`} /></div>}
+          {viewMode !== "multi" && <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7"><PayrollCard label="Salary Cap" value={money.format(salaryCap)} /><PayrollCard label="Cap Salary" value={money.format(capSalary)} /><PayrollCard label="Buyout Penalties" value={money.format(buyoutPenaltyTotal)} detail={`${buyoutSlotsUsed} of 2 used`} danger={buyoutSlotsUsed > 2} /><PayrollCard label="Retention Net" value={money.format(retentionNet)} detail={`${retentionSlotsUsed} of 1 used`} danger={retentionNet > 0 || retentionSlotsUsed > 1} /><PayrollCard label={capSpace >= 0 ? "Cap Space" : "Over Cap"} value={money.format(Math.abs(capSpace))} danger={capSpace < 0} /><PayrollCard label="Active Roster" value={`${rosterCount} / ${ROSTER_LIMIT}`} danger={rosterCount > ROSTER_LIMIT} /><PayrollCard label="Average Age" value={averageRosterAge === null ? "Loading…" : `${averageRosterAge.toFixed(1)} years`} detail={`${ageRoster.length} active, IR, LTIR and waiver players`} /></div>}
           {viewMode === "single" && canManageLeadership && <TeamLeadershipEditor roster={roster} leadership={leadership} disabled={leadershipBusy} onChange={(slot, playerSeasonId) => void updateLeadership(slot, playerSeasonId)} />}
           {leadershipError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Team leadership: {leadershipError}</div>}
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
