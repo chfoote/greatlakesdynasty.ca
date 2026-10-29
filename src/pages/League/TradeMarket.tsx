@@ -139,7 +139,6 @@ export default function TradeMarket() {
     const score = record ? ((row.position || "").toUpperCase() === "G" ? getGoalieScore(record as NhlGoalieRecord) : getSkaterScore(record as NhlSkaterRecord)) : 0;
     return { record, score, ppg: record?.gamesPlayed ? score / record.gamesPlayed : null };
   }
-
   async function toggleListing(seasonRow: PlayerSeasonWithRelations) {
     if (!user || !teamId) return;
     const current = listingByPlayerSeason.get(seasonRow.id);

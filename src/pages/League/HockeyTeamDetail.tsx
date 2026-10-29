@@ -161,18 +161,22 @@ const lineupCardTone: Record<string, string> = {
 function LineupPlayerCard({ season, score, ppg, headshot, nhlTeam, birthCountry, role, isLive, contractYear, contractLength }: { season?: PlayerSeasonWithRelations; score?: number; ppg?: number; headshot?: string; nhlTeam?: string; birthCountry?: string; role?: "C" | "A"; isLive?: boolean; contractYear?: number; contractLength?: number }) {
   if (!season) return <div className="h-[92px] rounded-2xl border border-dashed border-sky-200/80 bg-white/35 dark:border-sky-900/70 dark:bg-gray-950/30" />;
   const apiId = playerApiId(season);
+  const nhlAbbreviation = nhlTeam?.split(",")[0]?.trim();
   const cardTone = lineupCardTone[position(season)] || "border-gray-300 ring-gray-100 shadow-[0_7px_20px_rgba(100,116,139,0.2)] dark:border-gray-600 dark:ring-gray-700";
   return <Link to={apiId ? `/player-profile?playerId=${apiId}` : "#"} className={`group relative flex h-[92px] min-w-0 overflow-hidden rounded-2xl border-2 bg-white/95 ring-2 transition hover:z-20 hover:-translate-y-1 hover:shadow-[0_13px_30px_rgba(15,23,42,0.24)] dark:bg-gray-900/95 ${cardTone}`}>
-    <div className="relative flex w-[66px] shrink-0 items-end justify-center overflow-hidden bg-gradient-to-b from-slate-100 to-slate-200 dark:from-gray-800 dark:to-gray-900">
-      {headshot ? <img src={headshot} alt="" className="h-[94%] w-full object-contain object-bottom transition group-hover:scale-105" /> : <span className="mb-5 text-xl font-black text-gray-300 dark:text-gray-700">{playerName(season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}
+    {nhlAbbreviation && <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlAbbreviation}_light.svg`} alt="" aria-hidden="true" className="pointer-events-none absolute -right-[72px] top-[62%] h-[216px] w-[216px] -translate-y-1/2 object-contain opacity-10 grayscale transition group-hover:opacity-[0.15] dark:opacity-[0.12]" />}
+    <div className="relative z-10 flex w-[72px] shrink-0 items-center justify-center bg-white dark:bg-gray-900">
+      <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-white shadow-sm ring-1 ring-gray-200 dark:border-gray-900 dark:bg-gray-900 dark:ring-gray-700">
+        {headshot ? <img src={headshot} alt="" className="h-full w-full scale-[1.12] object-cover object-[center_22%] transition duration-200 group-hover:scale-[1.18]" /> : <span className="text-lg font-black text-gray-400 dark:text-gray-500">{playerName(season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}
+      </div>
     </div>
-    <div className="relative min-w-0 flex-1 px-2.5 py-2">
+    <div className="relative z-10 min-w-0 flex-1 px-2.5 py-2">
       <div className="flex items-start justify-between gap-1">
         <div className="flex min-w-0 items-center gap-1"><PositionBadge position={position(season)} /><CountryFlagBadge countryCode={birthCountry} />{role && <LeadershipBadge role={role} />}{isLive && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-error-500" title="Live now" />}</div>
         <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-1 text-[8px] font-black tabular-nums text-white dark:bg-brand-500">{formatFantasyPoints(score || 0)} <span className="text-white/65">({(ppg || 0).toFixed(2)})</span></span>
       </div>
       <p className="mt-1.5 truncate text-[13px] font-black leading-tight text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-300">{playerName(season)}</p>
-      <p className="mt-1 truncate text-[9px] font-bold uppercase tracking-wide text-gray-400">{nhlTeam?.split(",")[0] || "NHL"} · {money.format(season.salary || 0)} · {season.term_end_year || "—"}</p>
+      <p className="mt-1 truncate text-[9px] font-bold uppercase tracking-wide text-gray-400">{nhlAbbreviation || "NHL"} · {money.format(season.salary || 0)} · {season.term_end_year || "—"}</p>
       {contractLength && contractYear ? <div className="mt-1" title={`Year ${contractYear} of ${contractLength}`}><div className="flex max-w-28 gap-0.5">{Array.from({ length: contractLength }, (_, index) => <span key={index} className={`h-1 flex-1 rounded-full ${index < contractYear ? "bg-emerald-500" : "bg-gray-200 dark:bg-gray-700"}`} />)}</div><p className="mt-0.5 text-[8px] font-black uppercase tracking-wide text-gray-400">Year {contractYear} of {contractLength}</p></div> : null}
     </div>
   </Link>;

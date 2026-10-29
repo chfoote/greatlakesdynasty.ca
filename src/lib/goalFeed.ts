@@ -232,7 +232,8 @@ function buildRecordChases(lines: FranchiseStatLine[], rosterPlayers: Map<string
         const nextValue = Math.min(...values.filter((value) => value > row.value));
         if (!Number.isFinite(nextValue)) return;
         const needed = nextValue - row.value + 1;
-        if (needed > 3) return;
+        const chaseWindow = metric.abbreviation === "A" || metric.abbreviation === "P" ? 2 : 1;
+        if (needed > chaseWindow) return;
         const targetRank = competitionRank(values, nextValue);
         const targetNames = rows.filter(([candidateId, candidate]) => candidateId !== playerId && candidate.value === nextValue).map(([, candidate]) => candidate.name).slice(0, 2);
         chases.push({ key: `${scope}:${team?.id || "all"}:${metric.abbreviation}:${playerId}`, player, scope, category: metric.category, abbreviation: metric.abbreviation, rank, value: row.value, needed, targetRank, targetNames, team: scope === "franchise" ? team : null });
@@ -252,11 +253,11 @@ function buildMilestoneWatch(lines: FranchiseStatLine[], dailySkaters: Record<st
   const skaterDays = new Map(dailySkaters.map((row) => [String(row.playerId), row]));
   const goalieDays = new Map(dailyGoalies.map((row) => [String(row.playerId), row]));
   const metrics = [
-    { category: "Goals", abbreviation: "G", standard: [50,100,150,200,250,300,350,400,450], major: [500,600,700,800,900], tiers: { bronze: 100, silver: 250, gold: 500, legendary: 700 }, watch: 5, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.goals || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) },
-    { category: "Assists", abbreviation: "A", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_200,1_500], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 10, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.assists || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.assists || 0) },
-    { category: "Points", abbreviation: "P", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_250,1_500,1_750,2_000], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 10, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.points || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) + Number(skaterDays.get(id)?.assists || 0) },
-    { category: "Wins", abbreviation: "W", standard: [25,50,100,150,200,250,300,350], major: [400,500,600,700], tiers: { bronze: 100, silver: 250, gold: 400, legendary: 600 }, watch: 5, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.wins || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.wins || 0) },
-    { category: "Shutouts", abbreviation: "SO", standard: [10,20,25,30,40], major: [50,60,70,80,90,100], tiers: { bronze: 10, silver: 25, gold: 50, legendary: 100 }, watch: 2, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.shutouts || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.shutouts || 0) },
+    { category: "Goals", abbreviation: "G", standard: [50,100,150,200,250,300,350,400,450], major: [500,600,700,800,900], tiers: { bronze: 100, silver: 250, gold: 500, legendary: 700 }, watch: 1, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.goals || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) },
+    { category: "Assists", abbreviation: "A", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_200,1_500], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 2, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.assists || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.assists || 0) },
+    { category: "Points", abbreviation: "P", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_250,1_500,1_750,2_000], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 2, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.points || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) + Number(skaterDays.get(id)?.assists || 0) },
+    { category: "Wins", abbreviation: "W", standard: [25,50,100,150,200,250,300,350], major: [400,500,600,700], tiers: { bronze: 100, silver: 250, gold: 400, legendary: 600 }, watch: 1, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.wins || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.wins || 0) },
+    { category: "Shutouts", abbreviation: "SO", standard: [10,20,25,30,40], major: [50,60,70,80,90,100], tiers: { bronze: 10, silver: 25, gold: 50, legendary: 100 }, watch: 1, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.shutouts || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.shutouts || 0) },
   ] as const;
   const linesByPlayer = new Map<string, FranchiseStatLine[]>();
   lines.forEach((line) => linesByPlayer.set(line.playerId, [...(linesByPlayer.get(line.playerId) || []), line]));
@@ -281,8 +282,7 @@ function buildMilestoneWatch(lines: FranchiseStatLine[], dailySkaters: Record<st
     const metric = metrics.find((candidate) => candidate.abbreviation === item.abbreviation);
     return item.remaining <= (metric?.watch || 0);
   });
-  const closestByCategory = metrics.map((metric) => upcoming.filter((item) => item.abbreviation === metric.abbreviation).sort((a, b) => a.remaining - b.remaining || a.player.name.localeCompare(b.player.name))[0]).filter((item): item is MilestoneWatchItem => Boolean(item));
-  const selected = new Map([...closestByCategory, ...nearby].map((item) => [item.key, item]));
+  const selected = new Map(nearby.map((item) => [item.key, item]));
   return [...achieved.sort((a, b) => a.category.localeCompare(b.category)), ...selected.values()].sort((a, b) => Number(b.achievedTonight) - Number(a.achievedTonight) || a.remaining - b.remaining || a.player.name.localeCompare(b.player.name)).slice(0, 15);
 }
 
