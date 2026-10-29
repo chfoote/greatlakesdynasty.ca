@@ -3,7 +3,8 @@ import { fetchPlayerSeasons, type PlayerSeasonWithRelations } from "./fantasyPla
 import { fetchNhlDraftPicks, fetchNhlLiveSeasonStats, fetchNhlPlayerLanding, getGoalieScore, getSkaterScore, searchNhlPlayers, type NhlDraftPick } from "./nhl";
 import { CURRENT_LEAGUE_SEASON } from "./leagueSeasons";
 
-export type FarmRanking = { team: FantasyTeam; rank: number; eligible: number; nhlActive: number; production: number; farmScore: number };
+export type RankedFarmProspect = { playerId?: number; headshot?: string; name: string; position: string; nhlTeam: string; score: number; draftYear: number; overallPick: number };
+export type FarmRanking = { team: FantasyTeam; rank: number; eligible: number; nhlActive: number; production: number; draftQuality: number; farmScore: number; topProspects: RankedFarmProspect[] };
 export type AgingProspect = { playerId: number; name: string; position: string; birthDate: string; birthday: string; age: number; draftYear: number; nhlTeam: string; headshot?: string; score: number };
 export type FarmInsights = { rankings: FarmRanking[]; agingByTeam: Map<number, AgingProspect[]> };
 
@@ -52,7 +53,27 @@ export function fetchFarmInsights() {
       return { year, pick, name, playerId: record?.playerId, birthDate: record?.birthDate, nhlTeam: record?.teamAbbrevs?.split(",")[0] || pick.teamAbbrev, score, signed: wasSigned(name, record?.playerId, seasons), rightsTeamId: prospectRightsTeam(name, record?.playerId, seasons) };
     }));
     const rowsFor = (team: FantasyTeam) => allRows.filter((row) => row.rightsTeamId ? row.rightsTeamId === team.id : belongs(row.pick, team.eastern_farm_system, row.year) || belongs(row.pick, team.western_farm_system, row.year));
-    const rankingRows = displayTeams.map((team) => { const eligible = rowsFor(team).filter((row) => !row.signed && (!row.birthDate || age(row.birthDate) < 25)); const production = eligible.map((row) => row.score).sort((a, b) => b - a).slice(0, 5).reduce((sum, value) => sum + value, 0); return { team, rank: 0, eligible: eligible.length, nhlActive: eligible.filter((row) => row.score > 0).length, production, farmScore: production + eligible.length * 2 }; }).sort((a, b) => b.farmScore - a.farmScore || b.nhlActive - a.nhlActive || b.eligible - a.eligible).map((row, index) => ({ ...row, rank: index + 1 }));
+    const rankingBase = displayTeams.map((team) => {
+      const eligible = rowsFor(team).filter((row) => !row.signed && (!row.birthDate || age(row.birthDate) < 25));
+      const production = eligible.map((row) => row.score).sort((a, b) => b - a).slice(0, 5).reduce((sum, value) => sum + value, 0);
+      const draftCapital = eligible.map((row) => Math.max(225 - row.pick.overallPick, 0) / 224).sort((a, b) => b - a).slice(0, 10).reduce((sum, value) => sum + value, 0);
+      const topProspects = [...eligible].sort((a, b) => b.score - a.score).slice(0, 3).map((row) => ({ playerId: row.playerId, name: row.name, position: row.pick.positionCode || "—", nhlTeam: row.nhlTeam, score: row.score, draftYear: row.year, overallPick: row.pick.overallPick }));
+      return { team, eligible: eligible.length, nhlActive: eligible.filter((row) => row.score > 0).length, production, draftCapital, topProspects };
+    });
+    const productionLeader = Math.max(...rankingBase.map((row) => row.production), 1);
+    const draftCapitalLeader = Math.max(...rankingBase.map((row) => row.draftCapital), 1);
+    const depthLeader = Math.max(...rankingBase.map((row) => Math.min(row.eligible, 25)), 1);
+    const rankingRows: FarmRanking[] = rankingBase.map((row) => {
+      const productionIndex = row.production / productionLeader;
+      const draftQuality = row.draftCapital / draftCapitalLeader * 100;
+      const depthIndex = Math.min(row.eligible, 25) / depthLeader;
+      return { team: row.team, rank: 0, eligible: row.eligible, nhlActive: row.nhlActive, production: row.production, draftQuality, farmScore: productionIndex * 85 + draftQuality * 0.10 + depthIndex * 5, topProspects: row.topProspects };
+    }).sort((a, b) => b.farmScore - a.farmScore || b.production - a.production || b.draftQuality - a.draftQuality).map((row, index) => ({ ...row, rank: index + 1 }));
+    const rankingsWithHeadshots = await Promise.all(rankingRows.map(async (row) => ({ ...row, topProspects: await Promise.all(row.topProspects.map(async (prospect) => {
+      if (!prospect.playerId) return prospect;
+      try { const landing = await fetchNhlPlayerLanding(prospect.playerId); return landing.headshot ? { ...prospect, headshot: landing.headshot } : prospect; }
+      catch { return prospect; }
+    })) })));
     const agingByTeam = new Map<number, AgingProspect[]>();
     await Promise.all(displayTeams.map(async (team) => {
       const candidates = rowsFor(team).filter((row) => !row.signed && row.year <= earliestDraftYear() + 1);
@@ -70,7 +91,7 @@ export function fetchFarmInsights() {
       }));
       agingByTeam.set(team.id, resolved.filter((row): row is AgingProspect => Boolean(row)).sort((a, b) => a.birthDate.localeCompare(b.birthDate)));
     }));
-    return { rankings: rankingRows, agingByTeam };
+    return { rankings: rankingsWithHeadshots, agingByTeam };
   }).catch((error) => { insightRequest = null; throw error; });
   return insightRequest;
 }
