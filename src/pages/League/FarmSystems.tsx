@@ -23,7 +23,11 @@ import {
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import TeamIdentityCard from "./TeamIdentityCard";
 
-const DRAFT_YEAR_COUNT = 10;
+function earliestPotentiallyEligibleDraftYear() {
+  const today = new Date();
+  const youngestDraftClassPlayersHaveTurned25 = today.getMonth() > 8 || (today.getMonth() === 8 && today.getDate() >= 15);
+  return today.getFullYear() - (youngestDraftClassPlayersHaveTurned25 ? 6 : 7);
+}
 
 type FarmProspect = {
   key: string;
@@ -251,7 +255,8 @@ export default function FarmSystems() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const lastDraftYear = CURRENT_LEAGUE_SEASON - 1;
-  const draftYears = useMemo(() => Array.from({ length: DRAFT_YEAR_COUNT }, (_, index) => lastDraftYear - index), [lastDraftYear]);
+  const firstRelevantDraftYear = earliestPotentiallyEligibleDraftYear();
+  const draftYears = useMemo(() => Array.from({ length: lastDraftYear - firstRelevantDraftYear + 1 }, (_, index) => lastDraftYear - index), [firstRelevantDraftYear, lastDraftYear]);
 
   useEffect(() => {
     let active = true;
@@ -367,7 +372,7 @@ export default function FarmSystems() {
     {error ? <div className="rounded-2xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : <>
       {team && <div className="mb-5 space-y-3">
         <TeamIdentityCard team={team} season={CURRENT_LEAGUE_SEASON} managerName={team.manager_name} />
-        <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div>
+        <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p><div className="flex items-center gap-4"><Link to="/farm-system-rankings" className="text-sm font-semibold text-indigo-600 hover:underline dark:text-indigo-300">View Farm System Rankings</Link><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div></div>
       </div>}
       <ProspectSpotlight team={team} prospects={prospects} loading={loading} />
       <DraftBoard team={team} draftYears={draftYears} easternProspects={easternProspects} westernProspects={westernProspects} loading={loading} />

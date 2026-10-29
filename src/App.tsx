@@ -39,6 +39,7 @@ import AwardAdmin from "./pages/League/AwardAdmin";
 import Awards from "./pages/League/Awards";
 import LeagueDashboard from "./pages/League/LeagueDashboard";
 import FarmSystems from "./pages/League/FarmSystems";
+import FarmSystemRankings from "./pages/League/FarmSystemRankings";
 import TradeMarket from "./pages/League/TradeMarket";
 import BuyoutAdmin from "./pages/League/BuyoutAdmin";
 import RetentionAdmin from "./pages/League/RetentionAdmin";
@@ -62,6 +63,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route path="/teams" element={<Teams />} />
             <Route path="/teams/:abbreviation/farm-systems" element={<FarmSystems />} />
+            <Route path="/farm-system-rankings" element={<FarmSystemRankings />} />
             <Route path="/teams/:abbreviation/records" element={<RecordBook />} />
             <Route path="/teams/:abbreviation" element={<HockeyTeamDetail />} />
 

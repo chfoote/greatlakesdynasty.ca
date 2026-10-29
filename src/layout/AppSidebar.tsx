@@ -72,6 +72,11 @@ const leaguePulseItems: NavItem[] = [
     path: "/power-rankings",
   },
   {
+    icon: <StandingsIcon />,
+    name: "Farm System Rankings",
+    path: "/farm-system-rankings",
+  },
+  {
     icon: <AwardsIcon />,
     name: "Awards & Honours",
     path: "/awards",
