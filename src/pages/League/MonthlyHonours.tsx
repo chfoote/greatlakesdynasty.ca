@@ -100,7 +100,7 @@ export default function MonthlyHonours() {
         fantasy_team_id: winner.team.id,
         games_played: winner.gamesPlayed,
         fantasy_points: winner.points,
-      }))).catch(() => {});
+      }))).catch((reason) => { if (active) setError(`Unable to save monthly honours: ${reason.message || reason}`); });
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Unable to load monthly honours."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };

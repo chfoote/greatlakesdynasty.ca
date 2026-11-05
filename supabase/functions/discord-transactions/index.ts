@@ -92,6 +92,7 @@ function playerName(player: Player | null | undefined) {
 
 function actionLabel(action: string) {
   return ({
+    monthly_honour: "Monthly Honour",
     signed: "Signing",
     called_up: "Call-up",
     waived: "Waiver",
@@ -108,6 +109,7 @@ function actionLabel(action: string) {
 }
 
 function actionSentence(transaction: Transaction) {
+  if (transaction.action === "monthly_honour") return `🏆 **${playerName(transaction.player)}** — ${transaction.description || "Monthly Honour"}`;
   const team = transaction.fantasy_team?.team_name || "Unknown team";
   const name = playerName(transaction.player);
   const position = transaction.action === "competitive_balance_drafted" ? "prospect " : transaction.position ? `${transaction.position.toUpperCase()} ` : "";
@@ -203,8 +205,8 @@ function discordPayload(transaction: Transaction) {
   }
 
   return {
-    username: "GLDHL Transactions",
-    content: "🏒 **New GLDHL transaction posted**",
+    username: "GLDHL Transactions / News",
+    content: transaction.action === "monthly_honour" ? "🏆 **GLDHL Monthly Honours**" : "🏒 **New GLDHL transaction posted**",
     embeds: [embed],
     allowed_mentions: { parse: [] },
   };

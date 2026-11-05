@@ -19,6 +19,7 @@ type TransactionTradeOffer = {
 };
 
 export type TransactionAction =
+  | "monthly_honour"
   | "signed"
   | "called_up"
   | "waived"
@@ -37,7 +38,7 @@ export type LeagueTransaction = {
   player_season_id: number | null;
   player_id: number | null;
   fantasy_team_id: number | null;
-  transaction_type: "signing" | "extension" | "trade" | "waiver" | "release" | "draft";
+  transaction_type: "signing" | "extension" | "trade" | "waiver" | "release" | "draft" | "news";
   action: TransactionAction;
   transaction_date: string;
   season_year: number;

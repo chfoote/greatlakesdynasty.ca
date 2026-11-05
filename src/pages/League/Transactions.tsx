@@ -7,6 +7,7 @@ import { useAuth } from "../../context/AuthContext";
 import { deleteLeagueTransaction, fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
 
 const transactionTypeOptions = [
+  { value: "monthly_honour", label: "Monthly Honours" },
   { value: "trade", label: "Trades" },
   { value: "signed", label: "Signed" },
   { value: "called_up", label: "Called-up" },
@@ -52,6 +53,7 @@ function formatTransactionDate(date: string) {
 }
 
 function getTransactionSentence(transaction: LeagueTransaction, fallbackPosition?: string | null) {
+  if (transaction.action === "monthly_honour") return { prefix: "🏆", position: null, suffix: ` — ${transaction.description || "Monthly Honour"}`, contractDetail: null };
   const team = transaction.fantasy_team?.team_name || "Unknown team";
   const position = (transaction.position || transaction.player_season?.position || fallbackPosition)?.toUpperCase();
   const prefixes = {
@@ -106,6 +108,7 @@ function getTransactionSentence(transaction: LeagueTransaction, fallbackPosition
 function getActionLabel(transaction: LeagueTransaction) {
   if (transaction.trade_offer_id) return "Trade";
   return {
+    monthly_honour: "Monthly Honour",
     signed: "Signed",
     called_up: "Called-up",
     waived: "Waived",
@@ -360,12 +363,12 @@ export default function Transactions() {
   return (
     <div>
       <PageMeta title="Great Lakes Dynasty Hockey League" description="Great Lakes Dynasty Hockey League transactions" />
-      <PageBreadcrumb pageTitle="Transactions" />
+      <PageBreadcrumb pageTitle="Transactions / News" />
       <div className="min-h-screen rounded-2xl border border-gray-200 bg-white px-4 py-6 dark:border-gray-800 dark:bg-white/[0.03] sm:px-5 sm:py-7 xl:px-10 xl:py-12">
         <div className="mb-4 flex items-start justify-between gap-3 sm:mb-6">
           <div>
-          <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">Transactions</h3>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Official GLDHL signings and player transactions.</p>
+          <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">Transactions / News</h3>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Official GLDHL transactions, monthly honours, and league news.</p>
           </div>
           {!loading && !error && transactions.length > 0 && <button type="button" onClick={() => setShowFilters((current) => !current)} aria-expanded={showFilters} className="shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-xs font-bold text-gray-600 dark:border-gray-700 dark:text-gray-300 md:hidden">{showFilters ? "Hide filters" : `Filters${typeFilter !== "all" || selectedTeamIds.size ? ` (${(typeFilter !== "all" ? 1 : 0) + selectedTeamIds.size})` : ""}`}</button>}
         </div>
@@ -375,7 +378,7 @@ export default function Transactions() {
             <div>
               <label htmlFor="transaction-type" className="mb-1.5 block text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Transaction Type</label>
               <select id="transaction-type" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900">
-                <option value="all">All Transactions</option>
+                <option value="all">All Transactions / News</option>
                 {transactionTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </div>

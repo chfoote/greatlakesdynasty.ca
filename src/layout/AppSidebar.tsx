@@ -88,7 +88,7 @@ const leaguePulseItems: NavItem[] = [
   },
   {
     icon: <TransactionsIcon />,
-    name: "Transactions",
+    name: "Transactions / News",
     path: "/transactions",
   },
 ];
