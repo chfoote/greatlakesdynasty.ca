@@ -6,6 +6,8 @@ import { fetchPlayerAwards } from "./awards";
 import { fetchNhlGoalieStats, fetchNhlGoalieStatsForPeriod, fetchNhlSkaterStats, fetchNhlSkaterStatsForPeriod, getGoalieScore, getNhlStatsDate, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "./nhl";
 import { fetchSeasonLeadership } from "./teamLeadership";
 
+export const LEAGUE_RECORD_LIMIT = 10;
+
 export type RecordBookEntry = {
   key: string;
   category: "Team Performance" | "Player Performance" | "Awards & Leadership";

@@ -3,7 +3,7 @@ import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
 import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights } from "./prospectRights";
 import { fetchNhlDailyStats, fetchNhlLiveSeasonStats, getGoalieScore, getNhlStatsDate, getSkaterScore } from "./nhl";
-import { fetchRecordBookData, type FranchiseStatLine } from "./recordBook";
+import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, type FranchiseStatLine } from "./recordBook";
 
 type Localized = { default?: string };
 type ScoreTeam = { id?: number; abbrev?: string; score?: number; logo?: string; commonName?: Localized; placeName?: Localized };
@@ -166,7 +166,7 @@ function buildRecordMovements(
       if (dailyValue <= 0) return;
 
       (["league", "franchise"] as const).forEach((scope) => {
-        const recordLimit = scope === "league" ? 5 : 10;
+        const recordLimit = scope === "league" ? LEAGUE_RECORD_LIMIT : 10;
         const scopedLines = scope === "league" ? lines : lines.filter((line) => line.team?.id === teamId);
         const grouped = new Map<string, { name: string; current: number; before: number }>();
         scopedLines.forEach((line) => {
@@ -228,7 +228,7 @@ function buildRecordChases(lines: FranchiseStatLine[], rosterPlayers: Map<string
         const player = rosterPlayers.get(playerId);
         if (!player || (scope === "franchise" && player.fantasyTeam?.id !== team?.id)) return;
         const rank = competitionRank(values, row.value);
-        if (rank > (scope === "league" ? 6 : 11)) return;
+        if (rank > (scope === "league" ? LEAGUE_RECORD_LIMIT + 1 : 11)) return;
         const nextValue = Math.min(...values.filter((value) => value > row.value));
         if (!Number.isFinite(nextValue)) return;
         const needed = nextValue - row.value + 1;
