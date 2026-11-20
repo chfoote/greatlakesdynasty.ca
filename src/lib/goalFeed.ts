@@ -1,3 +1,4 @@
+import { nhlFetch } from "./nhlRequest";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
@@ -333,7 +334,7 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
 export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; nightlyStars: GoalFeedPlayer[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; milestoneWatchPromise: Promise<MilestoneWatchItem[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
   const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
-    fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
+    nhlFetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error(`Unable to load NHL games (${response.status})`);
       return response.json() as Promise<ScoreResponse>;
     }),
@@ -347,8 +348,8 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   const games = scoreResponse.games ?? [];
   const playByPlay = await Promise.all(games.map(async (game) => {
     const [playResponse, boxscoreResponse] = await Promise.all([
-      fetch(`/nhl-web-api/gamecenter/${game.id}/play-by-play`, { cache: "no-store" }),
-      fetch(`/nhl-web-api/gamecenter/${game.id}/boxscore`, { cache: "no-store" }),
+      nhlFetch(`/nhl-web-api/gamecenter/${game.id}/play-by-play`, { cache: "no-store" }),
+      nhlFetch(`/nhl-web-api/gamecenter/${game.id}/boxscore`, { cache: "no-store" }),
     ]);
     return {
       game,

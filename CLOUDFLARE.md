@@ -33,7 +33,108 @@ The Vite development proxies, Vercel configuration, Supabase configuration, data
 authentication, and credentials are unchanged. `keep_vars` preserves dashboard-set
 Worker variables when deploying. No account IDs, routes, custom domains, or secrets
 are added to Wrangler. API proxy requests still count as Worker invocations; this
-fix does not reduce frontend polling or promise free-tier capacity.
+initial routing fix did not reduce frontend polling or promise free-tier capacity.
+
+## Local follow-up: caching and rate-limit handling
+
+The currently proposed follow-up is local only; it has not been committed, pushed,
+or deployed. The user observed HTTP 429 on about ten historical draft requests.
+A skater summary response was HTTP 200 from browser disk cache, which does not
+verify a fresh production fetch. Diagnostic requests from this environment to both
+production and direct NHL endpoints returned Cloudflare HTTP 403 / error 1010
+(`browser_signature_banned`), not the reported 429. Therefore the precise limiter
+is **unconfirmed**. The original Worker has no application-generated 429 branch or
+rate-limit binding: a 429 reaching its upstream-response branch is passed through,
+but Cloudflare can also reject requests before that code runs. `Server: cloudflare`
+alone does not distinguish these cases. Actual 429 headers/body or Cloudflare
+request/security logs are needed to establish the source.
+
+Confirmed request amplification: the original Worker forwarded every request, the
+browser fetched overlapping stats/game data, and `fetchProspectRights` started ten
+draft-year fetches alongside optional stats metadata. It also kept rejected draft
+promises indefinitely. These are traffic/recovery defects, not proof of which
+service imposed the observed limit.
+
+The follow-up uses Cloudflare's supported named Cache API for **HTTP 200, valid
+JSON, public NHL GET responses only**. Full URL queries remain part of identity.
+Only the existing fixed NHL origins are reachable. No Supabase URLs or responses
+enter this cache or the frontend NHL client.
+
+| Data | Maximum configured TTL per cache layer |
+| --- | --- |
+| Live scoreboard/game data | 15 seconds |
+| Current-season stat reports | 60 seconds |
+| Current-season player bios | 6 hours |
+| Completed-season reports | 24 hours |
+| Current-season completed games | 5 minutes |
+| Completed games from older seasons | 24 hours |
+| Scoreboards more than two days old | 6 hours |
+| Prior-calendar-year draft picks | 7 days |
+| Current/future-calendar-year draft picks | 1 hour |
+| Player landing pages and searches | 1 hour |
+
+All errors, including HTTP 429, bypass caching. Only a per-origin cooldown timestamp
+is retained after 429. Both seconds and HTTP-date `Retry-After` values are respected;
+missing/invalid values default to 60 seconds. There are **no automatic retries**.
+Requests already in flight may finish; queued requests check cooldown before fetching.
+Fresh successful cache entries remain usable during cooldown.
+
+The Worker deduplicates identical requests and bounds upstream concurrency to four
+per isolate. It shares buffered bytes, not live Response streams, across request
+contexts, as required by workerd. The frontend uses three concurrent NHL requests,
+an expiring/bounded in-memory success cache, in-flight deduplication, and a public
+draft-only localStorage cache. Disabling/full localStorage degrades to network and
+memory caching without breaking the app. Public draft caches are shared across
+page visits/reloads; private roster and ownership data is read fresh.
+
+Stats pages load draft/rights enrichment only after stats succeed and while the
+page is still active. Historical draft fetching also waits for valid league/farm
+metadata. The original draft range is preserved for correct ownership badges; a
+cold cache still needs the draft classes for features that actually use them.
+The main hockey team, standings, and Around the Horn polling timers skip hidden
+tabs. Scoring formulas, authentication, database content, and styling are unchanged.
+
+### Diagnostics after an approved deployment
+
+- `X-NHL-Source: upstream` and `X-NHL-Upstream-Status: 429` identify a 429 received
+  by the Worker from its NHL subrequest (possibly an upstream CDN).
+- `X-NHL-Source: cooldown` identifies the Worker's deliberate pause after a prior
+  upstream 429. `Retry-After` reports the remaining wait.
+- `X-NHL-Upstream-CF-Ray` and `X-NHL-Upstream-Server`, when present, are copied from
+  the upstream response; the ordinary `CF-Ray` identifies the outer request.
+- `X-NHL-Cache: HIT`, `MISS`, `COALESCED`, or `BYPASS` describes Worker caching.
+- A 429 without Worker diagnostics still requires Cloudflare logs/body inspection;
+  absence of these headers alone is not proof of a specific limiter.
+
+The Cache API is local to each Cloudflare data center. In-flight deduplication,
+concurrency and cooldown state are best-effort **per isolate**, not a globally
+coordinated limiter. Frontend caching is per browser. Layered caches can compound
+data age. Cache hits within a Worker still count as Worker invocations, so this
+does not bypass Cloudflare account quotas or guarantee free-tier capacity.
+
+### Follow-up checks
+
+```sh
+npm run build
+npx --no-install tsc -p tsconfig.app.json
+npx --no-install tsc -p tsconfig.worker.json
+npm run test:worker
+npm run test:nhl
+npm run test:nhl:runtime
+npm run check:deploy
+```
+
+The runtime check uses workerd and simulated NHL responses, without calling
+production or Supabase. It verifies real Cache API MISS/HIT behavior, simultaneous
+request deduplication, cooldown and asset delegation. Live NHL success/rate-limit
+verification remains limited by the diagnostic 403 responses noted above. The
+runtime/bundler are the versions already installed and locked with Wrangler; no
+new dependency installation is required.
+
+Final local results: production build, frontend and Worker TypeScript checks, all
+38 unit tests (25 Worker and 13 frontend/policy), the workerd runtime check, and
+Wrangler deployment dry run passed. Existing CSS minification/bundle warnings
+remain. No signed-in production test or database access was performed.
 
 ## Local checks (no deployment)
 
@@ -124,9 +225,16 @@ Cloudflare deployment/version in the dashboard for rollback. Confirm the command
 above and the intended release branch. Then:
 
 ```sh
-git add .gitignore README.md package.json package-lock.json wrangler.jsonc tsconfig.worker.json worker/index.ts worker/index.test.mjs src/pages/League/Standings.tsx CLOUDFLARE.md
+git add CLOUDFLARE.md package.json tsconfig.worker.json \
+  worker/index.ts worker/index.test.mjs worker/cache.test.mjs \
+  shared/nhl-policy.ts shared/nhl-policy.test.mjs \
+  scripts/test-nhl-runtime.mjs src/lib/nhlRequest.ts src/lib/nhlRequest.test.mjs \
+  src/lib/nhl.ts src/lib/goalFeed.ts src/lib/prospectRights.ts \
+  src/pages/League/SkaterStats.tsx src/pages/League/GoalieStats.tsx \
+  src/pages/League/HockeyTeamDetail.tsx src/pages/League/Standings.tsx \
+  src/pages/League/GoalHorn.tsx
 git diff --cached --stat
-git commit -m "Fix NHL API proxy routing on Cloudflare Workers"
+git commit -m "Cache public NHL responses and respect rate limits"
 git push origin HEAD
 ```
 

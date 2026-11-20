@@ -1,3 +1,4 @@
+import { nhlFetch } from "./nhlRequest";
 export const NHL_SEASON_ID = 20252026;
 export const FANTASY_SEASON_YEAR = 2026;
 
@@ -147,19 +148,19 @@ export function getNhlStatsDate(dayOffset = 0) {
 }
 
 async function fetchScoreboard(date = getNhlStatsDate()) {
-  const response = await fetch(`/nhl-web-api/score/${date}`, { cache: "no-store" });
+  const response = await nhlFetch(`/nhl-web-api/score/${date}`, { cache: "no-store" });
   if (!response.ok) throw new Error(`Unable to load today's NHL games (${response.status})`);
   return response.json() as Promise<NhlScoreResponse>;
 }
 
 async function fetchGameBoxscore(gameId: number) {
-  const response = await fetch(`/nhl-web-api/gamecenter/${gameId}/boxscore`, { cache: "no-store" });
+  const response = await nhlFetch(`/nhl-web-api/gamecenter/${gameId}/boxscore`, { cache: "no-store" });
   if (!response.ok) return null;
   return response.json() as Promise<NhlBoxscoreResponse>;
 }
 
 async function fetchGamePlayByPlay(gameId: number) {
-  const response = await fetch(`/nhl-web-api/gamecenter/${gameId}/play-by-play`, { cache: "no-store" });
+  const response = await nhlFetch(`/nhl-web-api/gamecenter/${gameId}/play-by-play`, { cache: "no-store" });
   if (!response.ok) return null;
   return response.json() as Promise<NhlPlayByPlayResponse>;
 }
@@ -329,20 +330,20 @@ export async function fetchNhlLiveSeasonStats(seasonYear: number) {
 }
 
 export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
-  const response = await fetch(`/nhl-web-api/player/${playerId}/landing`);
+  const response = await nhlFetch(`/nhl-web-api/player/${playerId}/landing`);
   if (!response.ok) throw new Error(`Unable to load NHL player profile (${response.status})`);
   return response.json() as Promise<NhlPlayerLanding>;
 }
 
 export async function searchNhlPlayers(name: string): Promise<NhlPlayerSearchResult[]> {
   const params = new URLSearchParams({ culture: "en-us", limit: "10", q: name });
-  const response = await fetch(`/nhl-search-api/search/player?${params}`);
+  const response = await nhlFetch(`/nhl-search-api/search/player?${params}`);
   if (!response.ok) throw new Error(`Unable to search NHL players (${response.status})`);
   return response.json() as Promise<NhlPlayerSearchResult[]>;
 }
 
 export async function fetchNhlDraftPicks(draftYear: number): Promise<NhlDraftPick[]> {
-  const response = await fetch(`/nhl-web-api/draft/picks/${draftYear}/all`);
+  const response = await nhlFetch(`/nhl-web-api/draft/picks/${draftYear}/all`);
   if (!response.ok) throw new Error(`Unable to load the ${draftYear} NHL Draft (${response.status})`);
   const payload = await response.json() as NhlDraftResponse;
   return payload.picks ?? [];
@@ -375,7 +376,7 @@ function periodReportUrl(position: "skater" | "goalie", report: string, seasonId
 }
 
 async function fetchReport<T>(url: string, label: string): Promise<T[]> {
-  const response = await fetch(url);
+  const response = await nhlFetch(url);
   if (!response.ok) {
     throw new Error(`Unable to load NHL ${label} (${response.status})`);
   }

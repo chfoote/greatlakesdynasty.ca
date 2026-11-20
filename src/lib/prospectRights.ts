@@ -33,9 +33,6 @@ const nhlTeamAbbreviations: Record<string, string> = {
   winnipegjets: "WPG",
 };
 
-const landingCache = new Map<number, ReturnType<typeof fetchNhlPlayerLanding>>();
-const draftCache = new Map<number, ReturnType<typeof fetchNhlDraftPicks>>();
-
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -48,11 +45,8 @@ function farmAbbreviations(team: FantasyTeam) {
 }
 
 function draftPicks(year: number) {
-  const cached = draftCache.get(year);
-  if (cached) return cached;
-  const request = fetchNhlDraftPicks(year);
-  draftCache.set(year, request);
-  return request;
+  // The shared public NHL client owns caching, deduplication and failure expiry.
+  return fetchNhlDraftPicks(year);
 }
 
 function draftPickName(pick: NhlDraftPick) {
@@ -99,16 +93,12 @@ export async function removeAgedOutProspectRights(
 }
 
 function playerLanding(playerId: number) {
-  const cached = landingCache.get(playerId);
-  if (cached) return cached;
-  const request = fetchNhlPlayerLanding(playerId);
-  landingCache.set(playerId, request);
-  return request;
+  return fetchNhlPlayerLanding(playerId);
 }
 
 export async function fetchProspectRights(seasonYear: number) {
   const draftYears = Array.from({ length: 10 }, (_, index) => seasonYear - 1 - index);
-  const [prospectResult, callUpResult, fantasyTeamResult, draftResults] = await Promise.all([
+  const [prospectResult, callUpResult, fantasyTeamResult] = await Promise.all([
     supabase
       .from("player_seasons")
       .select("*, player:players(*), fantasy_team:fantasy_teams(*)")
@@ -120,7 +110,6 @@ export async function fetchProspectRights(seasonYear: number) {
       .in("action", ["called_up", "signed"])
       .not("fantasy_team_id", "is", null),
     supabase.from("fantasy_teams").select("*").eq("active", true),
-    Promise.all(draftYears.map(async (year) => ({ year, picks: await draftPicks(year) }))),
   ]);
   if (prospectResult.error) throw prospectResult.error;
   if (callUpResult.error) throw callUpResult.error;
@@ -128,6 +117,12 @@ export async function fetchProspectRights(seasonYear: number) {
 
   const rights = new Map<string, ProspectRight>();
   const fantasyTeams = (fantasyTeamResult.data ?? []) as FantasyTeam[];
+  // No historical NHL calls when league metadata failed or there are no farms.
+  // Successful draft classes persist in the public client cache across navigation
+  // and reloads; roster/ownership data is always read fresh from Supabase above.
+  const draftResults = fantasyTeams.some((team) => farmAbbreviations(team).size)
+    ? await Promise.all(draftYears.map(async (year) => ({ year, picks: await draftPicks(year) })))
+    : [];
   draftResults.forEach(({ picks }) => picks.forEach((pick) => {
     const owner = fantasyTeams.find((team) => farmAbbreviations(team).has(pick.teamAbbrev));
     const playerName = draftPickName(pick);

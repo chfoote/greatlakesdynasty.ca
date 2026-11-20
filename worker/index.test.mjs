@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import worker from "./index.ts";
+import { beforeEach, test } from "node:test";
+import { createWorker } from "./index.ts";
+
+let worker;
+beforeEach(() => { worker = createWorker(); });
 
 const request = (path, options) => new Request(`https://league.example${path}`, options);
 const noAssets = { ASSETS: { fetch() { throw new Error("API fell through to assets"); } } };

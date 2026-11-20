@@ -213,7 +213,7 @@ export default function GoalHorn() {
   }, [date, user]);
   useEffect(() => {
     if (date !== today) return;
-    const timer = window.setInterval(() => void load(true), 30_000);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load(true); }, 30_000);
     return () => window.clearInterval(timer);
   }, [date, today, load]);
   useEffect(() => { window.localStorage.setItem("around-horn:show-nightly-recap", String(showNightlyRecap)); }, [showNightlyRecap]);

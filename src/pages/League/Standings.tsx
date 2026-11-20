@@ -218,7 +218,7 @@ export default function Standings() {
         // Keep the most recently loaded composite if a live refresh fails.
       }
     };
-    const intervalId = window.setInterval(() => void refresh(), 30_000);
+    const intervalId = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 30_000);
     return () => { active = false; window.clearInterval(intervalId); };
   }, [statsView, selectedSeason]);
 
@@ -242,7 +242,7 @@ export default function Standings() {
       }
     };
     void refresh();
-    const intervalId = statsView === "today" ? window.setInterval(() => void refresh(), 30_000) : null;
+    const intervalId = statsView === "today" ? window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 30_000) : null;
     return () => { active = false; if (intervalId) window.clearInterval(intervalId); };
   }, [statsView, selectedSeason]);
 

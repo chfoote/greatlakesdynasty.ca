@@ -698,7 +698,7 @@ export default function HockeyTeamDetail() {
         // Retain the latest composite if a live refresh temporarily fails.
       }
     };
-    const intervalId = window.setInterval(() => void refreshSeasonStats(), 30_000);
+    const intervalId = window.setInterval(() => { if (document.visibilityState === "visible") void refreshSeasonStats(); }, 30_000);
     return () => { active = false; window.clearInterval(intervalId); };
   }, [selectedSeason, statsView]);
 
@@ -776,7 +776,7 @@ export default function HockeyTeamDetail() {
       }
     };
     void refreshLivePlayers();
-    const intervalId = window.setInterval(() => void refreshLivePlayers(), 30_000);
+    const intervalId = window.setInterval(() => { if (document.visibilityState === "visible") void refreshLivePlayers(); }, 30_000);
     const handleVisibility = () => { if (document.visibilityState === "visible") void refreshLivePlayers(); };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
@@ -807,7 +807,7 @@ export default function HockeyTeamDetail() {
       }
     };
     void refreshDailyStats();
-    const intervalId = statsView === "today" ? window.setInterval(() => void refreshDailyStats(), 30_000) : null;
+    const intervalId = statsView === "today" ? window.setInterval(() => { if (document.visibilityState === "visible") void refreshDailyStats(); }, 30_000) : null;
     return () => { active = false; if (intervalId) window.clearInterval(intervalId); };
   }, [statsView]);
 

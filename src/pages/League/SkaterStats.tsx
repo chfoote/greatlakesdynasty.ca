@@ -91,10 +91,7 @@ export default function SkaterStats() {
         if (active) setLoading(false);
       });
 
-    Promise.all([
-      statsRequest,
-      fetchProspectRights(selectedSeason),
-    ])
+    statsRequest.then(async (data) => [data, active && data.length ? await fetchProspectRights(selectedSeason) : new Map<string, ProspectRight>()] as const)
       .then(async ([data, rights]) => removeAgedOutProspectRights(rights, data.map((record) => ({
         playerId: record.playerId,
         playerName: record.skaterFullName,

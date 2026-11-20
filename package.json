@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && tsc -p tsconfig.worker.json && vite build",
-    "test:worker": "node --test worker/index.test.mjs",
+    "test:worker": "node --test worker/*.test.mjs",
+    "test:nhl": "node --test shared/*.test.mjs src/lib/nhlRequest.test.mjs",
+    "test:nhl:runtime": "node scripts/test-nhl-runtime.mjs",
     "preview:worker": "wrangler dev --local",
     "check:deploy": "wrangler deploy --dry-run",
     "lint": "eslint .",
