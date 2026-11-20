@@ -1,5 +1,8 @@
 # TailAdmin React - Free React Tailwind Admin Dashboard Template
 
+For this project's Cloudflare Worker routing, local checks, and release steps, see
+[CLOUDFLARE.md](./CLOUDFLARE.md).
+
 TailAdmin is a free and open-source admin dashboard template built on **React and Tailwind CSS**, providing developers
 with everything they need to create a comprehensive, data-driven back-end,
 dashboard, or admin panel solution for upcoming web projects.

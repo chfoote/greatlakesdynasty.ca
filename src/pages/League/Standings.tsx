@@ -168,15 +168,12 @@ export default function Standings() {
     setError("");
 
     const finalizedStatsRequest = () => Promise.all([
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
+      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
+      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
     ]).then(([skaters, goalies]) => ({ skaters, goalies }));
     const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
       ? fetchNhlLiveSeasonStats(selectedSeason).catch(finalizedStatsRequest)
-      : Promise.all([
-          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
-          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
-        ]).then(([skaters, goalies]) => ({ skaters, goalies }));
+      : finalizedStatsRequest();
 
     Promise.all([
       fetchFantasyTeams(),
