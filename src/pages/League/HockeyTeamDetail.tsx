@@ -657,8 +657,8 @@ export default function HockeyTeamDetail() {
       .catch(() => setTradeBlockIds(new Set()));
 
     const finalizedStatsRequest = () => Promise.all([
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
+      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
+      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
     ]).then(([seasonSkaters, seasonGoalies]) => ({ skaters: seasonSkaters, goalies: seasonGoalies }));
     const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
       ? fetchNhlLiveSeasonStats(selectedSeason).catch(finalizedStatsRequest)

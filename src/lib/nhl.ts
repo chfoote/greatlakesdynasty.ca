@@ -1,10 +1,7 @@
 import { nhlFetch } from "./nhlRequest";
+import { fetchCompleteNhlReport } from "./nhlReports";
 export const NHL_SEASON_ID = 20252026;
 export const FANTASY_SEASON_YEAR = 2026;
-
-type NhlStatsResponse<T> = {
-  data?: T[];
-};
 
 const statsCacheTtlMs = 60_000;
 const skaterStatsCache = new Map<number, { expiresAt: number; request: Promise<NhlSkaterRecord[]> }>();
@@ -376,13 +373,7 @@ function periodReportUrl(position: "skater" | "goalie", report: string, seasonId
 }
 
 async function fetchReport<T>(url: string, label: string): Promise<T[]> {
-  const response = await nhlFetch(url);
-  if (!response.ok) {
-    throw new Error(`Unable to load NHL ${label} (${response.status})`);
-  }
-
-  const payload = (await response.json()) as NhlStatsResponse<T>;
-  return payload.data ?? [];
+  return fetchCompleteNhlReport<T>(url, label);
 }
 
 function fetchPlayerBios(position: "skater" | "goalie", seasonId: number) {

@@ -138,6 +138,38 @@ remain. No signed-in production test or database access was performed.
 
 ## Local checks (no deployment)
 
+### Local follow-up: missing player records
+
+After the caching release, missing players were reported in both 2026 and 2027.
+An application-loader defect was reproduced using simulated NHL responses: the
+old reader ignored the report's `total` and accepted only the first `data` array,
+even when additional records were advertised. This can drop most players and
+leave their IDs absent from the maps used for team statistics and standings.
+Live production response counts remain unverified because diagnostic requests
+from this environment returned HTTP 403 / Cloudflare error 1010.
+
+The proposed local fix adds `src/lib/nhlReports.ts` and routes every stat report
+through it. It retains the unlimited first request, requests additional pages
+sequentially only when necessary, sorts consistently by player ID, advances by
+actual returned row counts, and checks completeness before publishing the result
+to the application. New sort/start query parameters avoid reusing the old report
+cache keys. Existing rate-limit cooldown, caching, and concurrency limits apply.
+There are no automatic retries, database changes, scoring changes, or cache purges.
+
+Invalid, empty intermediate, repeated, changing, or inconsistent pages fail clearly
+rather than silently loading partial stats. Team-page fallback request errors now
+reach the existing stats error display instead of becoming empty lists. A complete
+unlimited report still uses one request; a truncated report requires more requests
+to retrieve the missing data, and a 429 aborts without accepting partial results.
+
+Local validation passed: production build, both TypeScript checks, 46 unit tests
+(25 Worker and 21 NHL/frontend), the workerd runtime check, and Wrangler dry run.
+New regression tests exercise the actual 2026/2027 skater and goalie loaders with
+120 players while the initial API response contains only five; all player IDs,
+enrichment fields, and scoring lookups survive. Existing build warnings remain.
+The fix is not committed, pushed, or deployed. Production must still be checked
+after an approved deployment to confirm the reported symptom is resolved.
+
 Use Node 24 LTS (the tests import TypeScript using Node's built-in type stripping).
 
 ```sh
