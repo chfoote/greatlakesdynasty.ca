@@ -224,3 +224,15 @@ test("denied Web Locks fall back safely without replaying failed fetches", async
   await assert.rejects(failed(path), /offline/);
   assert.equal(calls, 2);
 });
+
+test('shared stale JSON is never promoted into the fresh browser request cache', async () => {
+  let calls = 0;
+  const client = createNhlClient({ fetcher: async () => {
+    calls++;
+    return Response.json({ data: [1] }, { headers: { 'X-NHL-Stale': '1', 'X-NHL-Saved-At': '1795000000000' } });
+  } });
+  const first = await client('/nhl-api/skater/summary?test=stale');
+  assert.equal(first.headers.get('X-NHL-Stale'), '1');
+  await client('/nhl-api/skater/summary?test=stale');
+  assert.equal(calls, 2);
+});

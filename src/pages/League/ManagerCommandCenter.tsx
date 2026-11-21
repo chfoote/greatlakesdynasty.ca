@@ -1,3 +1,5 @@
+import { loadFrontOfficeNhl } from "../../lib/frontOfficeNhl";
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageMeta from "../../components/common/PageMeta";
@@ -108,11 +110,52 @@ export default function ManagerCommandCenter() {
   const [tradeBlock, setTradeBlock] = useState<TradeBlockListing[]>([]);
   const [skaters, setSkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalies, setGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
+  const [statsReady, setStatsReady] = useState({ skaters: false, goalies: false });
+  const [statsError, setStatsError] = useState("");
   const [radarMode, setRadarMode] = useState<"needs" | "all">("needs");
   const [agingProspects, setAgingProspects] = useState<AgingProspect[]>([]);
   const [transactions, setTransactions] = useState<LeagueTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const revision = useNhlDataRevision([`skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`, `skaters:${nhlSeasonId(season - 1)}`, `goalies:${nhlSeasonId(season - 1)}`]);
+  useEffect(() => {
+    if (!user || !assignment?.fantasy_team_id) return;
+    let active = true;
+    setStatsError("");
+    void loadFrontOfficeNhl({
+      isActive: () => active,
+      currentSkaters: () => fetchNhlSkaterStats(nhlSeasonId(season)),
+      currentGoalies: () => fetchNhlGoalieStats(nhlSeasonId(season)),
+      previousSkaters: () => fetchNhlSkaterStats(nhlSeasonId(season - 1)),
+      previousGoalies: () => fetchNhlGoalieStats(nhlSeasonId(season - 1)),
+      onSkaters: rows => {
+        if (active) {
+          setSkaters(new Map(rows.map(row => [String(row.playerId), row])));
+          setStatsReady(ready => ({ ...ready, skaters: true }));
+        }
+      },
+      onGoalies: rows => {
+        if (active) {
+          setGoalies(new Map(rows.map(row => [String(row.playerId), row])));
+          setStatsReady(ready => ({ ...ready, goalies: true }));
+        }
+      },
+      onError: () => { if (active) setStatsError("Some NHL statistics are unavailable. Your dashboard remains usable; missing scores show —."); },
+    });
+    return () => { active = false; };
+  }, [revision, season, user, assignment?.fantasy_team_id]);
+
+  // Historical draft/prospect scans must not compete with the initial stats load.
+  useEffect(() => {
+    const teamId = assignment?.fantasy_team_id;
+    if (!teamId || !statsReady.skaters || !statsReady.goalies) return;
+    let active = true;
+    void fetchFarmInsights().then(insights => {
+      if (active) setAgingProspects(insights.agingByTeam.get(teamId) || []);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [assignment?.fantasy_team_id, statsReady.skaters, statsReady.goalies]);
 
   useEffect(() => {
     if (!user) return;
@@ -125,8 +168,7 @@ export default function ManagerCommandCenter() {
         if (!active) return;
         setAssignment(assigned);
         if (!assigned?.fantasy_team_id) return;
-        void fetchFarmInsights().then((insights) => { if (active) setAgingProspects(insights.agingByTeam.get(assigned.fantasy_team_id) || []); }).catch(() => { if (active) setAgingProspects([]); });
-        const [leagueRosterRows, previousSeasonRows, penaltyRows, adjustmentRows, auctionRows, offerRows, interestRows, tradeBlockRows, transactionRows, branding, nhlStats] = await Promise.all([
+        const [leagueRosterRows, previousSeasonRows, penaltyRows, adjustmentRows, auctionRows, offerRows, interestRows, tradeBlockRows, transactionRows, branding] = await Promise.all([
           fetchPlayerSeasonsBySeason(season),
           fetchPlayerSeasonsBySeason(season - 1).catch(() => []),
           fetchBuyoutPenalties(season, assigned.fantasy_team_id).catch(() => []),
@@ -137,13 +179,6 @@ export default function ManagerCommandCenter() {
           fetchTradeBlockListings(season).catch(() => []),
           fetchLeagueTransactions().catch(() => []),
           fetchTeamBrandingHistory().catch(() => []),
-          // Do not turn rate-limited reports into empty player maps and zero FPTS.
-          Promise.all([
-            fetchNhlSkaterStats(nhlSeasonId(season)),
-            fetchNhlGoalieStats(nhlSeasonId(season)),
-            fetchNhlSkaterStats(nhlSeasonId(season - 1)),
-            fetchNhlGoalieStats(nhlSeasonId(season - 1)),
-          ]),
         ]);
         if (!active) return;
         setTeam(assigned.fantasy_team ? applyTeamBranding(assigned.fantasy_team, branding, season) : null);
@@ -156,12 +191,6 @@ export default function ManagerCommandCenter() {
         setOffers(offerRows);
         setInterests(interestRows);
         setTradeBlock(tradeBlockRows);
-        const skaterMap = new Map(nhlStats[2].map((row) => [String(row.playerId), row]));
-        const goalieMap = new Map(nhlStats[3].map((row) => [String(row.playerId), row]));
-        nhlStats[0].forEach((row) => skaterMap.set(String(row.playerId), row));
-        nhlStats[1].forEach((row) => goalieMap.set(String(row.playerId), row));
-        setSkaters(skaterMap);
-        setGoalies(goalieMap);
         setTransactions(transactionRows);
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : "Unable to load your manager dashboard.");
@@ -225,8 +254,13 @@ export default function ManagerCommandCenter() {
     const record = position(row) === "G" ? goalies.get(apiId) : skaters.get(apiId);
     return record ? (position(row) === "G" ? getGoalieScore(record as NhlGoalieRecord) : getSkaterScore(record as NhlSkaterRecord)) : 0;
   }, [goalies, skaters]);
+  const playerPoints = (row: PlayerSeasonWithRelations) => {
+    const apiId = row.player?.player_api_id || "";
+    const record = position(row) === "G" ? goalies.get(apiId) : skaters.get(apiId);
+    return record ? formatFantasyPoints(playerScore(row)) : "—";
+  };
   const marketRadar = useMemo(() => {
-    if (!teamId || !leagueRoster.length) return { needs: [] as string[], candidates: [] as PlayerSeasonWithRelations[], allCandidates: [] as PlayerSeasonWithRelations[] };
+    if (!teamId || !leagueRoster.length || !statsReady.skaters || !statsReady.goalies) return { needs: [] as string[], candidates: [] as PlayerSeasonWithRelations[], allCandidates: [] as PlayerSeasonWithRelations[] };
     const activeRows = leagueRoster.filter((row) => activePositions.has(position(row)));
     const strength = (rows: PlayerSeasonWithRelations[], code: string) => rows.filter((row) => position(row) === code).map(playerScore).sort((a, b) => b - a).slice(0, positionMinimums[code as keyof typeof positionMinimums]).reduce((sum, score) => sum + score, 0);
     const teamIds = [...new Set(activeRows.map((row) => row.fantasy_team_id).filter((id): id is number => id != null))];
@@ -239,7 +273,7 @@ export default function ManagerCommandCenter() {
     const candidates = byBenchOrder(eligible.filter((row) => needs.includes(position(row))).sort((a, b) => playerScore(b) - playerScore(a)).slice(0, 6));
     const allCandidates = byBenchOrder(eligible);
     return { needs, candidates, allCandidates };
-  }, [teamId, leagueRoster, tradeBlock, playerScore, season]);
+  }, [teamId, leagueRoster, tradeBlock, playerScore, season, statsReady.skaters, statsReady.goalies]);
 
   if (loading) return <div><PageMeta title="My Front Office | Great Lakes Dynasty" description="Your GLDHL manager dashboard" /><div className="grid animate-pulse gap-4"><div className="h-48 rounded-3xl bg-gray-200 dark:bg-gray-800" /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[1,2,3,4].map((item) => <div key={item} className="h-28 rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div></div></div>;
 
@@ -249,6 +283,7 @@ export default function ManagerCommandCenter() {
 
   return <div className="space-y-6">
     <PageMeta title="My Front Office | Great Lakes Dynasty" description="Your GLDHL manager dashboard" />
+    {(statsError || !statsReady.skaters || !statsReady.goalies) && <p role="status" className="text-sm text-gray-500 dark:text-gray-400">{statsError || "NHL statistics are loading in the background. Your dashboard is ready to use."}</p>}
     <section className="relative overflow-hidden rounded-2xl bg-gray-950 p-4 text-white shadow-lg" style={{ backgroundImage: `linear-gradient(125deg, #111827 0%, ${team?.primary_color || "#1d4ed8"} 72%, ${team?.secondary_color || "#f97316"} 145%)` }}>
       <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full border-[42px] border-white/5" />
       <div className="relative flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -272,7 +307,7 @@ export default function ManagerCommandCenter() {
         <div className="mb-4 flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-brand-500">Your inbox</p><h2 className="mt-1 text-xl font-bold text-gray-900 dark:text-white">Needs attention</h2></div><span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{offersToReview.length + receivedInterest.length + (missingPositions.length ? 1 : 0) + (restrictedFreeAgents.length ? 1 : 0) + (finalContractYear.length ? 1 : 0) + (agingProspects.length ? 1 : 0)}</span></div>
         <div className="space-y-3">
           {offersToReview.length > 0 && <ActionItem title={`${offersToReview.length} trade ${offersToReview.length === 1 ? "offer needs" : "offers need"} your response`} detail="Review the players, salary impact, and roster compliance before deciding." link="/trade-manager" linkLabel="Review trades" tone="warning" />}
-          {receivedInterestByPlayer.length > 0 && <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-500/25 dark:bg-sky-500/[0.07]"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-sky-900 dark:text-sky-200">{receivedInterest.length} expression{receivedInterest.length === 1 ? "" : "s"} of trade interest</p><p className="mt-0.5 text-sm text-sky-700/80 dark:text-sky-300/80">See who is interested before opening a conversation.</p></div><Link to="/trade-market" className="shrink-0 text-xs font-bold text-sky-700 hover:underline dark:text-sky-300">Trade Market →</Link></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{[...receivedInterestByPlayer].sort((a, b) => positionRank(a.row) - positionRank(b.row) || (a.row && b.row ? playerScore(b.row) - playerScore(a.row) : 0)).map(({ row, teams }) => row && <article key={row.id} className="rounded-xl border border-sky-200 bg-white p-3 dark:border-sky-500/25 dark:bg-gray-900"><div className="flex items-center gap-2"><PositionBadge position={position(row)} /><Link to={`/player-profile?playerId=${row.player?.player_api_id}`} className="min-w-0 truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row)}</Link><span className="ml-auto shrink-0 text-[10px] font-black text-gray-400">{formatFantasyPoints(playerScore(row))} FPTS</span></div><p className="mt-2 text-[9px] font-bold uppercase tracking-wide text-gray-400">Interested teams</p><div className="mt-1 flex flex-wrap gap-1.5">{teams.map((club) => club && <span key={club.id} title={club.team_name} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{club.logo && <img src={club.logo} alt="" className="h-4 w-4 object-contain" />}{club.abbreviation}</span>)}</div></article>)}</div></div>}
+          {receivedInterestByPlayer.length > 0 && <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-500/25 dark:bg-sky-500/[0.07]"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-sky-900 dark:text-sky-200">{receivedInterest.length} expression{receivedInterest.length === 1 ? "" : "s"} of trade interest</p><p className="mt-0.5 text-sm text-sky-700/80 dark:text-sky-300/80">See who is interested before opening a conversation.</p></div><Link to="/trade-market" className="shrink-0 text-xs font-bold text-sky-700 hover:underline dark:text-sky-300">Trade Market →</Link></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{[...receivedInterestByPlayer].sort((a, b) => positionRank(a.row) - positionRank(b.row) || (a.row && b.row ? playerScore(b.row) - playerScore(a.row) : 0)).map(({ row, teams }) => row && <article key={row.id} className="rounded-xl border border-sky-200 bg-white p-3 dark:border-sky-500/25 dark:bg-gray-900"><div className="flex items-center gap-2"><PositionBadge position={position(row)} /><Link to={`/player-profile?playerId=${row.player?.player_api_id}`} className="min-w-0 truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row)}</Link><span className="ml-auto shrink-0 text-[10px] font-black text-gray-400">{playerPoints(row)} FPTS</span></div><p className="mt-2 text-[9px] font-bold uppercase tracking-wide text-gray-400">Interested teams</p><div className="mt-1 flex flex-wrap gap-1.5">{teams.map((club) => club && <span key={club.id} title={club.team_name} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{club.logo && <img src={club.logo} alt="" className="h-4 w-4 object-contain" />}{club.abbreviation}</span>)}</div></article>)}</div></div>}
           {missingPositions.length > 0 && <ActionItem title="Your roster has open positions" detail={`Still needed: ${missingPositions.map((item) => `${item.missing} ${item.code}`).join(", ")}.`} link="/trade-market" linkLabel="Find players" tone="error" />}
           {restrictedFreeAgents.length > 0 && <div className="rounded-xl border border-violet-200 bg-violet-50/70 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-semibold text-violet-900 dark:text-violet-200">{restrictedFreeAgents.length} RFA decision{restrictedFreeAgents.length === 1 ? "" : "s"} due now</p><p className="mt-0.5 text-sm text-violet-700/80 dark:text-violet-300/80">These contracts have already expired. A qualifying offer keeps the player’s rights for one year.</p></div><Link to="/auction-house" className="shrink-0 text-sm font-semibold text-violet-700 hover:underline dark:text-violet-300">Review RFA rights →</Link></div>
@@ -280,12 +315,12 @@ export default function ManagerCommandCenter() {
             <p className="mt-2 text-[11px] text-violet-600/75 dark:text-violet-300/70">Calculated at 50% of the previous salary, with a minimum qualifying salary of {money.format(500_000)}.</p>
           </div>}
           {agingProspects.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-500/30 dark:bg-amber-500/[0.08]"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-amber-900 dark:text-amber-200">Prospects aging out</p><p className="mt-0.5 text-sm text-amber-700/80 dark:text-amber-300/80">These 24-year-old prospects lose eligibility when they turn 25.</p></div><Link to={`/teams/${teamId}/farm-systems`} className="shrink-0 text-xs font-bold text-amber-700 hover:underline dark:text-amber-300">Farm systems →</Link></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{agingProspects.map((prospect) => <article key={prospect.playerId} className="flex min-w-0 items-center gap-3 rounded-xl border border-amber-200 bg-white p-3 dark:border-amber-500/25 dark:bg-gray-900">{prospect.headshot ? <img src={prospect.headshot} alt="" className="h-11 w-11 shrink-0 rounded-full bg-white object-cover object-top ring-1 ring-amber-200" /> : <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-xs font-black text-amber-700">{prospect.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div>}<div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><PositionBadge position={prospect.position} /><Link to={`/player-profile?playerId=${prospect.playerId}`} className="truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{prospect.name}</Link></div><p className="mt-1 text-[10px] font-semibold text-gray-500">Turns 25 on {prospect.birthday} · {prospect.draftYear} draft</p><p className="mt-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">{prospect.nhlTeam || "NHL"} · {formatFantasyPoints(prospect.score)} FPTS</p></div></article>)}</div></div>}
-          {finalContractYear.length > 0 && <div className="rounded-xl border border-orange-200 bg-orange-50/60 p-4 dark:border-orange-500/25 dark:bg-orange-500/[0.07]"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-orange-900 dark:text-orange-200">Upcoming RFA</p><p className="mt-0.5 text-sm text-orange-700/80 dark:text-orange-300/80">{finalContractYear.length} contract{finalContractYear.length === 1 ? "" : "s"} expire after this season.</p></div><Link to={`/teams/${teamId}`} className="shrink-0 text-xs font-bold text-orange-700 hover:underline dark:text-orange-300">Contract outlook →</Link></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{[...finalContractYear].sort((a, b) => (positionOrder[position(a)] ?? 99) - (positionOrder[position(b)] ?? 99) || playerScore(b) - playerScore(a)).map((row) => { const apiId = row.player?.player_api_id || ""; const record = position(row) === "G" ? goalies.get(apiId) : skaters.get(apiId); const nhlTeam = record?.teamAbbrevs?.split(",")[0]; return <article key={row.id} className="flex min-w-0 items-center gap-3 rounded-xl border border-orange-200 bg-white p-3 dark:border-orange-500/25 dark:bg-gray-900"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-50 dark:bg-gray-800">{nhlTeam ? <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlTeam}_light.svg`} alt="" className="h-9 w-9 object-contain" /> : <PositionBadge position={position(row)} />}</div><div className="min-w-0 flex-1"><Link to={`/player-profile?playerId=${apiId}`} className="block truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row)}</Link><p className="mt-0.5 truncate text-[10px] font-semibold text-gray-500"><PositionBadge position={position(row)} className="mr-1" />{formatFantasyPoints(playerScore(row))} FPTS · {money.format(row.salary || 0)}</p></div><span className="shrink-0 rounded-md bg-orange-100 px-2 py-1 text-[9px] font-black uppercase text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">Expiring</span></article>; })}</div></div>}
+          {finalContractYear.length > 0 && <div className="rounded-xl border border-orange-200 bg-orange-50/60 p-4 dark:border-orange-500/25 dark:bg-orange-500/[0.07]"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-orange-900 dark:text-orange-200">Upcoming RFA</p><p className="mt-0.5 text-sm text-orange-700/80 dark:text-orange-300/80">{finalContractYear.length} contract{finalContractYear.length === 1 ? "" : "s"} expire after this season.</p></div><Link to={`/teams/${teamId}`} className="shrink-0 text-xs font-bold text-orange-700 hover:underline dark:text-orange-300">Contract outlook →</Link></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{[...finalContractYear].sort((a, b) => (positionOrder[position(a)] ?? 99) - (positionOrder[position(b)] ?? 99) || playerScore(b) - playerScore(a)).map((row) => { const apiId = row.player?.player_api_id || ""; const record = position(row) === "G" ? goalies.get(apiId) : skaters.get(apiId); const nhlTeam = record?.teamAbbrevs?.split(",")[0]; return <article key={row.id} className="flex min-w-0 items-center gap-3 rounded-xl border border-orange-200 bg-white p-3 dark:border-orange-500/25 dark:bg-gray-900"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-50 dark:bg-gray-800">{nhlTeam ? <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlTeam}_light.svg`} alt="" className="h-9 w-9 object-contain" /> : <PositionBadge position={position(row)} />}</div><div className="min-w-0 flex-1"><Link to={`/player-profile?playerId=${apiId}`} className="block truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{playerName(row)}</Link><p className="mt-0.5 truncate text-[10px] font-semibold text-gray-500"><PositionBadge position={position(row)} className="mr-1" />{playerPoints(row)} FPTS · {money.format(row.salary || 0)}</p></div><span className="shrink-0 rounded-md bg-orange-100 px-2 py-1 text-[9px] font-black uppercase text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">Expiring</span></article>; })}</div></div>}
           {offersToReview.length === 0 && receivedInterest.length === 0 && missingPositions.length === 0 && restrictedFreeAgents.length === 0 && finalContractYear.length === 0 && agingProspects.length === 0 && <div className="rounded-xl border border-dashed border-success-300 bg-success-50 p-7 text-center dark:border-success-500/30 dark:bg-success-500/10"><p className="font-bold text-success-700 dark:text-success-300">You’re all caught up.</p><p className="mt-1 text-sm text-success-600/80 dark:text-success-300/80">No urgent roster, contract, or trade decisions right now.</p></div>}
         </div>
         <div className="mt-6 border-t border-gray-200 pt-5 dark:border-gray-800">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><p className="text-xs font-bold uppercase tracking-wider text-violet-500">Market radar</p>{radarMode === "needs" && marketRadar.needs.map((code) => <PositionBadge key={code} position={code} />)}</div><div className="inline-flex rounded-lg border border-violet-200 bg-white p-1 dark:border-violet-500/30 dark:bg-gray-900"><button type="button" onClick={() => setRadarMode("needs")} className={`rounded-md px-2.5 py-1 text-[10px] font-black transition ${radarMode === "needs" ? "bg-violet-600 text-white" : "text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800"}`}>My Needs</button><button type="button" onClick={() => setRadarMode("all")} className={`rounded-md px-2.5 py-1 text-[10px] font-black transition ${radarMode === "all" ? "bg-violet-600 text-white" : "text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800"}`}>All Positions</button></div></div>
-          {(radarMode === "needs" ? marketRadar.candidates : marketRadar.allCandidates).length ? <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{(radarMode === "needs" ? marketRadar.candidates : marketRadar.allCandidates).map((row) => <article key={row.id} className="flex min-w-0 flex-col rounded-xl border border-violet-100 bg-violet-50/50 p-3 dark:border-violet-500/20 dark:bg-violet-500/[0.06]"><div className="flex min-w-0 items-center gap-2"><PositionBadge position={position(row)} /><Link to={`/player-profile?playerId=${row.player?.player_api_id}`} className="truncate text-sm font-bold text-gray-900 hover:text-violet-600 dark:text-white">{playerName(row)}</Link></div><p className="mt-1 truncate text-[11px] text-gray-500">{row.fantasy_team?.team_name} · {formatFantasyPoints(playerScore(row))} FPTS</p><p className="mt-1 text-[11px] font-semibold text-violet-700 dark:text-violet-300">{row.salary == null ? "No salary" : money.format(row.salary)} · {row.term_end_year === season ? "Expiring" : "1 year left"}</p><Link to={`/trade-manager?fromTeam=${teamId}&toTeam=${row.fantasy_team_id}&playerSeason=${row.id}&season=${season}`} className="mt-2 text-xs font-bold text-violet-600 hover:underline dark:text-violet-300">Explore offer →</Link></article>)}</div> : <p className="rounded-xl border border-dashed border-gray-200 p-4 text-center text-sm text-gray-500 dark:border-gray-700">No strong radar matches right now.</p>}
+          {(radarMode === "needs" ? marketRadar.candidates : marketRadar.allCandidates).length ? <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{(radarMode === "needs" ? marketRadar.candidates : marketRadar.allCandidates).map((row) => <article key={row.id} className="flex min-w-0 flex-col rounded-xl border border-violet-100 bg-violet-50/50 p-3 dark:border-violet-500/20 dark:bg-violet-500/[0.06]"><div className="flex min-w-0 items-center gap-2"><PositionBadge position={position(row)} /><Link to={`/player-profile?playerId=${row.player?.player_api_id}`} className="truncate text-sm font-bold text-gray-900 hover:text-violet-600 dark:text-white">{playerName(row)}</Link></div><p className="mt-1 truncate text-[11px] text-gray-500">{row.fantasy_team?.team_name} · {playerPoints(row)} FPTS</p><p className="mt-1 text-[11px] font-semibold text-violet-700 dark:text-violet-300">{row.salary == null ? "No salary" : money.format(row.salary)} · {row.term_end_year === season ? "Expiring" : "1 year left"}</p><Link to={`/trade-manager?fromTeam=${teamId}&toTeam=${row.fantasy_team_id}&playerSeason=${row.id}&season=${season}`} className="mt-2 text-xs font-bold text-violet-600 hover:underline dark:text-violet-300">Explore offer →</Link></article>)}</div> : <p className="rounded-xl border border-dashed border-gray-200 p-4 text-center text-sm text-gray-500 dark:border-gray-700">{!statsReady.skaters || !statsReady.goalies ? "NHL rankings are loading or temporarily unavailable." : "No strong radar matches right now."}</p>}
         </div>
       </section>
 

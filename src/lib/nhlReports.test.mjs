@@ -156,3 +156,16 @@ for (const seasonYear of [2026, 2027]) {
     assert.ok(calls.some((url) => new URL(url, "https://test.example").searchParams.get("start") === "5"));
   });
 }
+
+test('complete season baseline remains usable when the live snapshot is rate limited', async t => {
+  const built = await build({ entryPoints: ['src/lib/nhl.ts'], bundle: true, format: 'esm', platform: 'browser', write: false });
+  const stats = await import('data:text/javascript;base64,' + Buffer.from(built.outputFiles[0].text).toString('base64') + '#baseline-outage');
+  t.mock.method(globalThis, 'fetch', async path => {
+    if (path.includes('/live-snapshot/')) return Response.json({ error: 'limited' }, { status: 429, headers: { 'Retry-After': '60' } });
+    return Response.json({ data: [{ playerId: 8470001, gamesPlayed: 20, goals: 5 }], total: 1 });
+  });
+  const result = await stats.fetchNhlLiveSeasonStats(2027);
+  assert.equal(result.skaters[0].playerId, 8470001);
+  assert.equal(result.skaters[0].goals, 5);
+  assert.equal(result.goalies[0].playerId, 8470001);
+});

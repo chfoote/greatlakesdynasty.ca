@@ -408,3 +408,74 @@ implementation with runtime-canceled HTTP 500 before passing with the correction
 Production spot checks returned JSON 200 for a small summary query; exact failed
 query checks were blocked with 403, so attribution of every reported 500/502 to
 this bug is not confirmed. Existing CSS/bundle warnings remain.
+
+## Saved NHL data and background refresh
+
+Complete, assembled NHL skater/goalie datasets are now saved in the browser under
+`gld:complete-nhl:v1:` after all required report pages pass completeness checks.
+This cache stores only public NHL statistics, not Supabase data or fantasy rosters.
+It retains same-season/date datasets for up to seven days, with at most 24 persisted
+entries and a three-megabyte serialized budget. Eviction only removes its own keys.
+Private/full/disabled browser storage still permits in-memory use.
+
+A fresh copy is reused without fetching. An expired but retained complete copy is
+returned immediately and one background refresh starts. Network errors, 429s,
+invalid/incomplete reports, or an older shared copy never overwrite a newer complete
+local copy. A failed refresh pauses that dataset's next attempt for at least one
+minute; the existing NHL client continues to respect longer Retry-After cooldowns.
+Visible, online stats pages check their local datasets once per minute; actual
+requests still depend on cache expiry, in-flight deduplication and cooldowns.
+Background refresh events update only NHL display state, without rerunning league
+metadata queries or existing prospect-right maintenance operations.
+
+Standings, team, skater, goalie and Front Office pages reuse these saved datasets.
+A notice reports saved data and its update timestamp for the page's season/date.
+An existing full live-season snapshot survives live fetch failures. If none exists,
+a complete baseline through yesterday can be displayed with a specific notice;
+failed live data is never interpreted as zero games or added twice to season totals.
+Daily snapshots are keyed by date, so yesterday's results cannot masquerade as today.
+
+The Worker also retains a separate last-successful JSON copy in its existing named
+Cloudflare Cache API storage. On expiry, it can immediately return that copy with
+`X-NHL-Stale: 1`, `X-NHL-Saved-At`, and `Cache-Control: no-store`, while `waitUntil`
+refreshes it. Errors are never written over this copy. Without a background context,
+it is available as a fallback after an upstream failure. Retention is six hours for
+live snapshots, one day for scoreboards, and seven days for other public NHL routes.
+Full path and query string remain part of identity. The frontend carries the saved
+source age through report assembly instead of labeling a stale HTTP 200 as fresh.
+
+This shared edge cache is best-effort, per Cloudflare data centre, and may be evicted.
+It is not permanent storage. No KV namespace, paid plan, new binding, credential,
+production environment variable, database change or manual deployment is required.
+A visitor with no retained browser or edge copy still needs one successful NHL load;
+this change cannot invent missing statistics during an upstream outage.
+
+Local validation passed: 89 unit tests (49 NHL/frontend and 40 Worker), production
+build including frontend/configuration/Worker TypeScript, real workerd integration
+covering shared saved fallback and background failure, and Wrangler deployment dry
+run. Existing CSS minification and large-bundle warnings remain. Signed-in production
+UI behavior still requires post-deployment checking. No commit, push, new Cloudflare
+resource, or production deployment was performed for this follow-up.
+
+## Front Office landing-page loading
+
+The initial Front Office render waited on all four current/prior NHL datasets in
+one Promise.all with league metadata. Cold, paginated NHL loads and pacing could
+therefore hold the entire landing page behind its loading placeholder. Historical
+draft/prospect scans also started ahead of these initial stats requests.
+
+The dashboard now renders when its existing account/league metadata reads finish;
+NHL loading is separate and cannot fail the entire page. Current skater and goalie
+results publish independently before prior-season fallback requests complete. The
+existing historical override order is preserved (current season takes precedence).
+Missing player scores show an em dash rather than zero, and market rankings wait
+for both required current datasets. Prospect scans start after current stats are
+available. Unassigned users do not start this NHL work, and leaving the page avoids
+starting optional historical requests. No Supabase query definitions, database
+writes, authentication, contract math or fantasy scoring formulas were changed.
+
+Four new regression tests cover independent current-result publication, historical
+precedence, errors preserving good data, and cancellation of optional work. The NHL
+suite now has 53 passing tests; the unchanged Worker suite has 40 passing tests.
+The production build/TypeScript checks and deployment dry run passed. Actual signed-in
+production load time has not been measured. All follow-up changes remain local.

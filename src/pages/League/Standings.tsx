@@ -1,3 +1,4 @@
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
 import { isNhlRateLimit } from "../../../shared/nhl-policy";
 import { useEffect, useMemo, useState } from "react";
@@ -163,6 +164,31 @@ export default function Standings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const revision = useNhlDataRevision(statsView === 'season'
+    ? [`live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
+    : [`live:${getNhlStatsDate(statsView === 'yesterday' ? -1 : 0)}`]);
+  useEffect(() => {
+    if (!revision) return;
+    let active = true;
+    const request = statsView === 'season'
+      ? (selectedSeason === CURRENT_LEAGUE_SEASON ? fetchNhlLiveSeasonStats(selectedSeason)
+        : Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
+          .then(([skaters, goalies]) => ({ skaters, goalies })))
+      : fetchNhlDailyStats(getNhlStatsDate(statsView === 'yesterday' ? -1 : 0));
+    request.then(stats => {
+      if (!active) return;
+      if (statsView === 'season') {
+        setSkaterStats(new Map(stats.skaters.map(row => [String(row.playerId), row])));
+        setGoalieStats(new Map(stats.goalies.map(row => [String(row.playerId), row])));
+        setError('');
+      } else {
+        setDailySkaterStats(new Map(stats.skaters.map(row => [String(row.playerId), row])));
+        setDailyGoalieStats(new Map(stats.goalies.map(row => [String(row.playerId), row])));
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [revision, selectedSeason, statsView]);
+
   useEffect(() => {
     let active = true;
 
@@ -180,17 +206,16 @@ export default function Standings() {
         })
       : finalizedStatsRequest();
 
-    Promise.all([
-      fetchFantasyTeams(),
-      fetchTeamBrandingHistory(),
-      fetchPlayerSeasonsBySeason(selectedSeason),
-      statsRequest,
-    ])
-      .then(([teamRows, brandingRows, seasonRows, stats]) => {
+    const metadataRequest = Promise.all([
+      fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason),
+    ]).then(([teamRows, brandingRows, seasonRows]) => {
+      if (!active) return;
+      setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
+      setPlayerSeasons(seasonRows);
+    });
+    Promise.all([metadataRequest, statsRequest])
+      .then(([, stats]) => {
         if (!active) return;
-
-        setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
-        setPlayerSeasons(seasonRows);
         setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
         setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
       })
@@ -219,6 +244,7 @@ export default function Standings() {
         if (!active) return;
         setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
         setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
+        setError("");
       } catch {
         // Keep the most recently loaded composite if a live refresh fails.
         return false;

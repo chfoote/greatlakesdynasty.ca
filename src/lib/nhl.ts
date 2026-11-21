@@ -1,3 +1,5 @@
+import { inheritNhlFreshness } from "./nhlFreshness";
+import { savedNhl, validPlayerRows, NhlBaselineAvailable } from "./nhlSaved";
 import { nhlStatsDate } from "../../shared/nhl-live";
 import { fetchNhlLiveSnapshot } from "./nhlLive";
 import { nhlFetch } from "./nhlRequest";
@@ -228,7 +230,7 @@ export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ sk
       });
     });
   });
-  return { skaters: [...skaters.values()], goalies: [...goalies.values()] };
+  return inheritNhlFreshness({ skaters: [...skaters.values()], goalies: [...goalies.values()] }, [snapshot]);
 }
 
 function mergeSkaterRecords(baseline: NhlSkaterRecord[], live: NhlSkaterRecord[]) {
@@ -285,20 +287,25 @@ function mergeGoalieRecords(baseline: NhlGoalieRecord[], live: NhlGoalieRecord[]
   return [...merged.values()];
 }
 
-export async function fetchNhlLiveSeasonStats(seasonYear: number) {
+async function loadNhlLiveSeasonStats(seasonYear: number) {
   const seasonId = (seasonYear - 1) * 10000 + seasonYear;
   const today = getNhlStatsDate();
   const yesterday = getNhlStatsDate(-1);
   const seasonStart = `${seasonYear - 1}-07-01`;
-  const [baselineSkaters, baselineGoalies, daily] = await Promise.all([
+  const [baselineSkaters, baselineGoalies] = await Promise.all([
     fetchNhlSkaterStatsForPeriod(seasonId, seasonStart, yesterday),
     fetchNhlGoalieStatsForPeriod(seasonId, seasonStart, yesterday),
-    fetchNhlDailyStats(today),
   ]);
-  return {
+  let daily: { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] };
+  try { daily = await fetchNhlDailyStats(today); }
+  catch {
+    throw new NhlBaselineAvailable(inheritNhlFreshness({ skaters: baselineSkaters, goalies: baselineGoalies }, [baselineSkaters, baselineGoalies]),
+      `Live NHL updates unavailable. Season totals include completed games through ${yesterday}.`);
+  }
+  return inheritNhlFreshness({
     skaters: mergeSkaterRecords(baselineSkaters, daily.skaters),
     goalies: mergeGoalieRecords(baselineGoalies, daily.goalies),
-  };
+  }, [baselineSkaters, baselineGoalies, daily]);
 }
 
 export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
@@ -360,7 +367,7 @@ function fetchPlayerBios(position: "skater" | "goalie", seasonId: number) {
   return request;
 }
 
-export async function fetchNhlSkaterStats(
+async function loadNhlSkaterStats(
   seasonId = NHL_SEASON_ID,
 ): Promise<NhlSkaterRecord[]> {
   const cached = skaterStatsCache.get(seasonId);
@@ -376,13 +383,13 @@ export async function fetchNhlSkaterStats(
       const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
       const faceoffsByPlayer = new Map(faceoffs.map((row) => [row.playerId, row]));
       const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
-      return summary.map((row) => ({
+      return inheritNhlFreshness(summary.map((row) => ({
         ...row,
         blockedShots: realtimeByPlayer.get(row.playerId)?.blockedShots ?? 0,
         hits: realtimeByPlayer.get(row.playerId)?.hits ?? 0,
         totalFaceoffWins: faceoffsByPlayer.get(row.playerId)?.totalFaceoffWins ?? 0,
         birthDate: biosByPlayer.get(row.playerId)?.birthDate,
-      }));
+      })), [summary, realtime, faceoffs]);
     })
     .catch((error) => {
       skaterStatsCache.delete(seasonId);
@@ -436,7 +443,7 @@ export function getSkaterScore(record: NhlSkaterRecord) {
   );
 }
 
-export async function fetchNhlGoalieStats(
+async function loadNhlGoalieStats(
   seasonId = NHL_SEASON_ID,
 ): Promise<NhlGoalieRecord[]> {
   const cached = goalieStatsCache.get(seasonId);
@@ -448,7 +455,7 @@ export async function fetchNhlGoalieStats(
     ])
     .then(([summary, bios]) => {
       const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
-      return summary.map((row) => ({ ...row, birthDate: biosByPlayer.get(row.playerId)?.birthDate }));
+      return inheritNhlFreshness(summary.map((row) => ({ ...row, birthDate: biosByPlayer.get(row.playerId)?.birthDate })), [summary]);
     })
     .catch((error) => {
       goalieStatsCache.delete(seasonId);
@@ -458,7 +465,7 @@ export async function fetchNhlGoalieStats(
   return request;
 }
 
-export async function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+async function loadNhlSkaterStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
   const key = `${seasonId}:${startDate}:${endDate}`;
   const cached = skaterPeriodCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.request;
@@ -473,14 +480,14 @@ export async function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: 
       const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
       const faceoffsByPlayer = new Map(faceoffs.map((row) => [row.playerId, row]));
       const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
-      return summary.map((row) => ({
+      return inheritNhlFreshness(summary.map((row) => ({
         ...row,
         teamAbbrevs: row.teamAbbrevs || "",
         blockedShots: realtimeByPlayer.get(row.playerId)?.blockedShots ?? 0,
         hits: realtimeByPlayer.get(row.playerId)?.hits ?? 0,
         totalFaceoffWins: faceoffsByPlayer.get(row.playerId)?.totalFaceoffWins ?? 0,
         birthDate: biosByPlayer.get(row.playerId)?.birthDate,
-      }));
+      })), [summary, realtime, faceoffs]);
     })
     .catch((error) => {
       skaterPeriodCache.delete(key);
@@ -490,7 +497,7 @@ export async function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: 
   return request;
 }
 
-export async function fetchNhlGoalieStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+async function loadNhlGoalieStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
   const key = `${seasonId}:${startDate}:${endDate}`;
   const cached = goaliePeriodCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.request;
@@ -501,7 +508,7 @@ export async function fetchNhlGoalieStatsForPeriod(seasonId: number, startDate: 
   ])
     .then(([rows, bios]) => {
       const biosByPlayer = new Map(bios.map((row) => [row.playerId, row]));
-      return rows.map((row) => ({ ...row, teamAbbrevs: row.teamAbbrevs || "", birthDate: biosByPlayer.get(row.playerId)?.birthDate }));
+      return inheritNhlFreshness(rows.map((row) => ({ ...row, teamAbbrevs: row.teamAbbrevs || "", birthDate: biosByPlayer.get(row.playerId)?.birthDate })), [rows]);
     })
     .catch((error) => {
       goaliePeriodCache.delete(key);
@@ -534,4 +541,31 @@ export function formatFantasyPoints(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+export function fetchNhlSkaterStats(seasonId = NHL_SEASON_ID) {
+  return savedNhl<NhlSkaterRecord[]>(`skaters:${seasonId}`, () => loadNhlSkaterStats(seasonId),
+    (value): value is NhlSkaterRecord[] => validPlayerRows(value));
+}
+
+export function fetchNhlGoalieStats(seasonId = NHL_SEASON_ID) {
+  return savedNhl<NhlGoalieRecord[]>(`goalies:${seasonId}`, () => loadNhlGoalieStats(seasonId),
+    (value): value is NhlGoalieRecord[] => validPlayerRows(value));
+}
+
+export function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+  return savedNhl<NhlSkaterRecord[]>(`skaters:${seasonId}:${startDate}:${endDate}`, () => loadNhlSkaterStatsForPeriod(seasonId, startDate, endDate),
+    (value): value is NhlSkaterRecord[] => validPlayerRows(value));
+}
+
+export function fetchNhlGoalieStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+  return savedNhl<NhlGoalieRecord[]>(`goalies:${seasonId}:${startDate}:${endDate}`, () => loadNhlGoalieStatsForPeriod(seasonId, startDate, endDate),
+    (value): value is NhlGoalieRecord[] => validPlayerRows(value));
+}
+
+export function fetchNhlLiveSeasonStats(seasonYear: number) {
+  return savedNhl<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }>(`live-season:${seasonYear}`,
+    () => loadNhlLiveSeasonStats(seasonYear),
+    (value): value is { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] } => Boolean(value && typeof value === 'object'
+      && 'skaters' in value && 'goalies' in value && validPlayerRows(value.skaters) && validPlayerRows(value.goalies)));
 }

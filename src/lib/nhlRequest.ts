@@ -114,6 +114,9 @@ export function createNhlClient(options: Options = {}) {
         const age = Math.max(Number(result.headers.get("Age")) || 0,
           Number.isFinite(responseDate) ? Math.max(0, (now() - responseDate) / 1000) : 0,
           typeof generated === "number" ? Math.max(0, (now() - generated) / 1000) : 0);
+        if (result.headers.get("X-NHL-Stale") === "1") {
+          return new Response(body, { status: 200, headers: result.headers });
+        }
         const entry = { expires: now() + Math.max(0, nhlTtl(url, now(), payload) - age) * 1000, body };
         if (successful.size >= 100) successful.delete(successful.keys().next().value!);
         successful.set(key, entry);

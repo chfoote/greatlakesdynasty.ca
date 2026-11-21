@@ -59,7 +59,7 @@ test("identical concurrent requests make one upstream call", async (t) => {
   finish();
   const results = await Promise.all([a, b]);
   assert.deepEqual(await results[0].json(), await results[1].json());
-  assert.equal(f.puts(), 1);
+  assert.equal(f.puts(), 2);
 });
 
 test("429 is never cached; same-origin calls pause until Retry-After without retries", async (t) => {
@@ -148,4 +148,62 @@ test("upstream concurrency stays bounded", async (t) => {
   });
   await Promise.all(Array.from({ length: 16 }, (_, i) => f.worker.fetch(req(`${path}&offset=${i}`), env)));
   assert.equal(maximum, 4);
+});
+
+for (const status of [429, 500, 502]) {
+  test(`expired successful JSON is shared as an explicitly stale fallback after ${status}`, async t => {
+    const f = fixture();
+    let calls = 0;
+    t.mock.method(globalThis, 'fetch', async () => ++calls === 1
+      ? Response.json({ data: [{ playerId: 1 }], total: 1 })
+      : Response.json({ error: 'unavailable' }, { status, headers: { 'Retry-After': '60' } }));
+    await f.worker.fetch(req(path), env);
+    f.advance(300_001);
+    const result = await f.worker.fetch(req(path), env);
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get('X-NHL-Stale'), '1');
+    assert.equal(result.headers.get('X-NHL-Failure-Status'), String(status));
+    assert.equal(result.headers.get('Cache-Control'), 'no-store');
+    assert.equal(Number(result.headers.get('X-NHL-Saved-At')), start);
+    assert.deepEqual(await result.json(), { data: [{ playerId: 1 }], total: 1 });
+    assert.equal(f.puts(), 2); // No error/fallback write.
+    const differentQuery = await f.worker.fetch(req(path + '&start=100'), env);
+    assert.equal(differentQuery.status, status === 429 ? 429 : status);
+  });
+}
+
+test('shared saved data expires and malformed successes cannot replace it', async t => {
+  const f = fixture();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? Response.json({ data: [1] })
+    : new Response('invalid', { headers: { 'Content-Type': 'application/json' } }));
+  await f.worker.fetch(req(path), env);
+  f.advance(300_001);
+  assert.equal((await f.worker.fetch(req(path), env)).headers.get('X-NHL-Stale'), '1');
+  f.advance(7 * 86400_000);
+  assert.equal((await f.worker.fetch(req(path), env)).status, 502);
+  assert.equal(f.puts(), 2);
+});
+
+test('shared saved JSON returns immediately while waitUntil refreshes in the background', async t => {
+  const f = fixture();
+  let calls = 0, finish;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    if (calls === 1) return Response.json({ data: [1] });
+    return new Promise(resolve => { finish = resolve; });
+  });
+  await f.worker.fetch(req(path), env);
+  f.advance(300_001);
+  const work = [];
+  const result = await f.worker.fetch(req(path), env, { waitUntil: promise => work.push(promise) });
+  assert.equal(result.headers.get('X-NHL-Stale'), '1');
+  assert.deepEqual(await result.json(), { data: [1] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 2);
+  finish(Response.json({ data: [2] }));
+  await Promise.all(work);
+  const fresh = await f.worker.fetch(req(path), env);
+  assert.equal(fresh.headers.get('X-NHL-Stale'), null);
+  assert.deepEqual(await fresh.json(), { data: [2] });
 });

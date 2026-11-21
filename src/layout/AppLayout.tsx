@@ -2,6 +2,7 @@ import { SidebarProvider, useSidebar } from "../context/SidebarContext";
 import { Outlet } from "react-router";
 import AppHeader from "./AppHeader";
 import Backdrop from "./Backdrop";
+import NhlDataNotice from "../components/hockey/NhlDataNotice";
 import AppSidebar from "./AppSidebar";
 
 const LayoutContent: React.FC = () => {
@@ -20,6 +21,7 @@ const LayoutContent: React.FC = () => {
       >
         <AppHeader />
         <div className="p-4 mx-auto max-w-(--breakpoint-2xl) md:p-6">
+          <NhlDataNotice />
           <Outlet />
         </div>
       </div>

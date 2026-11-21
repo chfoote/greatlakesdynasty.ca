@@ -1,3 +1,4 @@
+import { savedKey, savedRetention, savedResponse } from "./saved.ts";
 import { nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
 import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
 import { createWorkerScheduler, WorkerQueueFullError } from "./scheduler.ts";
@@ -25,6 +26,8 @@ interface PublicCache {
   match(request: Request): Promise<Response | undefined>;
   put(request: Request, response: Response): Promise<void>;
 }
+
+interface BackgroundContext { waitUntil(work: Promise<unknown>): void; }
 
 interface WorkerOptions {
   cache?: () => Promise<PublicCache | undefined>;
@@ -59,7 +62,16 @@ export function createWorker(options: WorkerOptions = {}) {
   const cooldowns = new Map<string, number>();
   const getCache = options.cache ?? (async () =>
     typeof caches === "undefined" ? undefined : caches.open("gld-public-nhl-v1"));
-  async function handle(request: Request, env: Env, cacheEnabled = true): Promise<Response> {
+  async function remember(cache: PublicCache | undefined, key: Request, result: Response) {
+    if (!cache) return;
+    try {
+      const stored = result.clone();
+      stored.headers.set("X-NHL-Saved-At", String(now()));
+      stored.headers.set("Cache-Control", `public, max-age=${savedRetention(new URL(key.url).pathname)}`);
+      await cache.put(savedKey(key), stored);
+    } catch { /* Shared edge fallback is optional. */ }
+  }
+  async function handle(request: Request, env: Env, cacheEnabled = true, context?: BackgroundContext): Promise<Response> {
       const url = new URL(request.url);
       const route = routes.find(({ prefix }) =>
         url.pathname === prefix || url.pathname.startsWith(`${prefix}/`),
@@ -88,6 +100,18 @@ export function createWorker(options: WorkerOptions = {}) {
             const result = new Response(hit.body, hit);
             result.headers.set("X-NHL-Cache", "HIT");
             return result;
+          }
+          if (cache && context) {
+            const saved = await cache.match(savedKey(key));
+            const stale = saved && savedResponse(saved, undefined, now(), url.pathname);
+            if (stale) {
+              // waitUntil keeps this request's own timers/fetches alive after
+              // returning the saved JSON. Background errors never replace it.
+              context.waitUntil(handle(request, env, true).then(async result => {
+                await result.body?.cancel();
+              }).catch(() => {}));
+              return stale;
+            }
           }
         } catch { /* Edge cache availability must not break NHL routing. */ }
         const inFlight = pending.get(key.url);
@@ -172,7 +196,7 @@ export function createWorker(options: WorkerOptions = {}) {
               result.headers.set("Cache-Control", `public, max-age=${nhlTtl(url, now(), payload)}`);
               result.headers.set("X-NHL-Cache", "MISS");
               if (cache) {
-                try { await cache.put(key, result.clone()); }
+                try { await cache.put(key, result.clone()); await remember(cache, key, result); }
                 catch { /* A cache write failure must not hide valid NHL data. */ }
               }
             }
@@ -193,7 +217,7 @@ export function createWorker(options: WorkerOptions = {}) {
             "X-NHL-Cache": "MISS", "X-NHL-Source": "snapshot",
           } });
           if (cache && request.method === "GET") {
-            try { await cache.put(key, result.clone()); } catch { /* Cache is optional. */ }
+            try { await cache.put(key, result.clone()); await remember(cache, key, result); } catch { /* Cache is optional. */ }
           }
           return request.method === "HEAD" ? new Response(null, result) : result;
         } catch (error) {
@@ -218,7 +242,23 @@ export function createWorker(options: WorkerOptions = {}) {
       try { return fromSnapshot(await work); }
       finally { if (pending.get(key.url) === work) pending.delete(key.url); }
   }
-  return { fetch: (request: Request, env: Env) => handle(request, env) };
+  return { async fetch(request: Request, env: Env, context?: BackgroundContext) {
+    const result = await handle(request, env, true, context);
+    const url = new URL(request.url);
+    if (request.method !== "GET" || result.status < 400
+      || !routes.some(({ prefix }) => url.pathname === prefix || url.pathname.startsWith(prefix + "/"))
+      || [400, 404, 405].includes(result.status)) return result;
+    try {
+      const cache = await getCache();
+      const saved = await cache?.match(savedKey(request));
+      if (saved) {
+        const fallback = savedResponse(saved, result, now(), url.pathname);
+        if (fallback) { await result.body?.cancel(); return fallback; }
+      }
+    } catch { /* Keep the original error if shared storage is unavailable. */ }
+    return result;
+  } };
+
 }
 
 export default createWorker();

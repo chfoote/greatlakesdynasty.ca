@@ -1,3 +1,4 @@
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { useEffect, useMemo, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -72,6 +73,16 @@ export default function SkaterStats() {
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [sort, setSort] = useState<{ key: SkaterSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
+
+  const revision = useNhlDataRevision([`skaters:${nhlSeasonId(selectedSeason)}`]);
+  useEffect(() => {
+    if (!revision) return;
+    let active = true;
+    fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).then(data => {
+      if (active) { setRecords(data); setError(null); }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [revision, selectedSeason]);
 
   useEffect(() => {
     let active = true;

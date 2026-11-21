@@ -1,3 +1,4 @@
+import { markNhlSaved } from "./nhlFreshness.ts";
 import { nhlFetch } from "./nhlRequest.ts";
 import { NhlRateLimitError, retryAfterMs } from "../../shared/nhl-policy.ts";
 
@@ -32,6 +33,7 @@ export async function fetchCompleteNhlReport<T>(
   let expected: number | undefined;
   const seenPages = new Set<string>();
   let recovered = false;
+  let savedAt: number | undefined;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   for (let page = 0; page < 100; page++) {
@@ -50,6 +52,11 @@ export async function fetchCompleteNhlReport<T>(
     if (response.status === 429) throw new NhlRateLimitError(
       `NHL ${label} is temporarily rate limited (429). Please wait before refreshing; partial statistics were not used.`);
     if (!response.ok) throw new Error(`Unable to load NHL ${label} (${response.status})`);
+    if (response.headers.get("X-NHL-Stale") === "1") {
+      const timestamp = Number(response.headers.get("X-NHL-Saved-At"));
+      if (!Number.isFinite(timestamp) || timestamp <= 0) throw new Error("NHL saved report is missing its timestamp.");
+      savedAt = Math.min(savedAt ?? timestamp, timestamp);
+    }
     const payload: unknown = await response.json();
     if (!payload || typeof payload !== "object" || !("data" in payload) || !Array.isArray(payload.data)
       || !("total" in payload) || typeof payload.total !== "number"
@@ -72,7 +79,7 @@ export async function fetchCompleteNhlReport<T>(
     }
     seenPages.add(fingerprint);
     rows.push(...result.data);
-    if (rows.length === expected) return rows;
+    if (rows.length === expected) return savedAt ? markNhlSaved(rows, savedAt) : rows;
     if (!result.data.length) {
       throw new Error(`NHL ${label} is incomplete (${rows.length} of ${expected} records).`);
     }

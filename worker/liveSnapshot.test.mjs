@@ -25,7 +25,7 @@ test("one browser response bundles all game data and caches the complete snapsho
   assert.equal(payload.games.length, 2);
   assert.equal(payload.live, true);
   assert.equal(paths.length, 5);
-  assert.equal(entries.size, 1); // Per-game Cache API calls are avoided.
+  assert.equal(entries.size, 2); // Per-game Cache API calls are avoided.
   assert.equal((await worker.fetch(new Request(url), env)).headers.get("X-NHL-Cache"), "HIT");
   assert.equal(paths.length, 5);
 });

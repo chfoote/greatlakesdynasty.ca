@@ -1,3 +1,4 @@
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
 import { isNhlRateLimit } from "../../../shared/nhl-policy";
 import { useEffect, useMemo, useState } from "react";
@@ -609,6 +610,31 @@ export default function HockeyTeamDetail() {
     setSelectedSeason(year);
     setSearchParams({ season: String(year) }, { replace: true });
   }
+
+  const revision = useNhlDataRevision(statsView === 'season'
+    ? [`live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
+    : [`live:${getNhlStatsDate(statsView === 'yesterday' ? -1 : 0)}`]);
+  useEffect(() => {
+    if (!revision) return;
+    let active = true;
+    const request = statsView === 'season'
+      ? (selectedSeason === CURRENT_LEAGUE_SEASON ? fetchNhlLiveSeasonStats(selectedSeason)
+        : Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
+          .then(([skaters, goalies]) => ({ skaters, goalies })))
+      : fetchNhlDailyStats(getNhlStatsDate(statsView === 'yesterday' ? -1 : 0));
+    request.then(stats => {
+      if (!active) return;
+      if (statsView === 'season') {
+        setSkaters(new Map(stats.skaters.map(row => [String(row.playerId), row])));
+        setGoalies(new Map(stats.goalies.map(row => [String(row.playerId), row])));
+        setStatsError('');
+      } else {
+        setDailySkaters(new Map(stats.skaters.map(row => [String(row.playerId), row])));
+        setDailyGoalies(new Map(stats.goalies.map(row => [String(row.playerId), row])));
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [revision, selectedSeason, statsView]);
 
   useEffect(() => {
     setViewMode("lineup");

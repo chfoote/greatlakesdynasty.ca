@@ -7,6 +7,7 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 const built = await build({ entryPoints: ["worker/index.ts"], bundle: true, format: "esm", platform: "browser", write: false });
 let calls = 0;
 const statsStarts = [];
+let failSavedRequest = false;
 const mf = new Miniflare(convertV4MiniflareOptions({
   modules: true,
   script: built.outputFiles[0].text,
@@ -19,6 +20,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     calls++;
     if (new URL(request.url).hostname === "api.nhle.com") {
       statsStarts.push(Date.now());
+      if (failSavedRequest) return Response.json({ error: 'limited' }, { status: 429, headers: { 'Retry-After': '60' } });
       await new Promise((resolve) => setTimeout(resolve, 30));
       return Response.json({ data: [], total: 0 });
     }
@@ -88,7 +90,21 @@ try {
   await assertJson(await mf.dispatchFetch("https://league.example/nhl-api/goalie/summary?limit=1"));
   assert.equal(statsStarts.length, 8);
   assert.ok(statsStarts[1] - statsStarts[0] >= 1000);
-  console.log("PASS: real workerd cache, concurrent snapshots and six distinct reports, paced stats, 429 cooldown, and asset delegation.");
+  // Expire only the primary entry; the separate shared saved copy survives.
+  const savedUrl = 'https://league.example/nhl-api/skater/summary?test=stale-runtime';
+  await assertJson(await mf.dispatchFetch(savedUrl));
+  const cache = await (await mf.getCaches()).open('gld-public-nhl-v1');
+  assert.equal(await cache.delete(savedUrl), true);
+  failSavedRequest = true;
+  const savedResult = await mf.dispatchFetch(savedUrl);
+  assert.equal(savedResult.headers.get('X-NHL-Stale'), '1');
+  await assertJson(savedResult);
+  // Allow the waitUntil refresh to record its 429 without storing an error.
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  const stillSaved = await mf.dispatchFetch(savedUrl);
+  assert.equal(stillSaved.headers.get('X-NHL-Stale'), '1');
+  await assertJson(stillSaved);
+  console.log("PASS: real workerd cache, concurrent snapshots and six distinct reports, paced stats, 429 cooldown, shared saved fallback, and asset delegation.");
 } finally {
   await mf.dispose();
 }

@@ -1,3 +1,4 @@
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { useEffect, useMemo, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -65,6 +66,17 @@ export default function GoalieStats() {
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [sort, setSort] = useState<{ key: GoalieSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
+
+  const revision = useNhlDataRevision([`live-season:${selectedSeason}`, `goalies:${nhlSeasonId(selectedSeason)}`]);
+  useEffect(() => {
+    if (!revision) return;
+    let active = true;
+    const request = selectedSeason === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(selectedSeason).then(stats => stats.goalies)
+      : fetchNhlGoalieStats(nhlSeasonId(selectedSeason));
+    request.then(data => { if (active) { setRecords(data); setError(null); } }).catch(() => {});
+    return () => { active = false; };
+  }, [revision, selectedSeason]);
 
   useEffect(() => {
     let active = true;
