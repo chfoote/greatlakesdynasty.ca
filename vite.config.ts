@@ -5,6 +5,7 @@ import nhlWorker from "./worker/index";
 
 // https://vite.dev/config/
 export default defineConfig({
+  build: { manifest: true },
   server: {
     proxy: {
       "/nhl-api": {

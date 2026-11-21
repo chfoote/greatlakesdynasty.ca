@@ -59,3 +59,17 @@ test('leaving the page prevents optional historical requests from starting', asy
   });
   assert.equal(historicalCalls, 0);
 });
+
+test('covered current rosters skip historical NHL requests', async () => {
+  let historicalCalls = 0;
+  const published = [];
+  await loadFrontOfficeNhl({
+    currentSkaters: async () => [{ playerId: 1 }], currentGoalies: async () => [{ playerId: 2 }],
+    previousSkaters: async () => { historicalCalls++; return []; }, previousGoalies: async () => { historicalCalls++; return []; },
+    needsPreviousSkaters: rows => !rows.some(row => row.playerId === 1),
+    needsPreviousGoalies: rows => !rows.some(row => row.playerId === 2),
+    onSkaters: rows => published.push(rows), onGoalies: rows => published.push(rows), onError: error => {throw error;},
+  });
+  assert.equal(historicalCalls, 0);
+  assert.equal(published.length, 2);
+});

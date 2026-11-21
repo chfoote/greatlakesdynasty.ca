@@ -8,12 +8,15 @@ export async function loadFrontOfficeNhl<S extends Player, G extends Player>(opt
   onSkaters: (rows: S[]) => void; onGoalies: (rows: G[]) => void;
   onError: (error: unknown) => void;
   isActive?: () => boolean;
+  needsPreviousSkaters?: (rows: S[]) => boolean;
+  needsPreviousGoalies?: (rows: G[]) => boolean;
 }) {
-  async function load<T extends Player>(current: () => Promise<T[]>, previous: () => Promise<T[]>, publish: (rows: T[]) => void) {
+  async function load<T extends Player>(current: () => Promise<T[]>, previous: () => Promise<T[]>, publish: (rows: T[]) => void, needsPrevious?: (rows: T[]) => boolean) {
     try {
       const rows = await current();
       if (options.isActive?.() === false) return;
       publish(rows);
+      if (needsPrevious && !needsPrevious(rows)) return;
       const historical = await previous();
       if (options.isActive?.() === false) return;
       const merged = new Map(historical.map(row => [row.playerId, row]));
@@ -22,7 +25,7 @@ export async function loadFrontOfficeNhl<S extends Player, G extends Player>(opt
     } catch (error) { options.onError(error); }
   }
   await Promise.all([
-    load(options.currentSkaters, options.previousSkaters, options.onSkaters),
-    load(options.currentGoalies, options.previousGoalies, options.onGoalies),
+    load(options.currentSkaters, options.previousSkaters, options.onSkaters, options.needsPreviousSkaters),
+    load(options.currentGoalies, options.previousGoalies, options.onGoalies, options.needsPreviousGoalies),
   ]);
 }

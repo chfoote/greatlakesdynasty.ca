@@ -8,7 +8,7 @@ export type FarmRanking = { team: FantasyTeam; rank: number; eligible: number; n
 export type AgingProspect = { playerId: number; name: string; position: string; birthDate: string; birthday: string; age: number; draftYear: number; nhlTeam: string; headshot?: string; score: number };
 export type FarmInsights = { rankings: FarmRanking[]; agingByTeam: Map<number, AgingProspect[]> };
 
-let insightRequest: Promise<FarmInsights> | null = null;
+const insightRequests = new Map<string, Promise<FarmInsights>>();
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const pickName = (pick: NhlDraftPick) => [pick.firstName?.default, pick.lastName?.default].filter(Boolean).join(" ") || "Unknown Player";
 const age = (birthDate: string) => { const birth = new Date(`${birthDate}T00:00:00`); const now = new Date(); let value = now.getFullYear() - birth.getFullYear(); if (now.getMonth() < birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) value -= 1; return value; };
@@ -37,14 +37,20 @@ const prospectRightsTeam = (name: string, playerId: number | undefined, seasons:
   return latest && ["PROSPECT", "AP"].includes((latest.position || "").toUpperCase()) ? latest.fantasy_team_id : null;
 };
 
-export function fetchFarmInsights() {
-  if (insightRequest) return insightRequest;
-  insightRequest = Promise.all([
+export function fetchFarmInsights(teamId?: number) {
+  const key = teamId === undefined ? "league" : `aging:${teamId}`;
+  const cached = insightRequests.get(key);
+  if (cached) return cached;
+  // The Front Office only needs this team's aging alerts, not every team's
+  // rankings, photos, draft history and prospect lookups.
+  const draftYears = Array.from({ length: CURRENT_LEAGUE_SEASON - earliestDraftYear() }, (_, index) => CURRENT_LEAGUE_SEASON - 1 - index)
+    .filter(year => teamId === undefined || year <= earliestDraftYear() + 1);
+  const request = Promise.all([
     fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasons(),
-    Promise.all(Array.from({ length: CURRENT_LEAGUE_SEASON - earliestDraftYear() }, (_, index) => CURRENT_LEAGUE_SEASON - 1 - index).map(async (year) => ({ year, picks: await fetchNhlDraftPicks(year) }))),
+    Promise.all(draftYears.map(async (year) => ({ year, picks: await fetchNhlDraftPicks(year) }))),
     fetchNhlLiveSeasonStats(CURRENT_LEAGUE_SEASON),
   ]).then(async ([teams, branding, seasons, drafts, stats]) => {
-    const displayTeams = teams.map((team) => applyTeamBranding(team, branding, CURRENT_LEAGUE_SEASON));
+    const displayTeams = teams.filter(team => teamId === undefined || team.id === teamId).map((team) => applyTeamBranding(team, branding, CURRENT_LEAGUE_SEASON));
     const skaters = new Map(stats.skaters.map((row) => [normalize(row.skaterFullName), row]));
     const goalies = new Map(stats.goalies.map((row) => [normalize(row.goalieFullName), row]));
     const allRows = drafts.flatMap(({ year, picks }) => picks.map((pick) => {
@@ -69,14 +75,14 @@ export function fetchFarmInsights() {
       const depthIndex = Math.min(row.eligible, 25) / depthLeader;
       return { team: row.team, rank: 0, eligible: row.eligible, nhlActive: row.nhlActive, production: row.production, draftQuality, farmScore: productionIndex * 85 + draftQuality * 0.10 + depthIndex * 5, topProspects: row.topProspects };
     }).sort((a, b) => b.farmScore - a.farmScore || b.production - a.production || b.draftQuality - a.draftQuality).map((row, index) => ({ ...row, rank: index + 1 }));
-    const rankingsWithHeadshots = await Promise.all(rankingRows.map(async (row) => ({ ...row, topProspects: await Promise.all(row.topProspects.map(async (prospect) => {
+    const rankingsWithHeadshots = await Promise.all((teamId === undefined ? rankingRows : []).map(async (row) => ({ ...row, topProspects: await Promise.all(row.topProspects.map(async (prospect) => {
       if (!prospect.playerId) return prospect;
       try { const landing = await fetchNhlPlayerLanding(prospect.playerId); return landing.headshot ? { ...prospect, headshot: landing.headshot } : prospect; }
       catch { return prospect; }
     })) })));
     const agingByTeam = new Map<number, AgingProspect[]>();
     await Promise.all(displayTeams.map(async (team) => {
-      const candidates = rowsFor(team).filter((row) => !row.signed && row.year <= earliestDraftYear() + 1);
+      const candidates = rowsFor(team).filter((row) => !row.signed && row.year <= earliestDraftYear() + 1 && (!row.birthDate || age(row.birthDate) === 24));
       const resolved = await Promise.all(candidates.map(async (row) => {
         try {
           let playerId = row.playerId;
@@ -92,6 +98,8 @@ export function fetchFarmInsights() {
       agingByTeam.set(team.id, resolved.filter((row): row is AgingProspect => Boolean(row)).sort((a, b) => a.birthDate.localeCompare(b.birthDate)));
     }));
     return { rankings: rankingsWithHeadshots, agingByTeam };
-  }).catch((error) => { insightRequest = null; throw error; });
-  return insightRequest;
+  }).catch((error) => { insightRequests.delete(key); throw error; });
+  if (insightRequests.size >= 16) insightRequests.delete(insightRequests.keys().next().value!);
+  insightRequests.set(key, request);
+  return request;
 }

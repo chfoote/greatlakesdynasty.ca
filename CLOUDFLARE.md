@@ -516,3 +516,76 @@ Final local checks passed: 100 unit tests (60 NHL/frontend and 40 Worker), produ
 build including TypeScript checks, and Wrangler deployment dry run. Existing CSS and
 bundle-size warnings remain. No record-capture action, commit, push, or deployment
 was performed. Production and signed-in UI verification remain after publication.
+
+## Record Book photo requests
+
+The reported `/nhl-web-api/player/8478402/landing` 429 is a player-profile request
+used by the old record cards to discover a photo URL. Those optional requests share
+the NHL web/live origin's cooldown and can add avoidable traffic when many cards load.
+Record cards now use lazy images directly from NHL's static asset service, retaining
+their existing appearance and initials fallback. No profile API call is needed for
+these cards. The reported player's static image was checked read-only and returned
+HTTP 200 image/png with CDN caching headers. Other profile pages still use their
+normal player API data; this change does not replace real statistics with images.
+
+The existing 60 NHL/frontend tests, production build/TypeScript checks, component
+render smoke check (lazy image and safe initials fallback), and Wrangler dry run
+passed. No push or deployment was initiated for this additional change.
+
+## Measured performance pass
+
+All route pages were eagerly imported into one 2,334,637-byte initial JavaScript
+bundle (621,432 bytes gzipped). Routes now load their page code on demand, while the
+existing route JSX, protected layout and admin boundaries remain identical. A page
+load boundary gives an explicit refresh action for a failed chunk download instead
+of leaving a blank screen or retrying indefinitely. No route or feature was removed.
+
+Build-manifest measurements for JavaScript only, including static dependencies:
+
+| Load | Uncompressed bytes | Gzipped bytes |
+| --- | ---: | ---: |
+| Previous initial bundle | 2,334,637 | 621,432 |
+| New application shell | 523,398 | 153,950 |
+| New shell plus sign-in | 560,829 | 167,734 |
+| New shell plus Front Office | 591,098 | 175,823 |
+| New shell plus Record Book | 602,162 | 177,536 |
+
+The cold Front Office JavaScript transfer is about 72% smaller after gzip. These
+are bundle measurements, not a promise that production latency falls by that amount.
+CSS and data-transfer sizes are not included in this comparison. Vite's build
+manifest enables reproducing the entry/static-dependency calculation; generated
+build files remain ignored and are not committed.
+
+The Front Office core render now waits only for its roster, branding, penalties and
+retention reads after assignment lookup. Auction/trade activity, historical salary
+reads, NHL stats and prospect work run independently. Pending activity is labeled
+loading rather than shown as a false zero or an all-caught-up message. Historical
+NHL fallback is skipped when current statistics already cover the relevant roster.
+Farm insights on the landing page now fetch only its manager's team and the two
+oldest draft years needed for aging alerts, without league-wide ranking photos or
+other teams' prospect lookups. The dedicated farm-ranking pages keep full results.
+
+A real headless Chrome test renders the actual Front Office component with read-only
+fixtures: core reads take 100 ms, while NHL/activity/prior-year reads take 30 seconds.
+The prior component at commit 43a76cf7c3184bdd3a604c0c4e1cf17e77d8f0d0 failed the
+two-second display budget; the updated component showed team/cap/roster at roughly
+120 ms while optional reads remained pending. This is a controlled regression test,
+not a production Supabase/login timing measurement.
+
+Commands (Node 24; local Chrome/Chromium, CHROME_PATH may override the default):
+
+```sh
+npm run build
+npm run test:nhl
+npm run test:worker
+npm run test:frontoffice:runtime
+npm run test:routes:runtime
+npm run check:deploy
+```
+
+The browser tests block outbound connections with CSP, use temporary fresh browser
+profiles, and never sign in or contact Supabase. Built-route checks cover sign-in,
+unauthenticated record/admin routes, and a failed lazy page download. All 103 unit
+tests, production build/TypeScript, five browser checks, and deployment dry run passed.
+Existing CSS and large lazy-chunk warnings remain. Live production timing still needs
+verification after an approved publication. No commit, push, or deploy was initiated.
