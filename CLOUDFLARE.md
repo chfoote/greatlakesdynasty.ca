@@ -479,3 +479,40 @@ precedence, errors preserving good data, and cancellation of optional work. The 
 suite now has 53 passing tests; the unchanged Worker suite has 40 passing tests.
 The production build/TypeScript checks and deployment dry run passed. Actual signed-in
 production load time has not been measured. All follow-up changes remain local.
+
+## Record Book tab loading
+
+Each Record Book tab previously waited for one all-purpose loader: optional daily
+record tables, current stats, every roster season (including future contract years),
+and all trade/call-up date splits. A failed unrelated report could fail Contracts
+and every other tab. The default performance year was also hard-coded to 2026.
+
+The page now selects a loader section for each tab. Contracts uses league/contract
+records and stored roster positions without requiring NHL requests. Position leaders
+fetch only played/current season reports; franchise views additionally fetch bounded
+trade-period reports. Seasonal positional records use the selected/current season.
+Future seasons and future date ranges are excluded. Existing fantasy scoring,
+contract monetary calculations, and trade-date ownership credit remain in place.
+Optional rookie/history failures produce warnings; unavailable rookie rankings are
+suppressed instead of being presented as verified complete rankings.
+
+Complete read results are deduplicated and reused in memory by team, season, date,
+and section. Supabase data is not added to persistent browser storage. Failed NHL
+loads do not silently produce partial all-time totals. Prior successful in-session
+results can survive a failed refresh with a timestamp notice. Fast tab switches
+ignore obsolete results, historical movement comparisons wait for the main franchise
+records, and optional headshots only load for displayed players. A missing franchise
+now shows an error rather than leaving the page permanently loading.
+
+The existing admin record-capture action is not executed by these changes or tests.
+A guard prevents the saved-data display fallback from being written as fresh verified
+daily records, and a successful explicit capture invalidates the in-memory read cache.
+No database tables, migrations, credentials, authentication, or production data were
+changed. Seven regression tests use mocked read-only sources (database writes throw)
+to cover tab isolation, current/future season selection, contract values, franchise
+trade credit, deduplication, error handling, and stale-data write protection.
+
+Final local checks passed: 100 unit tests (60 NHL/frontend and 40 Worker), production
+build including TypeScript checks, and Wrangler deployment dry run. Existing CSS and
+bundle-size warnings remain. No record-capture action, commit, push, or deployment
+was performed. Production and signed-in UI verification remain after publication.

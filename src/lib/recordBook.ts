@@ -1,3 +1,6 @@
+import { CURRENT_LEAGUE_SEASON, FIRST_LEAGUE_SEASON } from "./leagueSeasons";
+import { nhlFreshness } from "./nhlFreshness";
+import { createLimiter } from "../../shared/nhl-policy";
 import { supabase } from "./supabase";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "./fantasyTeams";
 import { fetchPlayerSeasons, fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
@@ -98,7 +101,19 @@ function fantasySeasonForDate(date: string) {
 
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
-export async function fetchRecordBookData(teamId?: number | null, seasonYear?: number | null, asOfDate?: string) {
+export type RecordBookSection = "all" | "leaders" | "franchise" | "season" | "contracts";
+
+async function buildRecordBookData(teamId?: number | null, seasonYear?: number | null, asOfDate?: string, section: RecordBookSection = "all") {
+  const needsSeason = section === "all" || section === "season";
+  const needsLeaders = section === "all" || section === "leaders" || section === "franchise";
+  const needsFranchise = section === "all" || section === "franchise";
+  const warnings: string[] = [];
+  const emptyQuery = Promise.resolve({ data: [], error: null });
+  const limited = createLimiter(2);
+  const noteSaved = (value: unknown) => {
+    const freshness = nhlFreshness(value);
+    if (freshness?.message) warnings.push(`${freshness.message} Last updated: ${new Date(freshness.updatedAt).toLocaleString()}.`);
+  };
   let teamQuery = supabase.from("daily_team_performances").select("*");
   let playerQuery = supabase.from("daily_player_performances").select("*");
   let historyQuery = supabase.from("record_history").select("*").order("achieved_at", { ascending: false }).limit(50);
@@ -107,19 +122,24 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
   if (seasonYear) { teamQuery = teamQuery.eq("season_year", seasonYear); playerQuery = playerQuery.eq("season_year", seasonYear); }
   if (seasonYear) historyQuery = historyQuery.eq("season_year", seasonYear);
 
-  const performanceSeason = seasonYear || (asOfDate ? fantasySeasonForDate(asOfDate) : 2026);
+  const performanceSeason = seasonYear || (asOfDate ? fantasySeasonForDate(asOfDate) : CURRENT_LEAGUE_SEASON);
   const useDatedStats = Boolean(asOfDate && asOfDate < getNhlStatsDate());
   const seasonStart = `${performanceSeason - 1}-07-01`;
-  const performanceSkaters = useDatedStats ? fetchNhlSkaterStatsForPeriod(nhlSeasonId(performanceSeason), seasonStart, asOfDate!) : fetchNhlSkaterStats(nhlSeasonId(performanceSeason));
-  const performanceGoalies = useDatedStats ? fetchNhlGoalieStatsForPeriod(nhlSeasonId(performanceSeason), seasonStart, asOfDate!) : fetchNhlGoalieStats(nhlSeasonId(performanceSeason));
+  const performanceSkaters = !needsSeason ? Promise.resolve([] as NhlSkaterRecord[]) : useDatedStats ? fetchNhlSkaterStatsForPeriod(nhlSeasonId(performanceSeason), seasonStart, asOfDate!) : fetchNhlSkaterStats(nhlSeasonId(performanceSeason));
+  const performanceGoalies = !needsSeason ? Promise.resolve([] as NhlGoalieRecord[]) : useDatedStats ? fetchNhlGoalieStatsForPeriod(nhlSeasonId(performanceSeason), seasonStart, asOfDate!) : fetchNhlGoalieStats(nhlSeasonId(performanceSeason));
   const [{ data: teamDays, error: teamError }, { data: playerDays, error: playerError }, { data: history, error: historyError }, { data: rookies, error: rookieError }, teams, brandingHistory, allSeasons, transactions, awards, seasonSkaters, seasonGoalies] = await Promise.all([
-    teamQuery, playerQuery, historyQuery, supabase.from("rookie_eligibility").select("season_year,player_id").eq("season_year", performanceSeason), fetchFantasyTeams(true), fetchTeamBrandingHistory(), fetchPlayerSeasons(), fetchLeagueTransactions(), fetchPlayerAwards(seasonYear || undefined, false),
+    needsSeason ? teamQuery : emptyQuery, needsSeason ? playerQuery : emptyQuery, needsSeason ? historyQuery : emptyQuery,
+    needsSeason ? supabase.from("rookie_eligibility").select("season_year,player_id").eq("season_year", performanceSeason) : emptyQuery,
+    fetchFantasyTeams(true), fetchTeamBrandingHistory(), fetchPlayerSeasons(), fetchLeagueTransactions(),
+    needsSeason ? fetchPlayerAwards(seasonYear || undefined, false).catch(() => {
+      warnings.push("Award records could not be loaded; NHL performance records can still be shown."); return [];
+    }) : Promise.resolve([]),
     performanceSkaters, performanceGoalies,
   ]);
-  if (teamError) throw teamError;
-  if (playerError) throw playerError;
-  if (historyError) throw historyError;
-  if (rookieError) throw rookieError;
+  if (teamError || playerError) warnings.push("Stored daily performances are unavailable; current seasonal NHL records can still be shown.");
+  if (historyError) warnings.push("Stored record history is unavailable.");
+  if (rookieError) warnings.push("Rookie eligibility could not be loaded; rookie records are temporarily unavailable.");
+  noteSaved(seasonSkaters); noteSaved(seasonGoalies);
   const dailyTeams = (teamDays || []) as DailyTeamPerformance[];
   const dailyPlayers = (playerDays || []) as DailyPlayerPerformance[];
   const teamMap = new Map(teams.map((team) => [team.id, team]));
@@ -164,8 +184,8 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
     const played = positionRows.filter((item) => item.code === positionCode && item.gamesPlayed > 0);
     const top = [...played].sort((a, b) => b.score - a.score)[0];
     const lowest = [...played].sort((a, b) => a.score - b.score)[0];
-    const rookie = [...played].filter((item) => rookieIds.has(item.row.player_id)).sort((a, b) => b.score - a.score)[0];
-    const addSeasonPlayer = (item: typeof top, key: string, label: string) => {
+    const rookie = rookieError ? undefined : [...played].filter((item) => rookieIds.has(item.row.player_id)).sort((a, b) => b.score - a.score)[0];
+    const addSeasonPlayer = (item: typeof top | undefined, key: string, label: string) => {
       if (!item) return;
       entries.push({ key, category: "Player Performance", label, value: item.score, formattedValue: `${number.format(item.score)} FPTS`, holder: playerName(item.row), team: item.row.fantasy_team_id ? teamMap.get(item.row.fantasy_team_id) || null : null, playerId: item.row.player?.player_api_id || undefined, dateLabel: `${item.gamesPlayed} GP · Season ${performanceSeason}`, verification: "verified" });
     };
@@ -190,17 +210,26 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
     const skater = skaterMap.get(apiId);
     const goalie = goalieMap.get(apiId);
     const nhlPosition = skater?.positionCode === "L" ? "LW" : skater?.positionCode === "R" ? "RW" : skater?.positionCode;
-    const position = (goalie ? "G" : nhlPosition || first.position || "C") as ContractRecord["position"];
+    const storedPosition = [...rows, ...allSeasons.filter(row => row.player_id === first.player_id)]
+      .map(row => (row.position || "").toUpperCase()).find(code => activePositions.has(code));
+    const position = (goalie ? "G" : nhlPosition || storedPosition || first.position || "C") as ContractRecord["position"];
     return { key, playerId: apiId, playerName: playerName(first), position, aav: first.salary || 0, years, startSeason, endSeason: first.term_end_year || startSeason, totalValue: (first.salary || 0) * years, signingTeam: signing?.fantasy_team || (first.fantasy_team_id ? teamMap.get(first.fantasy_team_id) || null : null), currentTeam: current.fantasy_team_id ? teamMap.get(current.fantasy_team_id) || null : null };
   }).filter((contract) => (!seasonYear || contract.startSeason === seasonYear) && (!teamId || contract.signingTeam?.id === teamId));
   const topContracts = (["C", "LW", "RW", "D", "G"] as const).flatMap((position) => contracts.filter((contract) => contract.position === position).sort((a, b) => b.totalValue - a.totalValue || b.aav - a.aav).slice(0, 5));
 
-  const leaderYears = [...new Set(allSeasons.map((row) => row.season_year))].filter((year) => (!seasonYear || year === seasonYear) && (!asOfDate || year <= performanceSeason)).sort((a, b) => a - b);
-  const leaderStats = await Promise.all(leaderYears.map(async (year) => {
-    if (year === performanceSeason) return { year, skaters: seasonSkaters, goalies: seasonGoalies };
-    const [skaters, goalies] = await Promise.all([fetchNhlSkaterStats(nhlSeasonId(year)), fetchNhlGoalieStats(nhlSeasonId(year))]);
+  const leaderYears = needsLeaders ? [...new Set(allSeasons.map((row) => row.season_year))]
+    .filter(year => year >= FIRST_LEAGUE_SEASON && year <= CURRENT_LEAGUE_SEASON
+      && (!seasonYear || year === seasonYear) && (!asOfDate || year <= performanceSeason)).sort((a, b) => a - b) : [];
+  const leaderStats = await Promise.all(leaderYears.map((year) => limited(async () => {
+    if (needsSeason && year === performanceSeason) return { year, skaters: seasonSkaters, goalies: seasonGoalies };
+    const cutoff = asOfDate && asOfDate < `${year}-06-30` ? asOfDate : undefined;
+    const [skaters, goalies] = await Promise.all([
+      cutoff ? fetchNhlSkaterStatsForPeriod(nhlSeasonId(year), `${year - 1}-07-01`, cutoff) : fetchNhlSkaterStats(nhlSeasonId(year)),
+      cutoff ? fetchNhlGoalieStatsForPeriod(nhlSeasonId(year), `${year - 1}-07-01`, cutoff) : fetchNhlGoalieStats(nhlSeasonId(year)),
+    ]);
+    noteSaved(skaters); noteSaved(goalies);
     return { year, skaters, goalies };
-  }));
+  })));
   const callUpDateBySeasonPlayer = new Map<string, string>();
   transactions.filter((transaction) => transaction.action === "called_up" && transaction.player_id).forEach((transaction) => {
     const key = `${transaction.season_year}:${transaction.player_id}`;
@@ -237,9 +266,10 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
     value.setUTCDate(value.getUTCDate() - 1);
     return value.toISOString().slice(0, 10);
   };
-  const franchiseLeaderRows = (await Promise.all(leaderYears.map(async (year) => {
+  const franchiseLeaderRows = (await Promise.all((needsFranchise ? leaderYears : []).map(async (year) => {
     const seasonStart = `${year - 1}-07-01`;
-    const seasonEnd = asOfDate && year === performanceSeason && asOfDate < `${year}-06-30` ? asOfDate : `${year}-06-30`;
+    const cutoff = asOfDate || getNhlStatsDate();
+    const seasonEnd = cutoff < `${year}-06-30` ? cutoff : `${year}-06-30`;
     const yearRows = leaderRows.filter((item) => item.row.season_year === year);
     const playerIds = new Set(yearRows.map((item) => item.row.player_id));
     const tradeDates = [...new Set(tradeMoves.filter((move) => playerIds.has(move.playerId) && move.date >= seasonStart && move.date <= seasonEnd).map((move) => move.date))].sort();
@@ -248,10 +278,11 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
     if (!boundaryDates.length) return yearRows.map((item) => ({ ...item, row: { ...item.row, fantasy_team_id: ownerOnDate(item.row.player_id, item.row.fantasy_team_id, seasonEnd) } })).filter((item) => item.row.fantasy_team_id);
     const starts = [seasonStart, ...boundaryDates];
     const periods = starts.map((start, index) => ({ start, end: index + 1 < starts.length ? previousDate(starts[index + 1]) : seasonEnd })).filter((period) => period.start <= period.end);
-    const periodStats = await Promise.all(periods.map(async (period) => {
+    const periodStats = await Promise.all(periods.map((period) => limited(async () => {
       const [skaters, goalies] = await Promise.all([fetchNhlSkaterStatsForPeriod(nhlSeasonId(year), period.start, period.end), fetchNhlGoalieStatsForPeriod(nhlSeasonId(year), period.start, period.end)]);
+      noteSaved(skaters); noteSaved(goalies);
       return { ...period, skaters: new Map(skaters.map((row) => [String(row.playerId), row])), goalies: new Map(goalies.map((row) => [String(row.playerId), row])) };
-    }));
+    })));
     return periodStats.flatMap((period) => yearRows.map((item) => {
       const skater = period.skaters.get(item.playerId);
       const goalie = period.goalies.get(item.playerId);
@@ -329,7 +360,29 @@ export async function fetchRecordBookData(teamId?: number | null, seasonYear?: n
   const mostHonours = [...honourCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   if (mostHonours) { const winner = monthly.find((award) => award.player_id === mostHonours[0]); entries.push({ key: "most-monthly-honours", category: "Awards & Leadership", label: "Most Monthly Honours", value: mostHonours[1], formattedValue: `${mostHonours[1]} honours`, holder: winner?.player?.full_name || "Unknown player", team: winner?.fantasy_team_id ? teamMap.get(winner.fantasy_team_id) || null : null, playerId: winner?.player?.player_api_id || undefined, verification: "verified" }); }
 
-  return { entries, contracts: topContracts, positionLeaders, franchisePositionLeaders, franchiseStatLines, dailyTeams, dailyPlayers, history: (history || []) as RecordHistoryEvent[], teams };
+  return { entries, contracts: topContracts, positionLeaders, franchisePositionLeaders, franchiseStatLines, dailyTeams, dailyPlayers, history: (history || []) as RecordHistoryEvent[], teams, warnings: [...new Set(warnings)] };
+}
+
+type RecordBookData = Awaited<ReturnType<typeof buildRecordBookData>>;
+const recordBookCache = new Map<string, { value: RecordBookData; savedAt: number }>();
+const recordBookPending = new Map<string, Promise<RecordBookData>>();
+export function fetchRecordBookData(teamId?: number | null, seasonYear?: number | null, asOfDate?: string, section: RecordBookSection = "all") {
+  const key = JSON.stringify([teamId ?? null, seasonYear ?? null, asOfDate ?? null, section]);
+  const saved = recordBookCache.get(key);
+  if (saved && Date.now() - saved.savedAt < 300_000) return Promise.resolve(saved.value);
+  const pending = recordBookPending.get(key);
+  if (pending) return pending;
+  const work = buildRecordBookData(teamId, seasonYear, asOfDate, section).then(value => {
+    if (recordBookCache.size >= 24) recordBookCache.delete(recordBookCache.keys().next().value!);
+    recordBookCache.set(key, { value, savedAt: Date.now() });
+    return value;
+  }).catch(error => {
+    if (saved && Date.now() - saved.savedAt < 86400_000) return { ...saved.value,
+      warnings: [...saved.value.warnings, `Record updates unavailable. Showing the complete records loaded at ${new Date(saved.savedAt).toLocaleString()}.`] };
+    throw error;
+  }).finally(() => { recordBookPending.delete(key); });
+  recordBookPending.set(key, work);
+  return work;
 }
 
 export async function syncDailyRecordSnapshot(date: string) {
@@ -338,6 +391,9 @@ export async function syncDailyRecordSnapshot(date: string) {
     fetchNhlSkaterStatsForPeriod(nhlSeasonId(seasonYear), date, date), fetchNhlGoalieStatsForPeriod(nhlSeasonId(seasonYear), date, date),
     fetchPlayerSeasonsBySeason(seasonYear), fetchSeasonLeadership(seasonYear), fetchLeagueTransactions(), fetchFantasyTeams(true),
   ]);
+  if (nhlFreshness(skaters)?.message || nhlFreshness(goalies)?.message) {
+    throw new Error("Cannot capture verified records while NHL data is saved or stale. Please retry after a successful refresh.");
+  }
   const leadershipMap = new Map(leadership.map((row) => [row.player_season_id, row.slot === "C" ? "C" : "A"]));
   const skaterMap = new Map(skaters.map((row) => [String(row.playerId), row]));
   const goalieMap = new Map(goalies.map((row) => [String(row.playerId), row]));
@@ -386,5 +442,6 @@ export async function syncDailyRecordSnapshot(date: string) {
     const team = teams.find((candidate) => candidate.id === teamDay.fantasy_team_id);
     await supabase.from("record_history").upsert({ record_key: "highest-daily-team-score", scope: "franchise", fantasy_team_id: teamDay.fantasy_team_id, season_year: seasonYear, holder_type: "team", holder_name: team?.team_name || "Unknown team", record_value: teamDay.fantasy_points, previous_value: previous || null, period_start: date, period_end: date, verification_status: "verified" }, { onConflict: "record_key,scope,fantasy_team_id,holder_type,holder_name,record_value,period_start,period_end" });
   }
+  recordBookCache.clear();
   return { players: rows.length, teams: teamRows.length, seasonYear };
 }

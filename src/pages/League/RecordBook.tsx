@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import type { RecordBookSection } from "../../lib/recordBook";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -8,9 +9,14 @@ import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, syncDailyRecordSnapshot, type
 import { fetchNhlPlayerLanding, getNhlStatsDate } from "../../lib/nhl";
 import PositionBadge from "../../components/hockey/PositionBadge";
 
-const seasons = [2027, 2026];
+import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
+const seasons = playedAndCurrentSeasons;
 const categories = ["Leaders – Position", "Leaders – Positional by Franchise", "Franchise Records", "Seasonal – Positional Records", "Contracts"] as const;
 type Category = typeof categories[number];
+const sections: Record<Category, RecordBookSection> = {
+  "Leaders – Position": "leaders", "Leaders – Positional by Franchise": "franchise",
+  "Franchise Records": "franchise", "Seasonal – Positional Records": "season", "Contracts": "contracts",
+};
 
 const playerPositionSections = [
   { code: "c", title: "Centers", labels: ["Top-Scoring C", "Lowest-Scoring C", "Top-Scoring Rookie C"] },
@@ -126,42 +132,69 @@ export default function RecordBook() {
   const [history, setHistory] = useState<RecordHistoryEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const loadGeneration = useRef(0);
+  const section = sections[category];
   const [syncDate, setSyncDate] = useState(getNhlStatsDate(-1));
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [headshots, setHeadshots] = useState<Map<string, string>>(new Map());
+  const headshotsRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     let active = true;
     if (!abbreviation) { setTeam(null); return; }
-    fetchFantasyTeamByAbbreviation(abbreviation).then((row) => { if (active) setTeam(row); }).catch((reason: Error) => { if (active) setError(reason.message); });
+    setTeam(null); setLoading(true); setError("");
+    fetchFantasyTeamByAbbreviation(abbreviation).then(row => {
+      if (!active) return;
+      setTeam(row);
+      if (!row) { setError("Franchise not found."); setLoading(false); }
+    }).catch((reason: Error) => { if (active) { setError(reason.message); setLoading(false); } });
     return () => { active = false; };
   }, [abbreviation]);
 
-  const load = async () => {
-    setLoading(true); setError("");
-    try { const result = await fetchRecordBookData(team?.id || null, season); setEntries(result.entries); setContracts(result.contracts); setPositionLeaders(result.positionLeaders); setFranchisePositionLeaders(result.franchisePositionLeaders); setFranchiseStatLines(result.franchiseStatLines); setFranchises(result.teams); setHistory(result.history); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load the Record Book."); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { if (abbreviation && !team) return; void load(); }, [season, team, abbreviation]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    setLoading(true); setError(""); setWarnings([]);
+    try {
+      const result = await fetchRecordBookData(team?.id || null, season, undefined, section);
+      if (generation !== loadGeneration.current) return;
+      setEntries(result.entries); setContracts(result.contracts); setPositionLeaders(result.positionLeaders);
+      setFranchisePositionLeaders(result.franchisePositionLeaders); setFranchiseStatLines(result.franchiseStatLines);
+      setFranchises(result.teams); setHistory(result.history); setWarnings(result.warnings);
+    } catch (reason) {
+      if (generation === loadGeneration.current) setError(reason instanceof Error ? reason.message : "Unable to load the Record Book.");
+    } finally { if (generation === loadGeneration.current) setLoading(false); }
+  }, [team?.id, season, section]);
 
   useEffect(() => {
-    if (category !== "Franchise Records" || (abbreviation && !team)) return;
-    let active = true;
+    if (abbreviation && (!team || team.abbreviation.toLowerCase() !== abbreviation.toLowerCase())) return;
+    void load();
+    return () => { loadGeneration.current++; };
+  }, [load, team, abbreviation]);
+
+  useEffect(() => {
     setPreviousFranchiseStatLines(null);
+    if (category !== "Franchise Records" || (abbreviation && !team)) return;
+    if (loading || error || !franchiseStatLines.length || (season !== null && season < CURRENT_LEAGUE_SEASON)) return;
+    let active = true;
     // Compare the live standings with the end of the hockey day before last
     // night's games. Using -1 here includes those games on both sides once the
     // 6 a.m. rollover has passed, which makes genuine movement disappear.
-    void fetchRecordBookData(team?.id || null, season, getNhlStatsDate(-2))
+    void fetchRecordBookData(team?.id || null, season, getNhlStatsDate(-2), "franchise")
       .then((result) => { if (active) setPreviousFranchiseStatLines(result.franchiseStatLines); })
       .catch(() => { if (active) setPreviousFranchiseStatLines(null); });
     return () => { active = false; };
-  }, [category, season, team, abbreviation]);
+  }, [category, season, team, abbreviation, loading, error, franchiseStatLines]);
 
   const playerEntries = useMemo(() => entries.filter((entry) => entry.category === "Player Performance"), [entries]);
-  const playerIds = useMemo(() => [...new Set([...playerEntries.map((entry) => entry.playerId), ...contracts.map((contract) => contract.playerId), ...positionLeaders.map((leader) => leader.playerId), ...franchisePositionLeaders.map((leader) => leader.playerId)].filter((id): id is string => Boolean(id)))], [playerEntries, contracts, positionLeaders, franchisePositionLeaders]);
+  const playerIds = useMemo(() => {
+    const ids = category === "Contracts" ? contracts.map(row => row.playerId)
+      : category === "Seasonal – Positional Records" ? playerEntries.map(row => row.playerId)
+      : category === "Leaders – Positional by Franchise" ? franchisePositionLeaders.filter(row => row.team?.id === selectedFranchiseId).map(row => row.playerId)
+      : category === "Leaders – Position" ? positionLeaders.map(row => row.playerId) : [];
+    return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  }, [category, contracts, playerEntries, positionLeaders, franchisePositionLeaders, selectedFranchiseId]);
   const title = team ? `${team.team_name} Record Book` : "League Record Book";
 
   useEffect(() => {
@@ -172,11 +205,11 @@ export default function RecordBook() {
   useEffect(() => {
     let active = true;
     playerIds.forEach((id) => {
-      if (headshots.has(id)) return;
-      void fetchNhlPlayerLanding(Number(id)).then((landing) => { if (active && landing.headshot) setHeadshots((current) => new Map(current).set(id, landing.headshot!)); }).catch(() => {});
+      if (headshotsRef.current.has(id)) return;
+      void fetchNhlPlayerLanding(Number(id)).then((landing) => { if (active && landing.headshot) { headshotsRef.current.set(id, landing.headshot); setHeadshots(new Map(headshotsRef.current)); } }).catch(() => {});
     });
     return () => { active = false; };
-  }, [playerIds, headshots]);
+  }, [playerIds]); // Headshots are optional and never block record loading.
 
   async function syncDateSnapshot() {
     setSyncing(true); setSyncMessage(""); setError("");
@@ -202,9 +235,10 @@ export default function RecordBook() {
 
       {isAdmin && !team && <section className="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="font-bold text-blue-950 dark:text-blue-200">Daily Record Snapshot</h2><p className="mt-1 text-xs text-blue-700 dark:text-blue-300">Capture or safely re-run a completed hockey date. Dates roll over at 6:00 AM Eastern.</p></div><div className="flex gap-2"><input type="date" max={getNhlStatsDate(-1)} value={syncDate} onChange={(event) => setSyncDate(event.target.value)} className="h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm dark:border-blue-500/30 dark:bg-gray-900" /><button type="button" disabled={syncing || !syncDate} onClick={() => void syncDateSnapshot()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{syncing ? "Capturing…" : "Capture Date"}</button></div></div>{syncMessage && <p className="mt-3 text-sm font-semibold text-success-700 dark:text-success-300">{syncMessage}</p>}</section>}
 
+      {warnings.length > 0 && <p role="status" className="text-sm text-gray-500 dark:text-gray-400">{warnings.join(" ")}</p>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700">{error}</p>}
       {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-64 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div>
-        : category === "Seasonal – Positional Records" ? <div className="space-y-5 sm:space-y-6">{playerPositionSections.map((section) => <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Seasonal Records` : "Seasonal Positional Records"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view records →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">{section.labels.map((label) => { const entry = playerEntries.find((candidate) => candidate.label === label); return <PlayerRecordCard key={label} entry={entry} label={label} position={section.code} headshot={entry?.playerId ? headshots.get(entry.playerId) : undefined} />; })}</div></section>)}</div>
+        : error ? null : category === "Seasonal – Positional Records" ? <div className="space-y-5 sm:space-y-6">{playerPositionSections.map((section) => <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Seasonal Records` : "Seasonal Positional Records"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view records →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">{section.labels.map((label) => { const entry = playerEntries.find((candidate) => candidate.label === label); return <PlayerRecordCard key={label} entry={entry} label={label} position={section.code} headshot={entry?.playerId ? headshots.get(entry.playerId) : undefined} />; })}</div></section>)}</div>
         : category === "Contracts" ? <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const positionContracts = contracts.filter((contract) => contract.position === section.code); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">{season ? `${season} Contract Book` : "All-Time Contract Book"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view contracts →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const contract = positionContracts[index]; return <ContractRecordCard key={contract?.key || `${section.code}-${index}`} contract={contract} rank={index + 1} position={section.code} headshot={contract ? headshots.get(contract.playerId) : undefined} />; })}</div></section>; })}</div>
         : category === "Franchise Records" ? (() => { const scoped = recordScope === "franchise" ? franchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : franchiseStatLines; const previousScoped = previousFranchiseStatLines ? (recordScope === "franchise" ? previousFranchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : previousFranchiseStatLines) : null; const scopeName = recordScope === "franchise" ? franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise" : "League All-Time"; const limit = recordScope === "franchise" ? 10 as const : LEAGUE_RECORD_LIMIT; return <div className="space-y-5 sm:space-y-6"><FranchiseRecordsTable title={`${scopeName} · Skaters`} lines={scoped.filter((line) => line.skater)} previousLines={previousScoped?.filter((line) => line.skater) ?? null} kind="skater" limit={limit} /><FranchiseRecordsTable title={`${scopeName} · Goalies`} lines={scoped.filter((line) => line.goalie)} previousLines={previousScoped?.filter((line) => line.goalie) ?? null} kind="goalie" limit={limit} /></div>; })()
         : <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const franchiseView = category === "Leaders – Positional by Franchise"; const source = franchiseView ? franchisePositionLeaders.filter((leader) => leader.team?.id === selectedFranchiseId) : positionLeaders; const positionRows = source.filter((leader) => leader.position === section.code).slice(0, 5); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Leaders` : "All-Time Leaders"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}{franchiseView ? ` · ${franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise"}` : ""}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view leaders →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const leader = positionRows[index]; return <LeaderCard key={leader?.key || `${section.code}-${index}`} leader={leader} rank={index + 1} position={section.code} headshot={leader ? headshots.get(leader.playerId) : undefined} franchiseView={franchiseView} />; })}</div></section>; })}</div>}
