@@ -137,11 +137,12 @@ export default function ManagerCommandCenter() {
           fetchTradeBlockListings(season).catch(() => []),
           fetchLeagueTransactions().catch(() => []),
           fetchTeamBrandingHistory().catch(() => []),
+          // Do not turn rate-limited reports into empty player maps and zero FPTS.
           Promise.all([
-            fetchNhlSkaterStats(nhlSeasonId(season)).catch(() => [] as NhlSkaterRecord[]),
-            fetchNhlGoalieStats(nhlSeasonId(season)).catch(() => [] as NhlGoalieRecord[]),
-            fetchNhlSkaterStats(nhlSeasonId(season - 1)).catch(() => [] as NhlSkaterRecord[]),
-            fetchNhlGoalieStats(nhlSeasonId(season - 1)).catch(() => [] as NhlGoalieRecord[]),
+            fetchNhlSkaterStats(nhlSeasonId(season)),
+            fetchNhlGoalieStats(nhlSeasonId(season)),
+            fetchNhlSkaterStats(nhlSeasonId(season - 1)),
+            fetchNhlGoalieStats(nhlSeasonId(season - 1)),
           ]),
         ]);
         if (!active) return;

@@ -1,3 +1,5 @@
+import { startNhlPolling } from "../../lib/nhlPolling";
+import { isNhlRateLimit } from "../../../shared/nhl-policy";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -172,7 +174,10 @@ export default function Standings() {
       fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
     ]).then(([skaters, goalies]) => ({ skaters, goalies }));
     const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(selectedSeason).catch(finalizedStatsRequest)
+      ? fetchNhlLiveSeasonStats(selectedSeason).catch((error: unknown) => {
+          if (isNhlRateLimit(error)) throw error;
+          return finalizedStatsRequest();
+        })
       : finalizedStatsRequest();
 
     Promise.all([
@@ -216,34 +221,39 @@ export default function Standings() {
         setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
       } catch {
         // Keep the most recently loaded composite if a live refresh fails.
+        return false;
       }
     };
-    const intervalId = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 30_000);
-    return () => { active = false; window.clearInterval(intervalId); };
+    const stop = startNhlPolling(refresh, "season");
+    return () => { active = false; stop(); };
   }, [statsView, selectedSeason]);
 
   useEffect(() => {
     if (statsView === "season") return;
     let active = true;
+    let requestedDate = "";
     const refresh = async () => {
       setDailyLoading(true);
       try {
         const date = getNhlStatsDate(statsView === "yesterday" ? -1 : 0);
+        if (requestedDate !== date) {
+          requestedDate = date;
+          setDailySkaterStats(new Map()); setDailyGoalieStats(new Map());
+        }
         const result = await fetchNhlDailyStats(date);
         if (!active) return;
         setDailySkaterStats(new Map(result.skaters.map((record) => [String(record.playerId), record])));
         setDailyGoalieStats(new Map(result.goalies.map((record) => [String(record.playerId), record])));
       } catch {
-        if (!active) return;
-        setDailySkaterStats(new Map());
-        setDailyGoalieStats(new Map());
+        // Preserve the last complete daily results during transient API failures.
+        return false;
       } finally {
         if (active) setDailyLoading(false);
       }
     };
     void refresh();
-    const intervalId = statsView === "today" ? window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 30_000) : null;
-    return () => { active = false; if (intervalId) window.clearInterval(intervalId); };
+    const stop = statsView === "today" ? startNhlPolling(refresh, "live") : () => {};
+    return () => { active = false; stop(); };
   }, [statsView, selectedSeason]);
 
   const displayedSkaterStats = statsView === "season" ? skaterStats : dailySkaterStats;

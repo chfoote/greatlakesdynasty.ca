@@ -17,7 +17,7 @@ test("frontend deduplicates concurrent and fresh requests, including encoded que
   for (const r of responses) assert.deepEqual(await r.json(), { data: [1] });
   await client(path);
   assert.equal(calls, 1);
-  time += 61000;
+  time += 301000;
   await client(path);
   assert.equal(calls, 2);
 });
@@ -82,10 +82,9 @@ test("public draft cache survives navigation/reloads, expires, and never stores 
   time += 604800001;
   await createNhlClient(options)(draft);
   assert.equal(calls, 2);
-  const priorSize = entries.size;
   const limited = createNhlClient({ ...options, fetcher: async () => Response.json({}, { status: 429 }) });
   await limited("/nhl-web-api/draft/picks/2021/all");
-  assert.equal(entries.size, priorSize);
+  assert.ok(![...entries.keys()].some((key) => key.includes("/draft/picks/2021/all")));
 });
 
 test("failed and malformed responses are not cached; private APIs cannot use client", async () => {
@@ -141,4 +140,87 @@ test("disabled draft storage cannot break fetching or in-memory caching", async 
   assert.equal((await client(draft)).status, 200);
   assert.equal((await client(draft)).status, 200);
   assert.equal(calls, 1);
+});
+
+function sharedBrowser() {
+  const entries = new Map();
+  const store = { getItem: (key) => entries.get(key), setItem: (key, value) => entries.set(key, value), removeItem: (key) => entries.delete(key) };
+  const locks = new Map();
+  const lock = (key, work) => {
+    const result = (locks.get(key) || Promise.resolve()).then(work);
+    locks.set(key, result.catch(() => {}));
+    return result;
+  };
+  return { entries, storage: () => store, lock };
+}
+
+test("two tabs share one season request and one fresh snapshot through public storage and locks", async () => {
+  const browser = sharedBrowser();
+  let calls = 0;
+  const options = { ...browser, now: () => start, fetcher: async () => {
+    calls++;
+    await new Promise((resolve) => setImmediate(resolve));
+    return Response.json({ data: [1] });
+  } };
+  const a = createNhlClient(options);
+  const b = createNhlClient(options);
+  await Promise.all([a(path), b(path), a(path), b(path)]);
+  assert.equal(calls, 1);
+  await createNhlClient(options)(path); // Navigation/reload also reuses the data.
+  assert.equal(calls, 1);
+});
+
+test("rate-limit cooldowns are shared across tabs without storing the error response", async () => {
+  const browser = sharedBrowser();
+  let calls = 0;
+  const options = { ...browser, now: () => start, fetcher: async () => {
+    calls++; return Response.json({}, { status: 429, headers: { "Retry-After": "120" } });
+  } };
+  await createNhlClient(options)(path);
+  assert.equal((await createNhlClient(options)(path + "&offset=1")).status, 429);
+  assert.equal(calls, 1);
+  assert.ok(![...browser.entries.keys()].some((key) => key.includes("/skater/summary")));
+});
+
+test("public cache stays within its storage budget and preserves authentication keys", async () => {
+  const browser = sharedBrowser();
+  browser.entries.set("sb-existing-auth", "untouched");
+  const client = createNhlClient({ ...browser, now: () => start, fetcher: async () => Response.json({ picks: [], text: "x".repeat(600_000) }) });
+  for (let year = 2017; year <= 2026; year++) await client(`/nhl-web-api/draft/picks/${year}/all`);
+  const index = JSON.parse(browser.entries.get("gld:public-nhl:v2:index"));
+  assert.ok(index.reduce((sum, entry) => sum + entry.size, 0) <= 2_000_000);
+  assert.equal(browser.entries.get("sb-existing-auth"), "untouched");
+});
+
+test("cached live snapshot age is deducted so layers do not extend its lifetime", async () => {
+  let now = start;
+  let calls = 0;
+  const client = createNhlClient({ now: () => now, fetcher: async () => {
+    calls++; return Response.json({ date: "2026-11-19", live: true, generatedAt: now - 20_000 });
+  } });
+  const snapshotPath = "/nhl-web-api/live-snapshot/2026-11-19";
+  await client(snapshotPath);
+  now += 9000;
+  await client(snapshotPath);
+  assert.equal(calls, 1);
+  now += 2000;
+  await client(snapshotPath);
+  assert.equal(calls, 2);
+});
+
+test("denied Web Locks fall back safely without replaying failed fetches", async (t) => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "locks");
+  t.after(() => {
+    if (previous) Object.defineProperty(navigator, "locks", previous);
+    else delete navigator.locks;
+  });
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async () => { throw Error("Lock access denied"); } } });
+  let calls = 0;
+  const client = createNhlClient({ fetcher: async () => { calls++; return Response.json({ data: [] }); } });
+  assert.equal((await client(path)).status, 200);
+  assert.equal(calls, 1);
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async (_name, work) => work() } });
+  const failed = createNhlClient({ fetcher: async () => { calls++; throw Error("offline"); } });
+  await assert.rejects(failed(path), /offline/);
+  assert.equal(calls, 2);
 });

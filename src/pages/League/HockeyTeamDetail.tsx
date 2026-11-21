@@ -1,3 +1,5 @@
+import { startNhlPolling } from "../../lib/nhlPolling";
+import { isNhlRateLimit } from "../../../shared/nhl-policy";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -661,7 +663,10 @@ export default function HockeyTeamDetail() {
       fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
     ]).then(([seasonSkaters, seasonGoalies]) => ({ skaters: seasonSkaters, goalies: seasonGoalies }));
     const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(selectedSeason).catch(finalizedStatsRequest)
+      ? fetchNhlLiveSeasonStats(selectedSeason).catch((error: unknown) => {
+          if (isNhlRateLimit(error)) throw error;
+          return finalizedStatsRequest();
+        })
       : finalizedStatsRequest();
     statsRequest
       .then((stats) => {
@@ -696,10 +701,11 @@ export default function HockeyTeamDetail() {
         setStatsError("");
       } catch {
         // Retain the latest composite if a live refresh temporarily fails.
+        return false;
       }
     };
-    const intervalId = window.setInterval(() => { if (document.visibilityState === "visible") void refreshSeasonStats(); }, 30_000);
-    return () => { active = false; window.clearInterval(intervalId); };
+    const stop = startNhlPolling(refreshSeasonStats, "season");
+    return () => { active = false; stop(); };
   }, [selectedSeason, statsView]);
 
   useEffect(() => {
@@ -773,42 +779,41 @@ export default function HockeyTeamDetail() {
         if (active) setLivePlayerIds(ids);
       } catch {
         if (active) setLivePlayerIds(new Set());
+        return false;
       }
     };
     void refreshLivePlayers();
-    const intervalId = window.setInterval(() => { if (document.visibilityState === "visible") void refreshLivePlayers(); }, 30_000);
-    const handleVisibility = () => { if (document.visibilityState === "visible") void refreshLivePlayers(); };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibility);
-    };
+    const stop = startNhlPolling(refreshLivePlayers, "live");
+    return () => { active = false; stop(); };
   }, []);
 
   useEffect(() => {
     if (statsView === "season") return;
     let active = true;
+    let requestedDate = "";
     const refreshDailyStats = async () => {
       setDailyStatsLoading(true);
       try {
-        const result = await fetchNhlDailyStats(getNhlStatsDate(statsView === "yesterday" ? -1 : 0));
+        const date = getNhlStatsDate(statsView === "yesterday" ? -1 : 0);
+        if (requestedDate !== date) {
+          requestedDate = date;
+          setDailySkaters(new Map()); setDailyGoalies(new Map());
+        }
+        const result = await fetchNhlDailyStats(date);
         if (active) {
           setDailySkaters(new Map(result.skaters.map((row) => [String(row.playerId), row])));
           setDailyGoalies(new Map(result.goalies.map((row) => [String(row.playerId), row])));
         }
       } catch {
-        if (active) {
-          setDailySkaters(new Map());
-          setDailyGoalies(new Map());
-        }
+        // Preserve the last complete daily results during transient API failures.
+        return false;
       } finally {
         if (active) setDailyStatsLoading(false);
       }
     };
     void refreshDailyStats();
-    const intervalId = statsView === "today" ? window.setInterval(() => { if (document.visibilityState === "visible") void refreshDailyStats(); }, 30_000) : null;
-    return () => { active = false; if (intervalId) window.clearInterval(intervalId); };
+    const stop = statsView === "today" ? startNhlPolling(refreshDailyStats, "live") : () => {};
+    return () => { active = false; stop(); };
   }, [statsView]);
 
   const byPosition = useMemo(() => roster.reduce<Record<string, PlayerSeasonWithRelations[]>>((groups, season) => {

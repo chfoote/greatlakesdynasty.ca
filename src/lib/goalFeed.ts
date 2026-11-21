@@ -1,4 +1,4 @@
-import { nhlFetch } from "./nhlRequest";
+import { fetchNhlLiveSnapshot } from "./nhlLive";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
@@ -333,11 +333,8 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
 
 export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; nightlyStars: GoalFeedPlayer[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; milestoneWatchPromise: Promise<MilestoneWatchItem[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
   const season = seasonForDate(date);
-  const [scoreResponse, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
-    nhlFetch(`/nhl-web-api/score/${date}`, { cache: "no-store" }).then(async (response) => {
-      if (!response.ok) throw new Error(`Unable to load NHL games (${response.status})`);
-      return response.json() as Promise<ScoreResponse>;
-    }),
+  const [snapshot, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
+    fetchNhlLiveSnapshot(date),
     fetchPlayerSeasonsBySeason(season),
     fetchFantasyTeams(true),
     fetchLeagueTransactions(),
@@ -345,17 +342,12 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
     fetchNhlDailyStats(date).catch(() => ({ skaters: [], goalies: [] })),
     date === getNhlStatsDate() ? fetchNhlLiveSeasonStats(season).catch(() => null) : Promise.resolve(null),
   ]);
+  const scoreResponse = snapshot.scoreboard as ScoreResponse;
   const games = scoreResponse.games ?? [];
-  const playByPlay = await Promise.all(games.map(async (game) => {
-    const [playResponse, boxscoreResponse] = await Promise.all([
-      nhlFetch(`/nhl-web-api/gamecenter/${game.id}/play-by-play`, { cache: "no-store" }),
-      nhlFetch(`/nhl-web-api/gamecenter/${game.id}/boxscore`, { cache: "no-store" }),
-    ]);
-    return {
-      game,
-      data: playResponse.ok ? await playResponse.json() as PlayByPlay : null,
-      boxscore: boxscoreResponse.ok ? await boxscoreResponse.json() as Boxscore : null,
-    };
+  const playByPlay = snapshot.games.map(({ game, playByPlay, boxscore }) => ({
+    game: game as ScoreGame,
+    data: playByPlay as PlayByPlay | null,
+    boxscore: boxscore as Boxscore | null,
   }));
   const gamePlayers = new Map<number, string>();
   playByPlay.forEach(({ data }) => (data?.rosterSpots ?? []).forEach((player) => {

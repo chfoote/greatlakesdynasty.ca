@@ -47,14 +47,43 @@ test("offset advances by actual rows even when provider caps every page", async 
   assert.equal(result.length, 5);
 });
 
-test("later-page 429 rejects incomplete data without retrying", async () => {
+test("later-page 429 rejects incomplete data without retrying when recovery is disabled", async () => {
   let calls = 0;
   await assert.rejects(fetchCompleteNhlReport(path, "summary", async () => {
     calls++;
     return calls === 1 ? Response.json({ data: [{ playerId: 1 }], total: 2 })
       : Response.json({ error: "limited" }, { status: 429, headers: { "Retry-After": "60" } });
-  }), /429/);
+  }, { recoverRateLimit: false }), /429/);
   assert.equal(calls, 2);
+});
+
+test("a short 429 cooldown resumes exactly the blocked page without restarting loaded pages", async () => {
+  const offsets = [];
+  const waits = [];
+  let calls = 0;
+  const rows = await fetchCompleteNhlReport(path, "summary", async (url) => {
+    calls++;
+    const offset = Number(new URL(url, "https://test.example").searchParams.get("start"));
+    offsets.push(offset);
+    if (calls === 2) return Response.json({}, { status: 429, headers: { "Retry-After": "1" } });
+    return Response.json({ data: [{ playerId: offset + 1 }], total: 2 });
+  }, { sleep: async (ms) => { waits.push(ms); } });
+  assert.deepEqual(offsets, [0, 1, 1]);
+  assert.deepEqual(waits, [2000]);
+  assert.equal(rows.length, 2);
+});
+
+test("repeated 429 and long cooldowns stop without endless retries or partial results", async () => {
+  let calls = 0;
+  await assert.rejects(fetchCompleteNhlReport(path, "summary", async () => {
+    calls++; return Response.json({}, { status: 429, headers: { "Retry-After": "1" } });
+  }, { sleep: async () => {} }), /429/);
+  assert.equal(calls, 2);
+  calls = 0;
+  await assert.rejects(fetchCompleteNhlReport(path, "summary", async () => {
+    calls++; return Response.json({}, { status: 429, headers: { "Retry-After": "120" } });
+  }, { sleep: async () => { throw Error("Long cooldown should not auto-retry"); } }), /429/);
+  assert.equal(calls, 1);
 });
 
 test("invalid success payloads cannot silently become an empty player list", async () => {
@@ -88,7 +117,10 @@ for (const seasonYear of [2026, 2027]) {
     t.mock.method(globalThis, "fetch", async (requestPath) => {
       const url = new URL(requestPath, "https://test.example");
       calls.push(url.pathname + url.search);
-      if (url.pathname.startsWith("/nhl-web-api/score/")) return Response.json({ games: [] });
+      if (url.pathname.startsWith("/nhl-web-api/live-snapshot/")) return Response.json({
+        date: url.pathname.split("/").at(-1), generatedAt: Date.now(), live: false,
+        nextRefreshAt: null, scoreboard: { games: [] }, games: [],
+      });
       const start = Number(url.searchParams.get("start"));
       const size = url.searchParams.get("limit") === "-1" ? 5 : 500;
       const data = ids.slice(start, start + size).map((playerId) => {
@@ -105,6 +137,12 @@ for (const seasonYear of [2026, 2027]) {
       : { skaters: await stats.fetchNhlSkaterStats(seasonId), goalies: await stats.fetchNhlGoalieStats(seasonId) };
     assert.equal(result.skaters.length, 120);
     assert.equal(result.goalies.length, 120);
+    if (seasonYear === 2027) {
+      await stats.fetchNhlDailyStats(stats.getNhlStatsDate());
+      await stats.fetchNhlLivePlayerIds();
+      assert.equal(calls.filter((url) => url.includes("/live-snapshot/")).length, 1);
+      assert.equal(calls.filter((url) => url.includes("/gamecenter/")).length, 0);
+    }
     // These are the same string-ID maps used by team pages and standings.
     const skaters = new Map(result.skaters.map((row) => [String(row.playerId), row]));
     const goalies = new Map(result.goalies.map((row) => [String(row.playerId), row]));

@@ -1,4 +1,12 @@
 // Public NHL data only. Never apply this policy to Supabase or other APIs.
+export class NhlRateLimitError extends Error {
+  readonly status = 429;
+}
+
+export function isNhlRateLimit(error: unknown) {
+  return error instanceof NhlRateLimitError;
+}
+
 export function nhlOrigin(pathname: string): string | undefined {
   for (const [prefix, origin] of [
     ["/nhl-api", "https://api.nhle.com"],
@@ -11,6 +19,12 @@ export function nhlOrigin(pathname: string): string | undefined {
 
 export function nhlTtl(url: URL, now = Date.now(), payload?: unknown): number {
   const date = new Date(now);
+  if (url.pathname.startsWith("/nhl-web-api/live-snapshot/")) {
+    const snapshot = payload as { date?: string; live?: boolean; nextRefreshAt?: number | null } | undefined;
+    if (snapshot?.date && now - Date.parse(`${snapshot.date}T00:00:00Z`) > 2 * 86400_000) return 86400;
+    if (snapshot?.live) return 30;
+    return snapshot?.nextRefreshAt ? Math.max(1, Math.min(300, Math.ceil((snapshot.nextRefreshAt - now) / 1000))) : 300;
+  }
   const draft = url.pathname.match(/^\/nhl-web-api\/draft\/picks\/(\d{4})\/all$/);
   if (draft) return Number(draft[1]) < date.getUTCFullYear() ? 7 * 86400 : 3600;
   if (url.pathname.startsWith("/nhl-search-api/")) return 3600;
@@ -20,7 +34,7 @@ export function nhlTtl(url: URL, now = Date.now(), payload?: unknown): number {
     const currentSeasonEnd = date.getUTCFullYear() + (date.getUTCMonth() >= 6 ? 1 : 0);
     if (season && Number(season[1]) < currentSeasonEnd) return 86400;
     if (url.pathname.endsWith("/bios")) return 6 * 3600;
-    return 60;
+    return 300;
   }
   const scoreDate = url.pathname.match(/\/score\/(\d{4}-\d{2}-\d{2})$/)?.[1];
   if (scoreDate && now - Date.parse(`${scoreDate}T00:00:00Z`) > 2 * 86400_000) return 6 * 3600;
@@ -55,4 +69,16 @@ export function createLimiter(maximum: number) {
       else active--;
     }
   };
+}
+
+export function createPacer(gapMs: number, now: () => number = Date.now,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  const serial = createLimiter(1);
+  let next = 0;
+  return <T>(work: () => Promise<T>): Promise<T> => serial(async () => {
+    const delay = next - now();
+    if (delay > 0) await sleep(delay);
+    next = now() + gapMs;
+    return work();
+  });
 }

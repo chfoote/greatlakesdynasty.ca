@@ -4,6 +4,66 @@ This repository targets **Workers Static Assets**, not Cloudflare Pages. The exi
 Worker is `greatlakesdynasty-ca` at
 `https://greatlakesdynasty-ca.chfoote.workers.dev`.
 
+## Proposed local request reductions
+
+These changes are local and require review before committing/publishing. They
+preserve the complete-player report reader already present in the checkout.
+
+- Current-season report caches and season-view polling use five minutes. Live
+  views update every 30 seconds while games are active. Historical report and
+  draft TTLs stay at one day and seven days respectively.
+- Team pages, daily standings, and Around the Horn share one public
+  `/nhl-web-api/live-snapshot/YYYY-MM-DD` response containing the scoreboard,
+  box scores, and play-by-play fields required by the app. No Supabase or private
+  data is included. Nothing is removed from the scoring inputs or formulas.
+- Upcoming games are not queried for box scores before starting. Polling sleeps
+  until scheduled puck drop; unknown/delayed schedules and initial failures use
+  five-minute checks. After the final result is confirmed once, network polling
+  stops. A local clock check resumes current-day views at the next league date;
+  explicitly selected historical dates remain historical.
+- Hidden/offline tabs do not poll and overlapping timer refreshes are prevented.
+  Failed refreshes retain the last complete daily results instead of clearing them.
+- A public-only browser cache shares results across navigation/reloads/tabs, with
+  up to 32 tracked entries and a 2 MB entry-data budget. Eviction only removes its
+  own `gld:public-nhl:v2:` entries; no authentication keys are touched. Web Locks
+  coordinate matching requests and index writes across tabs where supported.
+  Without locks/storage the existing per-tab memory cache and deduplication remain.
+  Retry-After cooldown timestamps are also shared; error responses are not cached.
+- Snapshot age and HTTP cache age are deducted from browser freshness so cache
+  layers do not extend live snapshots indefinitely.
+- Completed game data is reused within a Worker isolate for five minutes today
+  or one day for historical dates. Snapshot JSON omits unrelated upstream fields
+  but retains all goal details, rosters, goalie/player stats and event times used
+  by scoring and Around the Horn.
+- Each snapshot is bounded to 16 unique games and 33 external NHL fetches at most.
+  Fan-out is limited to four simultaneous upstream calls and does not follow
+  redirects internally. Per-game Cache API operations are skipped for bundle
+  construction; the complete bundle uses a single cache match/put. This keeps
+  the fan-out within Free-plan limits. Errors and partial bundles are never cached.
+- The Vite configureServer middleware runs the same snapshot handler ahead of the
+  original development proxies. No Wrangler routes, environment variables,
+  database migrations, or additional Cloudflare resources are needed.
+
+For ten games, the scoreboard plus two game requests per game becomes **one
+browser-to-Worker live request instead of 21**, before browser reuse. This example
+excludes initial season reports/other page metadata and is not an account-usage
+measurement. Worker-side caching still counts as a Worker invocation; browser
+reuse avoids the request itself. The combined handler does more work per cache
+miss, so monitor CPU time and errors after an approved production deployment.
+
+Local tests cover 2026/2027 complete player loading, unchanged scoring lookups,
+quiet schedules, final confirmation, cross-tab cache/cooldown reuse, storage
+eviction, maximum fan-out, simultaneous bundle builds and the real workerd cache.
+The Vite development snapshot route and React `/standings` fallback were also
+checked with simulated NHL data, without production or Supabase access.
+
+Final local checks passed: production build and frontend/config/Worker TypeScript
+checks, 67 unit tests (32 Worker and 35 NHL/frontend), the real workerd integration
+check, the Vite local route check, and Wrangler's deployment dry run. Existing CSS
+minification and large-bundle warnings remain. Live production request savings,
+upstream access, CPU time, and signed-in behavior require post-deployment checks;
+no commit, push, or production deployment was performed for this follow-up.
+
 ## Why statistics failed
 
 Vite's `server.proxy` works only under `npm run dev`. Cloudflare does not execute
@@ -63,7 +123,8 @@ enter this cache or the frontend NHL client.
 | Data | Maximum configured TTL per cache layer |
 | --- | --- |
 | Live scoreboard/game data | 15 seconds |
-| Current-season stat reports | 60 seconds |
+| Current-season stat reports | 5 minutes |
+| Combined snapshot during live games | 30 seconds |
 | Current-season player bios | 6 hours |
 | Completed-season reports | 24 hours |
 | Current-season completed games | 5 minutes |
@@ -75,7 +136,9 @@ enter this cache or the frontend NHL client.
 
 All errors, including HTTP 429, bypass caching. Only a per-origin cooldown timestamp
 is retained after 429. Both seconds and HTTP-date `Retry-After` values are respected;
-missing/invalid values default to 60 seconds. There are **no automatic retries**.
+missing/invalid values default to 60 seconds. The Worker and low-level browser
+client never retry automatically. The complete-report reader has one bounded
+recovery attempt, described below.
 Requests already in flight may finish; queued requests check cooldown before fetching.
 Fresh successful cache entries remain usable during cooldown.
 
@@ -154,13 +217,14 @@ sequentially only when necessary, sorts consistently by player ID, advances by
 actual returned row counts, and checks completeness before publishing the result
 to the application. New sort/start query parameters avoid reusing the old report
 cache keys. Existing rate-limit cooldown, caching, and concurrency limits apply.
-There are no automatic retries, database changes, scoring changes, or cache purges.
+There are no database changes, scoring changes, or cache purges. The subsequent
+429 follow-up below adds one bounded recovery attempt to complete-report loading.
 
 Invalid, empty intermediate, repeated, changing, or inconsistent pages fail clearly
 rather than silently loading partial stats. Team-page fallback request errors now
 reach the existing stats error display instead of becoming empty lists. A complete
 unlimited report still uses one request; a truncated report requires more requests
-to retrieve the missing data, and a 429 aborts without accepting partial results.
+to retrieve the missing data. An unresolved 429 fails without accepting partial results.
 
 Local validation passed: production build, both TypeScript checks, 46 unit tests
 (25 Worker and 21 NHL/frontend), the workerd runtime check, and Wrangler dry run.
@@ -257,16 +321,16 @@ Cloudflare deployment/version in the dashboard for rollback. Confirm the command
 above and the intended release branch. Then:
 
 ```sh
-git add CLOUDFLARE.md package.json tsconfig.worker.json \
-  worker/index.ts worker/index.test.mjs worker/cache.test.mjs \
-  shared/nhl-policy.ts shared/nhl-policy.test.mjs \
+git add CLOUDFLARE.md package.json tsconfig.node.json vite.config.ts \
+  worker/index.ts worker/cache.test.mjs worker/liveSnapshot.ts worker/liveSnapshot.test.mjs \
+  shared/nhl-policy.ts shared/nhl-policy.test.mjs shared/nhl-live.ts \
   scripts/test-nhl-runtime.mjs src/lib/nhlRequest.ts src/lib/nhlRequest.test.mjs \
-  src/lib/nhl.ts src/lib/goalFeed.ts src/lib/prospectRights.ts \
-  src/pages/League/SkaterStats.tsx src/pages/League/GoalieStats.tsx \
+  src/lib/nhl.ts src/lib/goalFeed.ts src/lib/nhlReports.test.mjs \
+  src/lib/nhlLive.ts src/lib/nhlPolling.ts src/lib/nhlPolling.test.mjs \
   src/pages/League/HockeyTeamDetail.tsx src/pages/League/Standings.tsx \
   src/pages/League/GoalHorn.tsx
 git diff --cached --stat
-git commit -m "Cache public NHL responses and respect rate limits"
+git commit -m "Reduce NHL API request volume"
 git push origin HEAD
 ```
 
@@ -286,3 +350,39 @@ After deployment, repeat the JSON checks at the production URL, sign in, check t
 stats and standings, and reload a deep link. No DNS changes are needed for this
 existing workers.dev URL. If checks fail, roll back to the recorded deployment
 using Cloudflare's deployment/version history; database changes are unnecessary.
+
+## Follow-up: confirmed production 429 and paced report loading
+
+Read-only production checks of the reported season/date query returned both:
+
+- `X-NHL-Source: upstream`, `X-NHL-Upstream-Status: 429`, and `Retry-After: 1`.
+- `X-NHL-Source: cooldown` and `Retry-After: 1` on a subsequent request.
+
+This confirms an upstream subrequest returned 429 and the Worker also enforced its
+own cooldown. It does not identify which internal NHL service or upstream CDN rule
+issued the original response. `Server: cloudflare` alone is not attribution.
+
+Uncached `api.nhle.com` stats requests now run serially with at least 1.25 seconds
+between starts in each browser client and Worker isolate. Browser Web Locks also
+serialize the stats lane across tabs when available. This is not a globally shared
+rate limiter across Cloudflare isolates. Cache hits avoid the upstream lane.
+
+The complete-report reader may resume the exact blocked page once per report after
+at least two seconds and the supplied Retry-After delay, only if that delay is at
+most 30 seconds. Missing Retry-After defaults to 60 seconds, so it does not cause an
+automatic retry. A second 429 or longer cooldown produces a clear error; already
+loaded pages are never presented as complete statistics. A rate-limit failure no
+longer triggers an immediate alternate season report on standings/team pages.
+
+Final validation passed: 67 unit tests, production build (including frontend,
+configuration and Worker TypeScript), real workerd mock integration including paced
+stats requests, and Wrangler deployment dry run. Existing CSS minification and
+bundle-size warnings remain. Production success still requires an approved deploy
+and real-traffic verification; provider limits and cross-isolate traffic may still
+cause 429. No commit, push or deployment was performed.
+
+The Front Office (ManagerCommandCenter) also swallowed each failed NHL report as
+an empty list, allowing missing skaters to display zero FPTS beside loaded goalies.
+Those failures now reach the existing dashboard error display instead of publishing
+misleading totals or mixing a failed current-season report with historical data.
+No scoring formulas or contract/roster database operations were changed.

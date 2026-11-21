@@ -1,8 +1,15 @@
 import { nhlFetch } from "./nhlRequest.ts";
+import { NhlRateLimitError, retryAfterMs } from "../../shared/nhl-policy.ts";
 
 interface ReportPage<T> {
   data: T[];
   total: number;
+}
+
+interface RecoveryOptions {
+  recoverRateLimit?: boolean;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
 }
 
 // Keep paging sequential within each report. nhlFetch supplies the shared
@@ -11,6 +18,7 @@ export async function fetchCompleteNhlReport<T>(
   path: string,
   label: string,
   fetcher: (path: string) => Promise<Response> = nhlFetch,
+  options: RecoveryOptions = {},
 ): Promise<T[]> {
   const url = new URL(path, "https://nhl-report.invalid");
   // Stable ordering is necessary when one report spans several API pages.
@@ -23,9 +31,24 @@ export async function fetchCompleteNhlReport<T>(
   const rows: T[] = [];
   let expected: number | undefined;
   const seenPages = new Set<string>();
+  let recovered = false;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   for (let page = 0; page < 100; page++) {
-    const response = await fetcher(url.pathname + url.search);
+    let response = await fetcher(url.pathname + url.search);
+    if (response.status === 429 && options.recoverRateLimit !== false && !recovered) {
+      const wait = Math.max(2000, retryAfterMs(response.headers.get("Retry-After"), options.now?.() ?? Date.now()));
+      // At most one recovery per complete report, and never hold the UI for a
+      // long provider cooldown. Keep already loaded rows; retry only this URL.
+      if (wait <= 30_000) {
+        recovered = true;
+        await response.body?.cancel();
+        await sleep(wait);
+        response = await fetcher(url.pathname + url.search);
+      }
+    }
+    if (response.status === 429) throw new NhlRateLimitError(
+      `NHL ${label} is temporarily rate limited (429). Please wait before refreshing; partial statistics were not used.`);
     if (!response.ok) throw new Error(`Unable to load NHL ${label} (${response.status})`);
     const payload: unknown = await response.json();
     if (!payload || typeof payload !== "object" || !("data" in payload) || !Array.isArray(payload.data)

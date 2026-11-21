@@ -1,3 +1,4 @@
+import { startNhlPolling } from "../../lib/nhlPolling";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -198,7 +199,7 @@ export default function GoalHorn() {
         setRecordsLoading(false);
       });
     }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load Around the Horn."); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load Around the Horn."); return false; }
     finally { setLoading(false); setRefreshing(false); }
   }, [date]);
 
@@ -213,8 +214,7 @@ export default function GoalHorn() {
   }, [date, user]);
   useEffect(() => {
     if (date !== today) return;
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load(true); }, 30_000);
-    return () => window.clearInterval(timer);
+    return startNhlPolling(() => load(true), "live", date);
   }, [date, today, load]);
   useEffect(() => { window.localStorage.setItem("around-horn:show-nightly-recap", String(showNightlyRecap)); }, [showNightlyRecap]);
   useEffect(() => { window.localStorage.setItem("around-horn:show-record-chases", String(showRecordChases)); }, [showRecordChases]);

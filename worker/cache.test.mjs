@@ -32,13 +32,13 @@ test("successful JSON is cached, then refreshed at expiry with query-specific ke
   t.mock.method(globalThis, "fetch", async () => Response.json({ data: [++calls] }));
   const first = await f.worker.fetch(req(path), env);
   assert.equal(first.headers.get("X-NHL-Cache"), "MISS");
-  assert.equal(first.headers.get("Cache-Control"), "public, max-age=60");
+  assert.equal(first.headers.get("Cache-Control"), "public, max-age=300");
   const second = await f.worker.fetch(req(path), env);
   assert.equal(second.headers.get("X-NHL-Cache"), "HIT");
   assert.deepEqual(await second.json(), { data: [1] });
   await f.worker.fetch(req(path.replace("limit=1", "limit=2")), env);
   assert.equal(calls, 2);
-  f.advance(60_001);
+  f.advance(300_001);
   await f.worker.fetch(req(path), env);
   assert.equal(calls, 3);
 });

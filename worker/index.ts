@@ -1,4 +1,5 @@
-import { createLimiter, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
+import { createLimiter, createPacer, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
+import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -27,6 +28,7 @@ interface PublicCache {
 interface WorkerOptions {
   cache?: () => Promise<PublicCache | undefined>;
   now?: () => number;
+  statsGapMs?: number;
 }
 
 interface ResponseSnapshot {
@@ -47,6 +49,9 @@ function fromSnapshot(snapshot: ResponseSnapshot) {
 export function createWorker(options: WorkerOptions = {}) {
   const now = options.now ?? Date.now;
   const limited = createLimiter(4);
+  const statsGap = options.statsGapMs ?? (typeof caches === "undefined" ? 0 : 1250);
+  const paceStats = createPacer(statsGap, now);
+  const buildSnapshot = createSnapshotBuilder(now);
   // Share bytes rather than Response streams: workerd forbids consuming I/O
   // created by a different request context, even within the same isolate.
   const pending = new Map<string, Promise<ResponseSnapshot>>();
@@ -54,8 +59,7 @@ export function createWorker(options: WorkerOptions = {}) {
   const cooldowns = new Map<string, number>();
   const getCache = options.cache ?? (async () =>
     typeof caches === "undefined" ? undefined : caches.open("gld-public-nhl-v1"));
-  return {
-    async fetch(request: Request, env: Env): Promise<Response> {
+  async function handle(request: Request, env: Env, cacheEnabled = true): Promise<Response> {
       const url = new URL(request.url);
       const route = routes.find(({ prefix }) =>
         url.pathname === prefix || url.pathname.startsWith(`${prefix}/`),
@@ -66,13 +70,19 @@ export function createWorker(options: WorkerOptions = {}) {
         return jsonError("NHL API routes support GET and HEAD only.", 405, { Allow: "GET, HEAD" });
       }
 
+      const snapshotRoute = url.pathname.startsWith("/nhl-web-api/live-snapshot");
+      const snapshotDate = url.pathname.match(/^\/nhl-web-api\/live-snapshot\/(\d{4}-\d{2}-\d{2})$/)?.[1];
+      if (snapshotRoute && (!snapshotDate || url.search || !Number.isFinite(Date.parse(snapshotDate))
+        || new Date(snapshotDate).toISOString().slice(0, 10) !== snapshotDate)) {
+        return jsonError("A valid live snapshot date is required.", 400);
+      }
       let cache: PublicCache | undefined;
       // Strip browser credentials/headers from cache identity; these fixed NHL APIs
       // always fetch the same public representation. Keep the entire query string.
       const key = new Request(url.toString(), { method: "GET" });
       if (request.method === "GET") {
         try {
-          cache = await getCache();
+          cache = cacheEnabled ? await getCache() : undefined;
           const hit = await cache?.match(key);
           if (hit) {
             const result = new Response(hit.body, hit);
@@ -88,7 +98,7 @@ export function createWorker(options: WorkerOptions = {}) {
         }
       }
 
-      const work = limited(async () => {
+      const loadUpstream = async () => {
         const until = cooldowns.get(route.origin) ?? 0;
         if (until > now()) return jsonError("NHL requests paused after upstream rate limiting.", 429, {
           "Retry-After": String(Math.ceil((until - now()) / 1000)),
@@ -100,7 +110,7 @@ export function createWorker(options: WorkerOptions = {}) {
         let upstreamUrl = new URL(route.origin + route.base + url.pathname.slice(route.prefix.length) + url.search);
         const signal = AbortSignal.timeout(15_000);
         try {
-          for (let redirects = 0; redirects <= 3; redirects++) {
+          for (let redirects = 0; redirects <= (cacheEnabled ? 3 : 0); redirects++) {
             const upstream = await fetch(upstreamUrl, {
               method: request.method,
               headers: { Accept: "application/json" },
@@ -111,7 +121,7 @@ export function createWorker(options: WorkerOptions = {}) {
             if ([301, 302, 303, 307, 308].includes(upstream.status)) {
               const location = upstream.headers.get("Location");
               await upstream.body?.cancel();
-              if (!location || redirects === 3) break;
+              if (!location || !cacheEnabled || redirects === 3) break;
               const next = new URL(location, upstreamUrl);
               // Follow NHL redirects internally, never redirect the browser off-site
               // or allow an upstream redirect to turn this into an arbitrary proxy.
@@ -154,7 +164,7 @@ export function createWorker(options: WorkerOptions = {}) {
               statusText: upstream.statusText,
               headers,
             });
-            if (request.method === "GET" && upstream.status === 200) {
+            if (cacheEnabled && request.method === "GET" && upstream.status === 200) {
               // Validate before caching so an invalid JSON success cannot poison cache.
               let payload: unknown;
               try { payload = await result.clone().json(); }
@@ -172,7 +182,30 @@ export function createWorker(options: WorkerOptions = {}) {
         } catch {
           return jsonError(signal.aborted ? "NHL upstream timed out." : "Unable to reach NHL upstream.", signal.aborted ? 504 : 502);
         }
-      }).then(async (result): Promise<ResponseSnapshot> => ({
+      };
+      // Build the bundle outside the limiter: its individual fixed NHL requests
+      // acquire slots themselves, avoiding nested-limiter deadlocks.
+      const work = (snapshotDate ? (async () => {
+        try {
+          const payload = await buildSnapshot(snapshotDate, (path) => handle(new Request(url.origin + path), env, false));
+          const result = Response.json(payload, { headers: {
+            "Cache-Control": `public, max-age=${nhlTtl(url, now(), payload)}`,
+            "X-NHL-Cache": "MISS", "X-NHL-Source": "snapshot",
+          } });
+          if (cache && request.method === "GET") {
+            try { await cache.put(key, result.clone()); } catch { /* Cache is optional. */ }
+          }
+          return request.method === "HEAD" ? new Response(null, result) : result;
+        } catch (error) {
+          if (error instanceof SnapshotError) return jsonError(error.message, error.status, {
+            ...error.diagnostics,
+            "X-NHL-Source": `snapshot-${error.diagnostics["X-NHL-Source"] || "error"}`,
+            ...(error.retryAfter ? { "Retry-After": error.retryAfter } : {}),
+          });
+          return jsonError("Unable to build complete NHL live data.", 502);
+        }
+      })() : limited(() => route.origin === "https://api.nhle.com" && statsGap > 0
+        ? paceStats(loadUpstream) : loadUpstream())).then(async (result): Promise<ResponseSnapshot> => ({
         body: result.body ? await result.arrayBuffer() : null,
         status: result.status,
         statusText: result.statusText,
@@ -181,8 +214,8 @@ export function createWorker(options: WorkerOptions = {}) {
       if (request.method === "GET") pending.set(key.url, work);
       try { return fromSnapshot(await work); }
       finally { if (pending.get(key.url) === work) pending.delete(key.url); }
-    },
-  };
+  }
+  return { fetch: (request: Request, env: Env) => handle(request, env) };
 }
 
 export default createWorker();

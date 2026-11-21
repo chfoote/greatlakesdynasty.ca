@@ -1,9 +1,11 @@
+import { nhlStatsDate } from "../../shared/nhl-live";
+import { fetchNhlLiveSnapshot } from "./nhlLive";
 import { nhlFetch } from "./nhlRequest";
 import { fetchCompleteNhlReport } from "./nhlReports";
 export const NHL_SEASON_ID = 20252026;
 export const FANTASY_SEASON_YEAR = 2026;
 
-const statsCacheTtlMs = 60_000;
+const statsCacheTtlMs = 300_000;
 const skaterStatsCache = new Map<number, { expiresAt: number; request: Promise<NhlSkaterRecord[]> }>();
 const goalieStatsCache = new Map<number, { expiresAt: number; request: Promise<NhlGoalieRecord[]> }>();
 const skaterPeriodCache = new Map<string, { expiresAt: number; request: Promise<NhlSkaterRecord[]> }>();
@@ -130,43 +132,21 @@ export type NhlPlayerSearchResult = {
   active?: boolean;
 };
 
-type NhlScoreGame = { id: number; gameState: string; startTimeUTC?: string };
-type NhlScoreResponse = { games?: NhlScoreGame[] };
 type NhlBoxscorePlayer = { playerId?: number; position?: string; goals?: number; assists?: number; plusMinus?: number; pim?: number; hits?: number; powerPlayGoals?: number; sog?: number; blockedShots?: number; toi?: string; goalsAgainst?: number; saves?: number; savePctg?: number; starter?: boolean; decision?: "W" | "L" | "O"; shotsAgainst?: number };
 type NhlBoxscoreTeamPlayers = { forwards?: NhlBoxscorePlayer[]; defense?: NhlBoxscorePlayer[]; goalies?: NhlBoxscorePlayer[] };
 type NhlBoxscoreResponse = { gameState?: string; awayTeam?: { abbrev?: string; score?: number }; homeTeam?: { abbrev?: string; score?: number }; playerByGameStats?: { awayTeam?: NhlBoxscoreTeamPlayers; homeTeam?: NhlBoxscoreTeamPlayers } };
 type NhlPlayByPlayResponse = { plays?: Array<{ typeDescKey?: string; periodDescriptor?: { periodType?: string }; details?: { scoringPlayerId?: number; assist1PlayerId?: number; assist2PlayerId?: number } }> };
 
 export function getNhlStatsDate(dayOffset = 0) {
-  // The GLDHL stat day rolls over at 6:00 a.m. Eastern so late West Coast
-  // games remain part of the date on which they started.
-  const shifted = new Date(Date.now() - 6 * 60 * 60 * 1000 + dayOffset * 24 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(shifted);
-}
-
-async function fetchScoreboard(date = getNhlStatsDate()) {
-  const response = await nhlFetch(`/nhl-web-api/score/${date}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Unable to load today's NHL games (${response.status})`);
-  return response.json() as Promise<NhlScoreResponse>;
-}
-
-async function fetchGameBoxscore(gameId: number) {
-  const response = await nhlFetch(`/nhl-web-api/gamecenter/${gameId}/boxscore`, { cache: "no-store" });
-  if (!response.ok) return null;
-  return response.json() as Promise<NhlBoxscoreResponse>;
-}
-
-async function fetchGamePlayByPlay(gameId: number) {
-  const response = await nhlFetch(`/nhl-web-api/gamecenter/${gameId}/play-by-play`, { cache: "no-store" });
-  if (!response.ok) return null;
-  return response.json() as Promise<NhlPlayByPlayResponse>;
+  return nhlStatsDate(dayOffset);
 }
 
 export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
   // Avoid /score/now: the NHL responds with an absolute redirect which can
   // escape our same-origin proxy and be blocked by the browser. NHL game dates
   // are published in Eastern time, so request that date directly.
-  const scoreboard = await fetchScoreboard();
+  const snapshot = await fetchNhlLiveSnapshot(getNhlStatsDate());
+  const scoreboard = snapshot.scoreboard;
   const now = Date.now();
   const liveGames = (scoreboard.games ?? []).filter((game) =>
     ["LIVE", "CRIT"].includes(game.gameState)
@@ -176,9 +156,9 @@ export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
   );
   if (!liveGames.length) return new Set();
 
-  const boxscores = await Promise.all(liveGames.map(async (game) => {
-    return fetchGameBoxscore(game.id);
-  }));
+  const liveIds = new Set(liveGames.map((game) => game.id));
+  const boxscores = snapshot.games.filter(({ game }) => liveIds.has(game.id))
+    .map(({ boxscore }) => boxscore as NhlBoxscoreResponse | null);
   const ids = new Set<string>();
   boxscores.forEach((boxscore) => {
     if (!boxscore?.playerByGameStats) return;
@@ -192,16 +172,11 @@ export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
 }
 
 export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }> {
-  const scoreboard = await fetchScoreboard(date);
-  const now = Date.now();
-  const games = (scoreboard.games ?? []).filter((game) =>
-    ["LIVE", "CRIT", "OFF", "FINAL"].includes(game.gameState)
-    || (game.gameState === "PRE" && Boolean(game.startTimeUTC) && new Date(game.startTimeUTC!).getTime() <= now),
-  );
-  const gameData = (await Promise.all(games.map(async (game) => {
-    const [boxscore, playByPlay] = await Promise.all([fetchGameBoxscore(game.id), fetchGamePlayByPlay(game.id)]);
-    return { boxscore, playByPlay };
-  }))).filter((item): item is { boxscore: NhlBoxscoreResponse; playByPlay: NhlPlayByPlayResponse | null } => item.boxscore !== null);
+  const snapshot = await fetchNhlLiveSnapshot(date);
+  const gameData = snapshot.games.filter(({ boxscore }) => boxscore !== null).map(({ boxscore, playByPlay }) => ({
+    boxscore: boxscore as NhlBoxscoreResponse,
+    playByPlay: playByPlay as NhlPlayByPlayResponse | null,
+  }));
   const skaters = new Map<number, NhlSkaterRecord>();
   const goalies = new Map<number, NhlGoalieRecord>();
 
