@@ -1,5 +1,6 @@
-import { createLimiter, createPacer, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
+import { nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
 import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
+import { createWorkerScheduler, WorkerQueueFullError } from "./scheduler.ts";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -48,9 +49,8 @@ function fromSnapshot(snapshot: ResponseSnapshot) {
 
 export function createWorker(options: WorkerOptions = {}) {
   const now = options.now ?? Date.now;
-  const limited = createLimiter(4);
   const statsGap = options.statsGapMs ?? (typeof caches === "undefined" ? 0 : 1250);
-  const paceStats = createPacer(statsGap, now);
+  const schedule = createWorkerScheduler({ maximum: 4, statsGapMs: statsGap, now });
   const buildSnapshot = createSnapshotBuilder(now);
   // Share bytes rather than Response streams: workerd forbids consuming I/O
   // created by a different request context, even within the same isolate.
@@ -204,8 +204,11 @@ export function createWorker(options: WorkerOptions = {}) {
           });
           return jsonError("Unable to build complete NHL live data.", 502);
         }
-      })() : limited(() => route.origin === "https://api.nhle.com" && statsGap > 0
-        ? paceStats(loadUpstream) : loadUpstream())).then(async (result): Promise<ResponseSnapshot> => ({
+      })() : schedule(route.origin === "https://api.nhle.com" && statsGap > 0, loadUpstream)
+        .catch((error: unknown) => {
+          if (!(error instanceof WorkerQueueFullError)) throw error;
+          return jsonError(error.message, 503, { "Retry-After": "5", "X-NHL-Source": "queue", "X-NHL-Cache": "BYPASS" });
+        })).then(async (result): Promise<ResponseSnapshot> => ({
         body: result.body ? await result.arrayBuffer() : null,
         status: result.status,
         statusText: result.statusText,

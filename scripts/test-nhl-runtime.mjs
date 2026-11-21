@@ -19,6 +19,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     calls++;
     if (new URL(request.url).hostname === "api.nhle.com") {
       statsStarts.push(Date.now());
+      await new Promise((resolve) => setTimeout(resolve, 30));
       return Response.json({ data: [], total: 0 });
     }
     if (new URL(request.url).pathname.endsWith("/2021/all")) {
@@ -65,22 +66,29 @@ try {
   await assertJson(snapshotHit);
   assert.equal(calls - beforeSnapshot, 5);
 
+  // Different uncached reports must also work when separate requests queue.
+  const parallelStats = await Promise.all([
+    ...Array.from({ length: 6 }, (_, page) =>
+      mf.dispatchFetch(`https://league.example/nhl-api/skater/summary?start=${page}&test=parallel`)),
+    mf.dispatchFetch('https://league.example/nhl-web-api/live-snapshot/2026-11-20'),
+  ]);
+  await Promise.all(parallelStats.map((response) => assertJson(response)));
   const limited = await mf.dispatchFetch("https://league.example/nhl-web-api/draft/picks/2021/all");
   await assertJson(limited, 429);
   const paused = await mf.dispatchFetch("https://league.example/nhl-web-api/draft/picks/2022/all");
   assert.equal(paused.headers.get("X-NHL-Source"), "cooldown");
   await assertJson(paused, 429);
-  assert.equal(calls, beforeSnapshot + 6);
+  assert.equal(calls, beforeSnapshot + 15);
 
   const home = await mf.dispatchFetch("https://league.example/standings");
   assert.equal(home.status, 200);
   assert.match(await home.text(), /<!DOCTYPE html>/);
-  assert.equal(calls, beforeSnapshot + 6);
+  assert.equal(calls, beforeSnapshot + 15);
   await assertJson(await mf.dispatchFetch("https://league.example/nhl-api/skater/summary?limit=1"));
   await assertJson(await mf.dispatchFetch("https://league.example/nhl-api/goalie/summary?limit=1"));
-  assert.equal(statsStarts.length, 2);
+  assert.equal(statsStarts.length, 8);
   assert.ok(statsStarts[1] - statsStarts[0] >= 1000);
-  console.log("PASS: real workerd cache, concurrent snapshots, paced stats, 429 cooldown, and asset delegation.");
+  console.log("PASS: real workerd cache, concurrent snapshots and six distinct reports, paced stats, 429 cooldown, and asset delegation.");
 } finally {
   await mf.dispose();
 }

@@ -386,3 +386,25 @@ an empty list, allowing missing skaters to display zero FPTS beside loaded goali
 Those failures now reach the existing dashboard error display instead of publishing
 misleading totals or mixing a failed current-season report with historical data.
 No scoring formulas or contract/roster database operations were changed.
+
+## Worker concurrency correction
+
+A real workerd regression test with six distinct simultaneous uncached stat
+requests reproduced HTTP 500 and warnings about promises resolved from another
+request context after that context completed. The previous runtime test exercised
+same-URL coalescing and sequential stats calls, missing the global queue failure.
+
+The Worker now uses a dedicated scheduler sharing only counters and timestamps.
+Each waiting request owns its timer. It retains four concurrent upstream requests
+and serial stats pacing, releases slots after failures, and bounds queue waiting
+to 30 seconds (JSON 503 with Retry-After, never cached). The browser scheduler is
+unchanged. No runtime compatibility flags or production environment variables
+are changed.
+
+Validation: 70 unit tests, frontend/config/Worker TypeScript via production build,
+real workerd integration with six distinct reports plus a simultaneous snapshot,
+and Wrangler dry run passed. The new concurrency test failed on the previous
+implementation with runtime-canceled HTTP 500 before passing with the correction.
+Production spot checks returned JSON 200 for a small summary query; exact failed
+query checks were blocked with 403, so attribution of every reported 500/502 to
+this bug is not confirmed. Existing CSS/bundle warnings remain.
