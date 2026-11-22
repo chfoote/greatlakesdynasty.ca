@@ -1,7 +1,7 @@
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
 import { isNhlRateLimit } from "../../../shared/nhl-policy";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -591,6 +591,8 @@ export default function HockeyTeamDetail() {
   const [statsView, setStatsView] = useState<"season" | "today" | "yesterday">("season");
   const [dailySkaters, setDailySkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [dailyGoalies, setDailyGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
+  const playerCards = useRef(new Map<string, Promise<{ headshot?: string; currentTeamAbbrev?: string; birthCountry?: string; birthDate?: string }>>());
+  const [dailyStatsError, setDailyStatsError] = useState("");
   const [dailyStatsLoading, setDailyStatsLoading] = useState(false);
   const [livePlayerIds, setLivePlayerIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -783,19 +785,26 @@ export default function HockeyTeamDetail() {
 
   useEffect(() => {
     let active = true;
-    const metadataRows = [...roster, ...Object.values(multiYearRosters).flat()];
-    const missingIds = [...new Set(metadataRows.map(playerApiId))].filter((id) => id && (!lineupHeadshots.has(id) || !nhlTeamsByPlayer.has(id) || !birthCountriesByPlayer.has(id) || !birthDatesByPlayer.has(id)));
-    missingIds.forEach((id) => {
-      void fetchNhlPlayerLanding(Number(id)).then((landing) => {
+    const metadataRows = viewMode === "multi" ? [...roster, ...Object.values(multiYearRosters).flat()] : roster;
+    const ids = [...new Set(metadataRows.map(playerApiId))].filter(Boolean);
+    ids.forEach(id => {
+      let request = playerCards.current.get(id);
+      if (!request) {
+        request = fetchNhlPlayerLanding(Number(id)).then(({ headshot, currentTeamAbbrev, birthCountry, birthDate }) =>
+          ({ headshot, currentTeamAbbrev, birthCountry, birthDate }));
+        playerCards.current.set(id, request);
+        request.catch(() => { if (playerCards.current.get(id) === request) playerCards.current.delete(id); });
+      }
+      void request.then(landing => {
         if (!active) return;
-        if (landing.headshot) setLineupHeadshots((current) => new Map(current).set(id, landing.headshot!));
-        if (landing.currentTeamAbbrev) setNhlTeamsByPlayer((current) => new Map(current).set(id, landing.currentTeamAbbrev!));
-        if (landing.birthCountry) setBirthCountriesByPlayer((current) => new Map(current).set(id, landing.birthCountry!));
-        if (landing.birthDate) setBirthDatesByPlayer((current) => new Map(current).set(id, landing.birthDate!));
+        if (landing.headshot) setLineupHeadshots(current => new Map(current).set(id, landing.headshot!));
+        if (landing.currentTeamAbbrev) setNhlTeamsByPlayer(current => new Map(current).set(id, landing.currentTeamAbbrev!));
+        if (landing.birthCountry) setBirthCountriesByPlayer(current => new Map(current).set(id, landing.birthCountry!));
+        if (landing.birthDate) setBirthDatesByPlayer(current => new Map(current).set(id, landing.birthDate!));
       }).catch(() => {});
     });
     return () => { active = false; };
-  }, [roster, multiYearRosters, lineupHeadshots, nhlTeamsByPlayer, birthCountriesByPlayer, birthDatesByPlayer]);
+  }, [roster, multiYearRosters, viewMode, revision]);
 
   useEffect(() => {
     let active = true;
@@ -804,7 +813,7 @@ export default function HockeyTeamDetail() {
         const ids = await fetchNhlLivePlayerIds();
         if (active) setLivePlayerIds(ids);
       } catch {
-        if (active) setLivePlayerIds(new Set());
+        // Keep the last confirmed flags while the NHL is temporarily unavailable.
         return false;
       }
     };
@@ -827,11 +836,13 @@ export default function HockeyTeamDetail() {
         }
         const result = await fetchNhlDailyStats(date);
         if (active) {
+          setDailyStatsError("");
           setDailySkaters(new Map(result.skaters.map((row) => [String(row.playerId), row])));
           setDailyGoalies(new Map(result.goalies.map((row) => [String(row.playerId), row])));
         }
       } catch {
         // Preserve the last complete daily results during transient API failures.
+        if (active) setDailyStatsError("Daily NHL data is delayed. Any last successful results remain visible.");
         return false;
       } finally {
         if (active) setDailyStatsLoading(false);
@@ -892,6 +903,7 @@ export default function HockeyTeamDetail() {
           {viewMode === "single" && canManageLeadership && <TeamLeadershipEditor roster={roster} leadership={leadership} disabled={leadershipBusy} onChange={(slot, playerSeasonId) => void updateLeadership(slot, playerSeasonId)} />}
           {leadershipError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Team leadership: {leadershipError}</div>}
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
+          {statsView !== "season" && dailyStatsError && <p role="status" className="mt-3 text-sm text-gray-500 dark:text-gray-400">{dailyStatsError}</p>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
           {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} skaters={skaters} goalies={goalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : viewMode === "lineup" ? <LineupPreview roster={roster} contractHistory={contractHistory} seasonYear={selectedSeason} skaters={skaters} goalies={goalies} headshots={lineupHeadshots} nhlTeams={nhlTeamsByPlayer} birthCountries={birthCountriesByPlayer} leadershipByPlayer={leadershipByPlayer} livePlayerIds={livePlayerIds} team={displayTeam || team} /> : <div className="mt-5 space-y-4">
             {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={displayedGoalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={displayedSkaters} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} />)}

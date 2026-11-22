@@ -58,7 +58,7 @@ export function createSavedNhlCache(options: {
     } catch { /* A full/private browser cache must not break the page. */ }
   }
   return async function saved<T>(key: string, load: () => Promise<T>, validate: (value: unknown) => value is T,
-    ttl = 300_000): Promise<T> {
+    ttl = 300_000, policy: { waitForRefresh?: boolean; staleRetryMs?: number } = {}): Promise<T> {
     let previous = memory.get(key) as SavedNhlData<T> | undefined;
     if (!previous) {
       try { previous = JSON.parse(storage()?.getItem(prefix + key) || 'null') ?? undefined; } catch { /* Optional storage. */ }
@@ -75,14 +75,14 @@ export function createSavedNhlCache(options: {
     }
     if (previous) markNhlSaved(previous.value, previous.updatedAt, previous.message);
     const running = pending.get(key) as Promise<T> | undefined;
-    if (running) return previous ? previous.value : running;
+    if (running) return previous && !policy.waitForRefresh ? previous.value : running;
     if (previous && (failedUntil.get(key) ?? 0) > now()) return previous.value;
     status(key, { updatedAt: previous?.updatedAt, refreshing: true, saved: Boolean(previous) });
     const refresh = Promise.resolve().then(load).then(value => {
       if (!validate(value)) throw new Error('NHL returned an invalid complete dataset.');
       const source = nhlFreshness(value);
       if (previous && source && source.updatedAt <= previous.updatedAt) {
-        failedUntil.set(key, now() + 60_000);
+        failedUntil.set(key, now() + (policy.staleRetryMs ?? 60_000));
         status(key, { updatedAt: previous.updatedAt, refreshing: false, saved: true, message: source.message });
         return previous.value;
       }
@@ -113,7 +113,7 @@ export function createSavedNhlCache(options: {
       throw error;
     }).finally(() => { pending.delete(key); });
     pending.set(key, refresh);
-    if (previous) { void refresh.catch(() => {}); return previous.value; }
+    if (previous && !policy.waitForRefresh) { void refresh.catch(() => {}); return previous.value; }
     return refresh;
   };
 }

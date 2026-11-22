@@ -1,3 +1,4 @@
+import type { LiveSnapshot } from "../../shared/nhl-live";
 import { inheritNhlFreshness } from "./nhlFreshness";
 import { savedNhl, validPlayerRows, NhlBaselineAvailable } from "./nhlSaved";
 import { nhlStatsDate } from "../../shared/nhl-live";
@@ -174,7 +175,10 @@ export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
 }
 
 export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }> {
-  const snapshot = await fetchNhlLiveSnapshot(date);
+  return buildNhlDailyStats(await fetchNhlLiveSnapshot(date));
+}
+
+export function buildNhlDailyStats(snapshot: LiveSnapshot): { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] } {
   const gameData = snapshot.games.filter(({ boxscore }) => boxscore !== null).map(({ boxscore, playByPlay }) => ({
     boxscore: boxscore as NhlBoxscoreResponse,
     playByPlay: playByPlay as NhlPlayByPlayResponse | null,
@@ -302,10 +306,12 @@ async function loadNhlLiveSeasonStats(seasonYear: number) {
     throw new NhlBaselineAvailable(inheritNhlFreshness({ skaters: baselineSkaters, goalies: baselineGoalies }, [baselineSkaters, baselineGoalies]),
       `Live NHL updates unavailable. Season totals include completed games through ${yesterday}.`);
   }
+  // A still-valid through-yesterday baseline is intentionally reused. A newer
+  // live box score must advance this composite; delayed sources stay labeled.
   return inheritNhlFreshness({
     skaters: mergeSkaterRecords(baselineSkaters, daily.skaters),
     goalies: mergeGoalieRecords(baselineGoalies, daily.goalies),
-  }, [baselineSkaters, baselineGoalies, daily]);
+  }, [baselineSkaters, baselineGoalies, daily], "latest-if-fresh");
 }
 
 export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
@@ -567,5 +573,5 @@ export function fetchNhlLiveSeasonStats(seasonYear: number) {
   return savedNhl<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }>(`live-season:${seasonYear}`,
     () => loadNhlLiveSeasonStats(seasonYear),
     (value): value is { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] } => Boolean(value && typeof value === 'object'
-      && 'skaters' in value && 'goalies' in value && validPlayerRows(value.skaters) && validPlayerRows(value.goalies)));
+      && 'skaters' in value && 'goalies' in value && validPlayerRows(value.skaters) && validPlayerRows(value.goalies)), 30_000);
 }

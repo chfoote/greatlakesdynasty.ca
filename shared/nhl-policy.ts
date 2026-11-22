@@ -17,6 +17,10 @@ export function nhlOrigin(pathname: string): string | undefined {
   }
 }
 
+export function isLiveNhlPath(path: string) {
+  return /^\/nhl-web-api\/(?:live-snapshot|score|gamecenter)\//.test(path);
+}
+
 export function nhlTtl(url: URL, now = Date.now(), payload?: unknown): number {
   const date = new Date(now);
   if (url.pathname.startsWith("/nhl-web-api/live-snapshot/")) {

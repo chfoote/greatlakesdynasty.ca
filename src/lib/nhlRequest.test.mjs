@@ -55,7 +55,7 @@ test("queued requests honor a cooldown discovered by an earlier request", async 
   assert.ok(calls <= 3);
 });
 
-test("frontend concurrency stays at three", async () => {
+test("general frontend concurrency reserves a third slot for live requests", async () => {
   let active = 0;
   let maximum = 0;
   const client = createNhlClient({ fetcher: async () => {
@@ -64,7 +64,7 @@ test("frontend concurrency stays at three", async () => {
     active--; return Response.json({ data: [] });
   } });
   await Promise.all(Array.from({ length: 12 }, (_, i) => client(`${path}&offset=${i}`)));
-  assert.equal(maximum, 3);
+  assert.equal(maximum, 2);
 });
 
 test("public draft cache survives navigation/reloads, expires, and never stores failures", async () => {
@@ -235,4 +235,18 @@ test('shared stale JSON is never promoted into the fresh browser request cache',
   assert.equal(first.headers.get('X-NHL-Stale'), '1');
   await client('/nhl-api/skater/summary?test=stale');
   assert.equal(calls, 2);
+});
+
+test('live data starts even while both general slots are busy',async()=>{
+  const releases=[];
+  const client=createNhlClient({fetcher:async path=>{
+    if(path.includes('/live-snapshot/')) return Response.json({live:true});
+    await new Promise(resolve=>releases.push(resolve));return Response.json({playerId:1});
+  }});
+  const general=[client('/nhl-web-api/player/1/landing'),client('/nhl-web-api/player/2/landing')];
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(releases.length,2);
+  const live=await client('/nhl-web-api/live-snapshot/2026-11-21');
+  assert.equal(live.status,200);
+  releases.forEach(resolve=>resolve());await Promise.all(general);
 });

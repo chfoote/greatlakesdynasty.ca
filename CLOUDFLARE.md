@@ -589,3 +589,108 @@ unauthenticated record/admin routes, and a failed lazy page download. All 103 un
 tests, production build/TypeScript, five browser checks, and deployment dry run passed.
 Existing CSS and large lazy-chunk warnings remain. Live production timing still needs
 verification after an approved publication. No commit, push, or deploy was initiated.
+
+## Farm System Rankings skeleton delay
+
+The mobile screenshot showed the Farm System Rankings skeleton after the shell had
+loaded. This is a different path from sign-in. The league insights loader computed
+rankings, then awaited optional top-prospect profile photos and all teams' aging
+lookups before returning any ranking rows. Repeated full-roster scans/normalization
+for every draft pick added CPU work, especially on slower phones.
+
+Farm System Rankings now uses a separate `rankingsOnly` mode: it returns the complete
+ranking calculation without starting profile-photo, player-search, or birthday work.
+Cards use lazy static NHL headshots with initials fallback. Full insights and the
+Front Office aging alerts retain their existing behavior. The 85/10/5 ranking weights,
+fantasy scoring, farm ownership rules, and original tie/date precedence are preserved.
+Ownership/signing lookups now use indexes constructed once per roster instead of
+repeated scans. A controlled 1,500-row/2,000-lookup benchmark returned identical
+results in about 4 ms versus 4,469 ms for the previous scans; this is a fixture
+benchmark, not a production mobile timing guarantee.
+
+A separate browser cache stores only a whitelisted public ranking display by season:
+team ID/name/abbreviation/logo/colors and public ranking/prospect metrics. It excludes
+team notes, manager/account information, full roster rows, and authentication. It
+retains the last complete ranking for up to seven days, refreshes after five minutes,
+keeps good data if a refresh fails, deduplicates in-flight refreshes, limits stored
+content to 512 KB, and does not re-label older NHL source data as newly updated.
+Disabled or full local storage still permits in-memory display. Existing auth keys
+are not touched. First-time visitors still need one successful set of required draft
+and NHL reports; no placeholder scores are invented.
+
+The page shows saved rankings immediately on reload with an update timestamp, refreshes
+in the background on visible/online pages, and reports first-load delays or failures
+rather than silently displaying skeletons indefinitely. A ranking-only in-memory
+insights cache is separate from full/aging insights and expires after five minutes.
+
+`npm run test:farm:runtime` runs the actual component/calculation/cache in a local
+mobile-sized Chrome fixture with production connections blocked. Profile/birthday
+requests are delayed 30 seconds. Rankings appeared at about 169 ms on the first
+fixture load, and a second visit at about 14 ms made no ranking-source requests.
+The old page reproduces the blocked skeleton under the same fixture. No database,
+Supabase configuration, authentication, scoring formula, Cloudflare resource, or
+production deployment was changed by this follow-up.
+
+Final checks passed: 111 unit tests (71 NHL/frontend and 40 Worker), production
+build/TypeScript, ranking first-load and saved-reload browser regressions, existing
+built-route/access checks, and Wrangler deployment dry run. Existing CSS/chunk-size
+warnings remain. Production first-visit latency and Safari behavior still require
+verification after an approved deployment. All changes in this follow-up are local;
+no commit, push, database action, or production deployment was performed.
+
+## Live feed, daily roster stats, and preview flags
+
+Around the Horn previously waited for season totals, historical prospect rights,
+and age checks before showing live goals. Goal cards also preferred the historical
+score at that goal over the current scoreboard, making an older goal look like a
+stale current score. Cached live snapshots did not restore the polling schedule on
+reload; unknown schedules fell back to five-minute checks. Stale-while-revalidate
+could return the previous snapshot again without the feed consuming its refresh.
+
+Live goals and daily fantasy points now use one combined snapshot and render before
+optional season standings, prospect ownership, and record enrichment. Cards show
+the current score separately from the score at the goal. Pending prospect ownership
+is labeled as loading rather than guessed to be free agency. Profile photos for
+record cards use static image URLs instead of fetching full player profiles.
+
+Saved snapshots restore live schedule metadata. Visible live pages check every
+30 seconds, await the shared snapshot refresh before updating their view, and keep
+last-good data on transient failures. The Worker awaits a fresh complete live
+snapshot when its short cache expires; other report endpoints retain background
+refresh behavior. Saved fallback timestamps and rate-limit cooldowns are preserved.
+The live season composite expires after 30 seconds while underlying season reports
+keep their five-minute cache, so daily additions can update without refetching
+every season report. Hidden/offline pages pause; completed games stop polling after
+confirmation. No faster retry loop or automatic 429 retry was introduced.
+
+The browser allows two general requests plus one reserved live request. The Worker
+allows four active upstream requests with capacity reserved for live traffic.
+Snapshot bodies finish reading before their slots are released. Identical requests
+remain deduplicated and public successful JSON remains cached. A sixteen-game
+snapshot uses at most 33 external fetches; this is a per-snapshot bound, not a daily
+usage guarantee. Cold starts, upstream outages, and separate Cloudflare data centres
+can still require fresh calls. No paid resources or configuration changes are added.
+
+Roster metadata requests are reused per player and their results update independently;
+receiving one player's flags no longer cancels the remaining callbacks. Single-season
+views do not request metadata for hidden future rosters. Daily stat errors are shown,
+and temporary live-flag failures preserve the last confirmed flags.
+
+Local mobile-sized browser fixtures exercise the actual Around the Horn component,
+feed transformation, and polling with season/prospect/record requests deliberately
+unresolved: the feed renders below 200 ms and changes scores on the 30-second poll.
+These controlled timings do not measure production mobile latency or authenticate
+as a real league user. Worker tests cover fresh scores after live cache expiry,
+reserved capacity, successful JSON caching, 429 cooldown, and preserved SPA assets.
+Supabase configuration/authentication, database contents, and scoring formulas are
+unchanged. This batch remains local until publication is approved.
+
+Final validation for the combined local batch: 120 unit tests passed (78
+NHL/frontend and 42 Worker), production build including both TypeScript projects,
+actual workerd integration checks, live feed first-render and 30-second score
+update browser checks, farm ranking first-load/saved-reload checks, Front Office
+optional-request isolation, built-route/access checks, and Wrangler deployment
+dry run. Live season freshness tests confirm that newer daily points advance with
+an unchanged valid baseline and that delayed sources retain their older timestamp
+and warning. Existing CSS minification and large-chunk build warnings remain.
+No credentials were found in the pending-file review; no files were staged.

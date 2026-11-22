@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { build } from 'esbuild';
 let sequence=0;
-async function fixture(t) {
+async function fixture(t, changes = {}) {
   const date=new Date();
   const earliest=date.getFullYear()-((date.getMonth()>8 || (date.getMonth()===8 && date.getDate()>=15))?6:7);
-  const state={drafts:[],landings:[],earliest,birthDate:`${date.getFullYear()-24}-01-01`};
+  const state={drafts:[],landings:[],earliest,birthDate:`${date.getFullYear()-24}-01-01`,...changes};
   globalThis.__farmFixture=state;
   t.after(()=>{delete globalThis.__farmFixture;});
   const sources={
@@ -18,7 +18,7 @@ async function fixture(t) {
          {firstName:{default:'Player'},lastName:{default:'Two'},positionCode:'C',teamAbbrev:'BOS',overallPick:2}]:[];}
       export async function fetchNhlLiveSeasonStats(){const s=globalThis.__farmFixture;return {skaters:[{playerId:1,skaterFullName:'Player One',birthDate:s.birthDate},
         {playerId:2,skaterFullName:'Player Two',birthDate:s.birthDate}],goalies:[]};}
-      export async function fetchNhlPlayerLanding(id){const s=globalThis.__farmFixture;s.landings.push(id);return {birthDate:s.birthDate,headshot:'fixture.png'}}`,
+      export async function fetchNhlPlayerLanding(id){const s=globalThis.__farmFixture;s.landings.push(id);if(s.deferLandings)return new Promise(()=>{});return {birthDate:s.birthDate,headshot:'fixture.png'}}`,
   };
   const built=await build({entryPoints:['src/lib/farmInsights.ts'],bundle:true,format:'esm',platform:'browser',write:false,
     plugins:[{name:'farm-read-only-fixtures',setup(plugin){
@@ -49,4 +49,20 @@ test('full farm rankings remain available and do not reuse a team-only result',a
   assert.deepEqual([...league.agingByTeam.keys()],[1,2]);
   assert.ok(state.drafts.some(year=>year>state.earliest+1));
   assert.ok(state.landings.includes(2));
+});
+
+test('rankings do not wait for profile photos or league-wide birthday checks',async t=>{
+  const {state,api}=await fixture(t,{deferLandings:true});
+  const result=await api.fetchFarmInsights(undefined,{rankingsOnly:true});
+  assert.equal(result.rankings.length,2);
+  assert.equal(result.agingByTeam.size,0);
+  assert.equal(state.landings.length,0);
+});
+
+test('rankings-only results preserve the original ranking scores and ordering',async t=>{
+  const {api}=await fixture(t);
+  const simple=await api.fetchFarmInsights(undefined,{rankingsOnly:true});
+  const full=await api.fetchFarmInsights();
+  const values=result=>result.rankings.map(row=>[row.team.id,row.rank,row.farmScore,row.production,row.draftQuality,row.eligible]);
+  assert.deepEqual(values(simple),values(full));
 });

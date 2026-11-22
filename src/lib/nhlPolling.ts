@@ -1,5 +1,5 @@
 import { nhlStatsDate, type LiveSnapshot } from "../../shared/nhl-live.ts";
-import { getLiveSchedule } from "./nhlLive.ts";
+import { fetchNhlLiveSnapshot, getLiveSchedule } from "./nhlLive.ts";
 
 type Schedule = Pick<LiveSnapshot, "date" | "live" | "nextRefreshAt" | "generatedAt">;
 
@@ -9,9 +9,9 @@ export function shouldRefreshNhl(options: {
 }) {
   const { now, date, mode, lastAttempt, lastSuccess, schedule, visible } = options;
   if (!visible) return false;
-  const interval = mode === "season" ? 300_000 : 30_000;
+  const interval = mode === "season" && !schedule?.live ? 300_000 : 30_000;
   if (now - lastAttempt < interval) return false;
-  if (!schedule) return now - lastAttempt >= 300_000;
+  if (!schedule) return now - lastAttempt >= (mode === "live" ? 30_000 : 300_000);
   if (schedule.date !== date) return true; // One refresh at the next league day.
   if (schedule.live) return true;
   if (schedule.nextRefreshAt !== null) return now >= schedule.nextRefreshAt;
@@ -23,7 +23,7 @@ export function startNhlPolling(refresh: () => Promise<unknown>, mode: "live" | 
   let stopped = false;
   let busy = false;
   let lastAttempt = Date.now();
-  let lastSuccess = lastAttempt;
+  let lastSuccess = 0;
   const tick = async () => {
     const date = nhlStatsDate();
     if (stopped || busy || (selectedDate && selectedDate !== date)) return;
@@ -31,7 +31,10 @@ export function startNhlPolling(refresh: () => Promise<unknown>, mode: "live" | 
       schedule: getLiveSchedule(), visible: document.visibilityState === "visible" && navigator.onLine !== false })) return;
     busy = true;
     lastAttempt = Date.now();
-    try { if (await refresh() !== false) lastSuccess = Date.now(); }
+    try {
+      if (mode === "live" || getLiveSchedule()?.live) await fetchNhlLiveSnapshot(date, { waitForRefresh: true });
+      if (!stopped && await refresh() !== false) lastSuccess = Date.now();
+    }
     catch { /* Existing data stays visible; the next scheduled check can recover. */ }
     finally { busy = false; }
   };

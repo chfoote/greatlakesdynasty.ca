@@ -1,9 +1,10 @@
+import { nhlFreshness } from "./nhlFreshness";
 import { fetchNhlLiveSnapshot } from "./nhlLive";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchFantasyTeams, type FantasyTeam } from "./fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "./transactions";
-import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights } from "./prospectRights";
-import { fetchNhlDailyStats, fetchNhlLiveSeasonStats, getGoalieScore, getNhlStatsDate, getSkaterScore } from "./nhl";
+import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "./prospectRights";
+import { buildNhlDailyStats, fetchNhlLiveSeasonStats, getGoalieScore, getNhlStatsDate, getSkaterScore } from "./nhl";
 import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, type FranchiseStatLine } from "./recordBook";
 
 type Localized = { default?: string };
@@ -27,6 +28,7 @@ export type GoalFeedPlayer = {
   fantasyTeam: FantasyTeam | null;
   prospect: boolean;
   tonightPoints: number | null;
+  ownershipPending?: boolean;
 };
 
 export type GoalFeedEvent = {
@@ -37,6 +39,7 @@ export type GoalFeedEvent = {
   nhlTeam: { abbreviation: string; logo?: string };
   awayTeam: { abbreviation: string; score: number; logo?: string };
   homeTeam: { abbreviation: string; score: number; logo?: string };
+  scoreAtGoal?: { away: number; home: number };
   scorer: GoalFeedPlayer;
   assists: GoalFeedPlayer[];
   period: number;
@@ -331,17 +334,45 @@ function estimatedGoalTime(startTimeUTC: string | undefined, period: number, per
   return start + elapsedSeconds * 1_000 + sortOrder / 1_000;
 }
 
-export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEvent[]; goalieEvents: GoalieFeedEvent[]; nightlyStars: GoalFeedPlayer[]; recordEventsPromise: Promise<RecordMovementEvent[]>; recordChasesPromise: Promise<RecordChase[]>; milestoneWatchPromise: Promise<MilestoneWatchItem[]>; standings: FeedStanding[]; baselineStandings: FeedStanding[]; games: number; live: boolean; teams: FantasyTeam[] }> {
+const metadataCache = new Map<number, { expires: number; request: Promise<[PlayerSeasonWithRelations[], FantasyTeam[], LeagueTransaction[]]> }>();
+function feedMetadata(season: number) {
+  const saved = metadataCache.get(season);
+  if (saved && saved.expires > Date.now()) return saved.request;
+  const request = Promise.all([fetchPlayerSeasonsBySeason(season), fetchFantasyTeams(true), fetchLeagueTransactions()]);
+  if (metadataCache.size >= 8) metadataCache.delete(metadataCache.keys().next().value!);
+  metadataCache.set(season, { expires: Date.now() + 30_000, request });
+  request.catch(() => { if (metadataCache.get(season)?.request === request) metadataCache.delete(season); });
+  return request;
+}
+const rightsCache = new Map<string, { value: Map<string, ProspectRight>; checked: Set<number>; expires: number;
+  failedUntil: number; pending?: Promise<void> }>();
+function feedRights(date: string, season: number, players: Map<number, string>) {
+  let saved = rightsCache.get(date);
+  if (!saved) {
+    if (rightsCache.size >= 7) rightsCache.delete(rightsCache.keys().next().value!);
+    saved = { value: new Map(), checked: new Set(), expires: 0, failedUntil: 0 };
+    rightsCache.set(date, saved);
+  }
+  const entry = saved;
+  const needed = players.size && (entry.expires <= Date.now() || [...players.keys()].some(id => !entry.checked.has(id)));
+  if (needed && !entry.pending && entry.failedUntil <= Date.now()) {
+    entry.pending = fetchProspectRights(season).then(raw => removeAgedOutProspectRights(raw,
+      [...players].map(([playerId, playerName]) => ({ playerId, playerName })))).then(value => {
+        entry.value = value; entry.checked = new Set(players.keys()); entry.expires = Date.now() + 300_000;
+      }).catch(() => { entry.failedUntil = Date.now() + 60_000; }).finally(() => { entry.pending = undefined; });
+  }
+  return entry;
+}
+
+export async function fetchGoalFeed(date: string) {
   const season = seasonForDate(date);
-  const [snapshot, roster, teams, transactions, prospectRights, dailyStats, seasonStats] = await Promise.all([
-    fetchNhlLiveSnapshot(date),
-    fetchPlayerSeasonsBySeason(season),
-    fetchFantasyTeams(true),
-    fetchLeagueTransactions(),
-    fetchProspectRights(season),
-    fetchNhlDailyStats(date).catch(() => ({ skaters: [], goalies: [] })),
-    date === getNhlStatsDate() ? fetchNhlLiveSeasonStats(season).catch(() => null) : Promise.resolve(null),
+  const [snapshot, [roster, teams, transactions]] = await Promise.all([
+    fetchNhlLiveSnapshot(date), feedMetadata(season),
   ]);
+  const dailyStats = buildNhlDailyStats(snapshot);
+  // Season totals enrich standings movement; never hold live goals/box scores.
+  const seasonStatsPromise = date === getNhlStatsDate()
+    ? fetchNhlLiveSeasonStats(season).catch(() => null) : Promise.resolve(null);
   const scoreResponse = snapshot.scoreboard as ScoreResponse;
   const games = scoreResponse.games ?? [];
   const playByPlay = snapshot.games.map(({ game, playByPlay, boxscore }) => ({
@@ -353,7 +384,9 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   playByPlay.forEach(({ data }) => (data?.rosterSpots ?? []).forEach((player) => {
     gamePlayers.set(player.playerId, [player.firstName?.default, player.lastName?.default].filter(Boolean).join(" "));
   }));
-  const eligibleProspectRights = await removeAgedOutProspectRights(prospectRights, [...gamePlayers].map(([playerId, playerName]) => ({ playerId, playerName })));
+  const rights = feedRights(date, season, gamePlayers);
+  const eligibleProspectRights = rights.value;
+  const enrichmentPromise = rights.pending;
   const tonightPoints = new Map<string, number>([
     ...dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)] as const),
     ...dailyStats.goalies.map((record) => [String(record.playerId), getGoalieScore(record)] as const),
@@ -368,10 +401,11 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
     const nhl = (data?.rosterSpots ?? []).find((candidate) => candidate.playerId === playerId);
     const fantasy = fantasyPlayers.get(String(playerId));
     const name = [nhl?.firstName?.default, nhl?.lastName?.default].filter(Boolean).join(" ") || fantasy?.row.player?.full_name || "Unknown player";
-    const prospectRight = getProspectRight(eligibleProspectRights, playerId, name);
+    const checked = rights.checked.has(playerId);
+    const prospectRight = checked ? getProspectRight(eligibleProspectRights, playerId, name) : undefined;
     const rosterPosition = (fantasy?.row.position || "").toUpperCase();
     const isRosterProspect = ["PROSPECT", "AP"].includes(rosterPosition);
-    return { playerId: String(playerId), name, headshot: nhl?.headshot || fallbackHeadshot, fantasyTeam: fantasy?.team || prospectRight?.team || null, prospect: Boolean(prospectRight) && (isRosterProspect || !fantasy), tonightPoints: tonightPoints.get(String(playerId)) ?? null };
+    return { playerId: String(playerId), name, headshot: nhl?.headshot || fallbackHeadshot, fantasyTeam: fantasy?.team || prospectRight?.team || null, prospect: Boolean(prospectRight) && (isRosterProspect || !fantasy), ownershipPending: !checked && (!fantasy || isRosterProspect), tonightPoints: tonightPoints.get(String(playerId)) ?? null };
   };
   const events = playByPlay.flatMap(({ game, data }) => {
     if (!data) return [];
@@ -386,8 +420,9 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
       return {
         key: `${game.id}:${play.eventId}`, gameId: game.id, gameState: game.gameState, startTimeUTC: game.startTimeUTC,
         nhlTeam: { abbreviation: (scoringIsHome ? game.homeTeam?.abbrev : game.awayTeam?.abbrev) || "NHL", logo: scoringIsHome ? game.homeTeam?.logo : game.awayTeam?.logo },
-        awayTeam: { abbreviation: game.awayTeam?.abbrev || "AWAY", score: details.awayScore ?? game.awayTeam?.score ?? 0, logo: game.awayTeam?.logo },
-        homeTeam: { abbreviation: game.homeTeam?.abbrev || "HOME", score: details.homeScore ?? game.homeTeam?.score ?? 0, logo: game.homeTeam?.logo },
+        awayTeam: { abbreviation: game.awayTeam?.abbrev || "AWAY", score: game.awayTeam?.score ?? details.awayScore ?? 0, logo: game.awayTeam?.logo },
+        homeTeam: { abbreviation: game.homeTeam?.abbrev || "HOME", score: game.homeTeam?.score ?? details.homeScore ?? 0, logo: game.homeTeam?.logo },
+        scoreAtGoal: { away: details.awayScore ?? game.awayTeam?.score ?? 0, home: details.homeScore ?? game.homeTeam?.score ?? 0 },
         scorer, assists, period, periodType: play.periodDescriptor?.periodType || "REG", timeInPeriod: play.timeInPeriod || "00:00",
         strength: strengthLabel(details.situationCode, scoringIsHome), shotType: details.shotType,
         sortValue: estimatedGoalTime(game.startTimeUTC, period, play.periodDescriptor?.periodType || "REG", minutes, seconds, play.sortOrder || 0),
@@ -464,6 +499,7 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   const recordEventsPromise = recordInsightsPromise.then((result) => result.movements);
   const recordChasesPromise = recordInsightsPromise.then((result) => result.chases);
   const milestoneWatchPromise = recordInsightsPromise.then((result) => result.milestones);
+  const standingsPromise = seasonStatsPromise.then(seasonStats => {
   const skaterScores = new Map(seasonStats?.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]) ?? []);
   const goalieScores = new Map(seasonStats?.goalies.map((record) => [String(record.playerId), getGoalieScore(record)]) ?? []);
   const dailySkaterScores = new Map(dailyStats.skaters.map((record) => [String(record.playerId), getSkaterScore(record)]));
@@ -482,5 +518,9 @@ export async function fetchGoalFeed(date: string): Promise<{ events: GoalFeedEve
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((row, index) => ({ ...row, rank: index + 1 }));
   const standings = seasonStats ? rankTeams(skaterScores, goalieScores) : [];
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
-  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, milestoneWatchPromise, standings, baselineStandings, games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
+  return { standings, baselineStandings };
+  });
+  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, milestoneWatchPromise, standingsPromise,
+    enrichmentPromise, generatedAt: snapshot.generatedAt, stale: Boolean(nhlFreshness(snapshot)?.message),
+    games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }

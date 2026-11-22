@@ -42,6 +42,33 @@ test("completed games are reused and scheduled games do not fetch box scores", a
   assert.equal(paths.length, 4); // Two scoreboards + one completed game's pair.
 });
 
+test("expired live snapshots return the refreshed score even with a background context", async (t) => {
+  let now = time;
+  const entries = new Map();
+  const cache = {
+    async match(key) {
+      const entry = entries.get(key.url);
+      return entry && entry.expires > now ? entry.response.clone() : undefined;
+    },
+    async put(key, response) {
+      const ttl = Number(response.headers.get("Cache-Control").match(/max-age=(\d+)/)[1]);
+      entries.set(key.url, { response: response.clone(), expires: now + ttl * 1000 });
+    },
+  };
+  const worker = createWorker({ now: () => now, cache: async () => cache });
+  let score = 3;
+  t.mock.method(globalThis, "fetch", async upstream => Response.json(jsonFor(String(upstream),
+    [{ id: 2026020001, gameState: "LIVE", homeTeam: { score }, awayTeam: { score: 0 } }])));
+  const context = { waitUntil() { assert.fail("Live snapshot must await fresh data, not return old data while refreshing"); } };
+  const first = await (await worker.fetch(new Request(url), env, context)).json();
+  assert.equal(first.scoreboard.games[0].homeTeam.score, 3);
+  score = 8;
+  now += 31_000;
+  const next = await worker.fetch(new Request(url), env, context);
+  assert.equal(next.headers.get("X-NHL-Stale"), null);
+  assert.equal((await next.json()).scoreboard.games[0].homeTeam.score, 8);
+});
+
 test("snapshot 429 is not cached, passes Retry-After, and queues honor cooldown", async (t) => {
   let puts = 0;
   let calls = 0;

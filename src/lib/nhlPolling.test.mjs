@@ -9,10 +9,11 @@ const game = (gameState, startTimeUTC = "2026-11-19T23:00:00Z") => ({ id: 202602
 const options = { now: time + 30_000, date, mode: "live", lastAttempt: time, lastSuccess: time,
   schedule: { date, generatedAt: time, ...refreshPlan([game("LIVE")], time) }, visible: true };
 
-test("live checks run every 30 seconds and season checks every five minutes", () => {
+test("live games refresh every 30 seconds; quiet season views use five minutes", () => {
   assert.equal(shouldRefreshNhl(options), true);
   assert.equal(shouldRefreshNhl({ ...options, now: time + 29_999 }), false);
-  assert.equal(shouldRefreshNhl({ ...options, mode: "season" }), false);
+  assert.equal(shouldRefreshNhl({ ...options, mode: "season" }), true);
+  assert.equal(shouldRefreshNhl({ ...options, mode: "season", schedule: { ...options.schedule, live: false } }), false);
   assert.equal(shouldRefreshNhl({ ...options, mode: "season", now: time + 300_000 }), true);
 });
 
@@ -36,8 +37,9 @@ test("final results get one confirmation then stop; the next league day resumes"
   assert.equal(shouldRefreshNhl({ ...options, schedule, date: "2026-11-20" }), true);
 });
 
-test("unknown schedules and initial failures use a five-minute recovery interval", () => {
-  assert.equal(shouldRefreshNhl({ ...options, schedule: undefined }), false);
+test("unknown live schedules recover at 30 seconds, while season requests remain infrequent", () => {
+  assert.equal(shouldRefreshNhl({ ...options, schedule: undefined }), true);
+  assert.equal(shouldRefreshNhl({ ...options, mode: "season", schedule: undefined }), false);
   assert.equal(shouldRefreshNhl({ ...options, schedule: undefined, now: time + 300_000 }), true);
   assert.equal(refreshPlan([game("FUT", "")], time).nextRefreshAt, time + 300_000);
 });

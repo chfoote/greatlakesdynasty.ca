@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { fetchGoalFeed, type FeedStanding, type GoalieFeedEvent, type GoalFeedEvent, type GoalFeedPlayer, type MilestoneWatchItem, type RecordChase, type RecordMovementEvent } from "../../lib/goalFeed";
-import { fetchNhlPlayerLanding, getNhlStatsDate } from "../../lib/nhl";
+import { getNhlStatsDate } from "../../lib/nhl";
 import type { FantasyTeam } from "../../lib/fantasyTeams";
 import { useAuth } from "../../context/AuthContext";
 import { fetchLatestUserTeamAssignment, fetchUserTeamAssignment } from "../../lib/teamUserAssignments";
@@ -25,7 +25,7 @@ function FantasyOwnership({ player, primary = false }: { player: GoalFeedPlayer;
   const team = player.fantasyTeam;
   return <div className="flex min-w-0 items-center gap-2">
     {player.headshot && <Link to={`/player-profile?playerId=${player.playerId}`} className={`${primary ? "h-10 w-10" : "h-8 w-8"} shrink-0 overflow-hidden rounded-full bg-gray-100 ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700`}><img src={player.headshot} alt="" className="h-full w-full object-cover object-top" /></Link>}
-    <div className="min-w-0"><Link to={`/player-profile?playerId=${player.playerId}`} className={`${primary ? "text-base" : "text-sm"} block truncate font-black text-gray-900 hover:text-brand-500 dark:text-white`}>{player.name}</Link><div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">{team?.logo && <img src={team.logo} alt="" className="h-4 w-4 object-contain" />}{team ? <Link to={`/teams/${team.abbreviation}`} className="hover:text-brand-500">{team.abbreviation}</Link> : <span>Free Agent</span>}{player.prospect && <><span>·</span><span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Prospect</span></>}{player.tonightPoints != null && <><span>·</span><span className="text-brand-500">{player.tonightPoints.toFixed(2)} FPTS tonight</span></>}</div></div>
+    <div className="min-w-0"><Link to={`/player-profile?playerId=${player.playerId}`} className={`${primary ? "text-base" : "text-sm"} block truncate font-black text-gray-900 hover:text-brand-500 dark:text-white`}>{player.name}</Link><div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">{team?.logo && <img src={team.logo} alt="" className="h-4 w-4 object-contain" />}{team ? <Link to={`/teams/${team.abbreviation}`} className="hover:text-brand-500">{team.abbreviation}</Link> : <span>{player.ownershipPending ? "Ownership loading" : "Free Agent"}</span>}{player.prospect && <><span>·</span><span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[8px] text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Prospect</span></>}{player.tonightPoints != null && <><span>·</span><span className="text-brand-500">{player.tonightPoints.toFixed(2)} FPTS tonight</span></>}</div></div>
   </div>;
 }
 
@@ -112,7 +112,7 @@ function GoalCard({ event, records = [], viewerTeamId }: { event: GoalFeedEvent;
     <div className="grid gap-2 p-3 pl-4 lg:grid-cols-[150px_minmax(180px,.85fr)_minmax(260px,1.2fr)_145px] lg:items-center"><div className="flex items-center gap-2.5">{event.nhlTeam.logo && <img src={event.nhlTeam.logo} alt={`${event.nhlTeam.abbreviation} logo`} className="h-9 w-9 object-contain" />}<div><div className="flex items-center gap-1.5"><span className="text-[10px] font-black uppercase tracking-[0.16em] text-red-500">Goal</span>{event.strength && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-black text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">{event.strength}</span>}</div><p className="mt-0.5 text-[10px] font-semibold text-gray-500">{periodLabel(event)} · {event.timeInPeriod}{event.shotType ? ` · ${event.shotType.replace(/-/g, " ")}` : ""}</p></div></div>
       <div className={`rounded-lg px-3 py-2 ${scorerHighlighted ? "bg-gradient-to-r from-amber-100 to-yellow-50 ring-1 ring-amber-300 dark:from-amber-500/20 dark:to-yellow-500/10 dark:ring-amber-700" : "bg-gray-50 dark:bg-gray-900/60"}`}><p className={`mb-1 text-[8px] font-black uppercase tracking-[0.14em] ${scorerHighlighted ? "text-amber-700 dark:text-amber-300" : "text-gray-400"}`}>Scored by</p><FantasyOwnership player={event.scorer} primary /><PlayerRecordLines events={records} playerId={event.scorer.playerId} /></div>
       <div>{event.assists.length ? <div className="grid gap-1.5 sm:grid-cols-2">{event.assists.map((assist) => { const highlighted = assist.fantasyTeam?.id === viewerTeamId; return <div key={assist.playerId} className={`rounded-lg border px-2.5 py-1.5 ${highlighted ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-500/10" : "border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50"}`}><FantasyOwnership player={assist} /><PlayerRecordLines events={records} playerId={assist.playerId} /></div>; })}</div> : <p className="px-2 text-[10px] font-semibold text-gray-400">Unassisted</p>}</div>
-      <div className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-50 px-2 py-2 dark:bg-gray-900/70"><span className="text-[10px] font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-lg font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span><span className="text-[10px] font-black text-gray-500">{event.homeTeam.abbreviation}</span>{final && <span className="text-[7px] font-black uppercase text-gray-400">Final</span>}</div>
+      <div className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-50 px-2 py-2 dark:bg-gray-900/70"><span className="text-[10px] font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-lg font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span>{event.scoreAtGoal && (event.scoreAtGoal.away !== event.awayTeam.score || event.scoreAtGoal.home !== event.homeTeam.score) && <span className="text-[7px] text-gray-400">At goal: {event.scoreAtGoal.away}–{event.scoreAtGoal.home}</span>}<span className="text-[10px] font-black text-gray-500">{event.homeTeam.abbreviation}</span>{final && <span className="text-[7px] font-black uppercase text-gray-400">Final</span>}</div>
     </div>
   </article>;
 }
@@ -146,27 +146,14 @@ export default function GoalHorn() {
   const recordRequest = useRef(0);
   const milestoneHeadshots = useRef(new Map<string, string | null>());
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (background = false): Promise<false | undefined> => {
     const requestId = ++recordRequest.current;
     if (background) setRefreshing(true); else setLoading(true);
     setError("");
     try {
       const result = await fetchGoalFeed(date);
+      if (recordRequest.current !== requestId) return;
       if (feedOrderDate.current !== date) { feedOrder.current.clear(); feedOrderDate.current = date; previousStandings.current = []; standingsEvents.current = []; recordEvents.current = []; }
-      if (!previousStandings.current.length) previousStandings.current = result.baselineStandings;
-      if (previousStandings.current.length && result.standings.length) {
-        const previousByTeam = new Map(previousStandings.current.map((row) => [row.team.id, row]));
-        const currentByTeam = new Map(result.standings.map((row) => [row.team.id, row]));
-        result.standings.forEach((row) => {
-          const previous = previousByTeam.get(row.team.id);
-          if (!previous || row.rank >= previous.rank) return;
-          const passed = previousStandings.current.find((candidate) => candidate.rank >= row.rank && candidate.rank < previous.rank && (currentByTeam.get(candidate.team.id)?.rank || 0) > row.rank);
-          if (!passed) return;
-          const movement: StandingsFeedEvent = { kind: "standings", key: `standings:${date}:${row.team.id}:${passed.team.id}:${row.rank}`, team: row.team, passedTeam: passed.team, rank: row.rank, points: row.points, sortValue: Date.now() };
-          if (!standingsEvents.current.some((event) => event.key === movement.key)) standingsEvents.current.unshift(movement);
-        });
-      }
-      previousStandings.current = result.standings;
       const firstLoad = feedOrder.current.size === 0;
       const nextEvents: DisplayFeedEvent[] = [
         ...result.events.map((event) => ({ ...event, kind: "goal" as const })),
@@ -187,7 +174,30 @@ export default function GoalHorn() {
         });
       }
       setEvents(nextEvents.sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
-      setTeams(result.teams); setGames(result.games); setLive(result.live); setNightlyStars(result.nightlyStars); setUpdatedAt(new Date());
+      setTeams(result.teams); setGames(result.games); setLive(result.live); setNightlyStars(result.nightlyStars); setUpdatedAt(new Date(result.generatedAt));
+      if (result.stale) setError("Live NHL updates are delayed. Showing the last complete snapshot at the time below.");
+      void result.standingsPromise.then(standingData => {
+        if (recordRequest.current !== requestId || feedOrderDate.current !== date) return;
+        if (!previousStandings.current.length) previousStandings.current = standingData.baselineStandings;
+        if (previousStandings.current.length && standingData.standings.length) {
+          const previousByTeam = new Map(previousStandings.current.map((row) => [row.team.id, row]));
+          const currentByTeam = new Map(standingData.standings.map((row) => [row.team.id, row]));
+          standingData.standings.forEach((row) => {
+            const previous = previousByTeam.get(row.team.id);
+            if (!previous || row.rank >= previous.rank) return;
+            const passed = previousStandings.current.find((candidate) => candidate.rank >= row.rank && candidate.rank < previous.rank && (currentByTeam.get(candidate.team.id)?.rank || 0) > row.rank);
+            if (!passed) return;
+            const movement: StandingsFeedEvent = { kind: "standings", key: `standings:${date}:${row.team.id}:${passed.team.id}:${row.rank}`, team: row.team, passedTeam: passed.team, rank: row.rank, points: row.points, sortValue: Date.now() };
+            if (!standingsEvents.current.some((event) => event.key === movement.key)) standingsEvents.current.unshift(movement);
+          });
+        }
+        previousStandings.current = standingData.standings;
+        setEvents(current => [...current.filter(event => event.kind !== "standings"), ...standingsEvents.current]
+          .sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
+      });
+      if (result.enrichmentPromise) void result.enrichmentPromise.then(() => {
+        if (recordRequest.current === requestId && feedOrderDate.current === date) void load(true);
+      });
       setRecordsLoading(true);
       void Promise.all([result.recordEventsPromise, result.recordChasesPromise, result.milestoneWatchPromise]).then(([rows, chases, milestoneRows]) => {
         if (recordRequest.current !== requestId || feedOrderDate.current !== date) return;
@@ -199,11 +209,11 @@ export default function GoalHorn() {
         setRecordsLoading(false);
       });
     }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load Around the Horn."); return false; }
-    finally { setLoading(false); setRefreshing(false); }
+    catch (reason) { if (recordRequest.current === requestId) setError(reason instanceof Error ? reason.message : "Unable to load Around the Horn."); return false; }
+    finally { if (recordRequest.current === requestId) { setLoading(false); setRefreshing(false); } }
   }, [date]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); return () => { recordRequest.current++; }; }, [load]);
   useEffect(() => {
     let active = true;
     if (!user) { setViewerTeamId(null); return; }
@@ -228,15 +238,13 @@ export default function GoalHorn() {
     if (!missing.length) return;
     let active = true;
     missing.forEach((player) => milestoneHeadshots.current.set(player.playerId, null));
-    void Promise.all(missing.map(async (player) => {
-      const landing = await fetchNhlPlayerLanding(Number(player.playerId)).catch(() => null);
-      return { playerId: player.playerId, headshot: landing?.headshot || null };
-    })).then((rows) => {
-      if (!active) return;
-      rows.forEach((row) => milestoneHeadshots.current.set(row.playerId, row.headshot));
-      setMilestones((current) => current.map((milestone) => ({ ...milestone, player: { ...milestone.player, headshot: milestone.player.headshot || milestoneHeadshots.current.get(milestone.player.playerId) || undefined } })));
-      setRecordChases((current) => current.map((chase) => ({ ...chase, player: { ...chase.player, headshot: chase.player.headshot || milestoneHeadshots.current.get(chase.player.playerId) || undefined } })));
-    });
+    const rows = missing.map(player => ({ playerId: player.playerId,
+      headshot: /^\d+$/.test(player.playerId) ? `https://assets.nhle.com/mugs/nhl/latest/${player.playerId}.png` : null }));
+    if (active) {
+      rows.forEach(row => milestoneHeadshots.current.set(row.playerId, row.headshot));
+      setMilestones(current => current.map(milestone => ({ ...milestone, player: { ...milestone.player, headshot: milestone.player.headshot || milestoneHeadshots.current.get(milestone.player.playerId) || undefined } })));
+      setRecordChases(current => current.map(chase => ({ ...chase, player: { ...chase.player, headshot: chase.player.headshot || milestoneHeadshots.current.get(chase.player.playerId) || undefined } })));
+    }
     return () => { active = false; };
   }, [milestones, recordChases, showMilestones, showRecordChases]);
   const filteredEvents = useMemo(() => selectedTeamId == null ? events : events.filter((event) => event.kind === "goal" ? [event.scorer, ...event.assists].some((player) => player.fantasyTeam?.id === selectedTeamId) : event.kind === "goalie" ? event.goalie.fantasyTeam?.id === selectedTeamId : event.kind === "record" ? event.player.fantasyTeam?.id === selectedTeamId : event.team.id === selectedTeamId || event.passedTeam.id === selectedTeamId), [events, selectedTeamId]);

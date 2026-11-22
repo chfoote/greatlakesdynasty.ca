@@ -7,15 +7,17 @@ export function createWorkerScheduler(options: {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   maximumWaitMs?: number;
+  reserveLiveSlot?: boolean;
 }) {
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let active = 0;
   let statsActive = false;
   let nextStatsStart = 0;
-  return async function schedule<T>(stats: boolean, work: () => Promise<T>): Promise<T> {
+  return async function schedule<T>(stats: boolean, work: () => Promise<T>, live = false): Promise<T> {
     const deadline = now() + (options.maximumWaitMs ?? 30_000);
-    while (active >= options.maximum || (stats && (statsActive || now() < nextStatsStart))) {
+    const capacity = options.reserveLiveSlot && !live ? Math.max(1, options.maximum - 1) : options.maximum;
+    while (active >= capacity || (stats && (statsActive || now() < nextStatsStart))) {
       const remaining = deadline - now();
       if (remaining <= 0) throw new WorkerQueueFullError("NHL request queue is busy. Please wait before refreshing.");
       const delay = stats && !statsActive && now() < nextStatsStart

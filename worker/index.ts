@@ -1,5 +1,5 @@
 import { savedKey, savedRetention, savedResponse } from "./saved.ts";
-import { nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
+import { isLiveNhlPath, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
 import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
 import { createWorkerScheduler, WorkerQueueFullError } from "./scheduler.ts";
 
@@ -53,7 +53,7 @@ function fromSnapshot(snapshot: ResponseSnapshot) {
 export function createWorker(options: WorkerOptions = {}) {
   const now = options.now ?? Date.now;
   const statsGap = options.statsGapMs ?? (typeof caches === "undefined" ? 0 : 1250);
-  const schedule = createWorkerScheduler({ maximum: 4, statsGapMs: statsGap, now });
+  const schedule = createWorkerScheduler({ maximum: 4, statsGapMs: statsGap, now, reserveLiveSlot: true });
   const buildSnapshot = createSnapshotBuilder(now);
   // Share bytes rather than Response streams: workerd forbids consuming I/O
   // created by a different request context, even within the same isolate.
@@ -101,7 +101,7 @@ export function createWorker(options: WorkerOptions = {}) {
             result.headers.set("X-NHL-Cache", "HIT");
             return result;
           }
-          if (cache && context) {
+          if (cache && context && !url.pathname.startsWith("/nhl-web-api/live-snapshot/")) {
             const saved = await cache.match(savedKey(key));
             const stale = saved && savedResponse(saved, undefined, now(), url.pathname);
             if (stale) {
@@ -183,7 +183,11 @@ export function createWorker(options: WorkerOptions = {}) {
               delete errorHeaders["content-type"];
               return jsonError("NHL upstream returned a non-JSON response.", upstream.ok ? 502 : upstream.status, errorHeaders);
             }
-            const result = new Response(request.method === "HEAD" ? null : upstream.body, {
+            // Internal snapshot calls must finish reading their body before
+            // releasing the scheduler slot (not just after response headers).
+            const body = request.method === "HEAD" ? null
+              : !cacheEnabled && upstream.body ? await upstream.arrayBuffer() : upstream.body;
+            const result = new Response(body, {
               status: upstream.status,
               statusText: upstream.statusText,
               headers,
@@ -228,7 +232,7 @@ export function createWorker(options: WorkerOptions = {}) {
           });
           return jsonError("Unable to build complete NHL live data.", 502);
         }
-      })() : schedule(route.origin === "https://api.nhle.com" && statsGap > 0, loadUpstream)
+      })() : schedule(route.origin === "https://api.nhle.com" && statsGap > 0, loadUpstream, isLiveNhlPath(url.pathname))
         .catch((error: unknown) => {
           if (!(error instanceof WorkerQueueFullError)) throw error;
           return jsonError(error.message, 503, { "Retry-After": "5", "X-NHL-Source": "queue", "X-NHL-Cache": "BYPASS" });

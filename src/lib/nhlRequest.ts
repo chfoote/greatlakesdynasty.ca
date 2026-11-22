@@ -1,4 +1,4 @@
-import { createLimiter, createPacer, nhlOrigin, nhlTtl, retryAfterMs } from "../../shared/nhl-policy.ts";
+import { createLimiter, createPacer, isLiveNhlPath, nhlOrigin, nhlTtl, retryAfterMs } from "../../shared/nhl-policy.ts";
 
 interface Options {
   fetcher?: typeof fetch;
@@ -10,7 +10,8 @@ interface Options {
 
 export function createNhlClient(options: Options = {}) {
   const now = options.now ?? Date.now;
-  const limited = createLimiter(3);
+  const limited = createLimiter(2);
+  const liveLimited = createLimiter(1);
   const statsGap = options.statsGapMs ?? (typeof window === "undefined" ? 0 : 1250);
   const paceStats = createPacer(statsGap, now);
   const pending = new Map<string, Promise<Response>>();
@@ -97,7 +98,7 @@ export function createNhlClient(options: Options = {}) {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(20_000),
       });
-      if (result.status === 429) {
+      if (result.status === 429 || result.headers.get("X-NHL-Failure-Status") === "429") {
         try { until = Math.max(until, Number(storage()?.getItem(cooldownKey)) || 0); } catch { /* Optional storage. */ }
         const blockedUntil = Math.max(until, cooldowns.get(origin) ?? 0,
           now() + retryAfterMs(result.headers.get("Retry-After"), now()));
@@ -127,7 +128,7 @@ export function createNhlClient(options: Options = {}) {
     });
     // All stats reports share this lane, including pages of different reports.
     // Cached responses return above without consuming a paced network slot.
-    const work = limited(() => origin === "https://api.nhle.com" && statsGap > 0
+    const work = (isLiveNhlPath(url.pathname) ? liveLimited : limited)(() => origin === "https://api.nhle.com" && statsGap > 0
       ? lock("gld:nhl:stats-origin", () => paceStats(fetchPublic)) : fetchPublic());
     pending.set(key, work);
     try { return (await work).clone(); }

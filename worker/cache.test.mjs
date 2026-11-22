@@ -135,7 +135,7 @@ test("cache hits remain usable during origin cooldown", async (t) => {
   assert.equal(calls, 2);
 });
 
-test("upstream concurrency stays bounded", async (t) => {
+test("general upstream concurrency reserves a slot for live requests", async (t) => {
   const f = fixture();
   let active = 0;
   let maximum = 0;
@@ -147,7 +147,7 @@ test("upstream concurrency stays bounded", async (t) => {
     return Response.json({ data: [1] });
   });
   await Promise.all(Array.from({ length: 16 }, (_, i) => f.worker.fetch(req(`${path}&offset=${i}`), env)));
-  assert.equal(maximum, 4);
+  assert.equal(maximum, 3);
 });
 
 for (const status of [429, 500, 502]) {

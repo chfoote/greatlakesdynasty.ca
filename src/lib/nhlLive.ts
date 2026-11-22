@@ -22,10 +22,14 @@ async function loadNhlLiveSnapshot(date: string): Promise<LiveSnapshot> {
   return markNhlFetched(snapshot, snapshot.generatedAt);
 }
 
-export function fetchNhlLiveSnapshot(date: string): Promise<LiveSnapshot> {
-  return savedNhl<LiveSnapshot>(`live:${date}`, () => loadNhlLiveSnapshot(date),
+export async function fetchNhlLiveSnapshot(date: string, options: { waitForRefresh?: boolean } = {}): Promise<LiveSnapshot> {
+  const snapshot = await savedNhl<LiveSnapshot>(`live:${date}`, () => loadNhlLiveSnapshot(date),
     (value): value is LiveSnapshot => Boolean(value && typeof value === 'object' && 'date' in value && value.date === date
       && 'games' in value && Array.isArray(value.games) && 'scoreboard' in value && value.scoreboard
       && typeof value.scoreboard === 'object' && 'games' in value.scoreboard && Array.isArray(value.scoreboard.games)
-      && 'generatedAt' in value && Number.isFinite(value.generatedAt)), 30_000);
+      && 'generatedAt' in value && Number.isFinite(value.generatedAt)
+      && 'live' in value && typeof value.live === 'boolean' && 'nextRefreshAt' in value
+      && (value.nextRefreshAt === null || Number.isFinite(value.nextRefreshAt))), 30_000, { ...options, staleRetryMs: 5000 });
+  if (date === nhlStatsDate()) latest = snapshot;
+  return snapshot;
 }

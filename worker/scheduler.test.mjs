@@ -41,3 +41,12 @@ test('Worker queue wait is bounded and does not leak a concurrency slot', async 
   await first;
   assert.equal(await schedule(false, async () => 'available'), 'available');
 });
+
+test('reserved live slot stays available while general requests occupy their capacity',async()=>{
+  const schedule=createWorkerScheduler({maximum:4,statsGapMs:0,reserveLiveSlot:true});
+  const releases=[];
+  const general=Array.from({length:3},()=>schedule(false,()=>new Promise(resolve=>releases.push(resolve))));
+  assert.equal(releases.length,3);
+  assert.equal(await schedule(false,async()=>'live-score',true),'live-score');
+  releases.forEach(resolve=>resolve('done'));await Promise.all(general);
+});

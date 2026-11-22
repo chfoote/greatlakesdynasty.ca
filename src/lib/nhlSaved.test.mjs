@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createSavedNhlCache, NhlBaselineAvailable, validPlayerRows } from './nhlSaved.ts';
-import { markNhlSaved, nhlFreshness } from './nhlFreshness.ts';
+import { inheritNhlFreshness, markNhlFetched, markNhlSaved, nhlFreshness } from './nhlFreshness.ts';
 const rows = [{ playerId: 1, goals: 5 }];
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function fixture() {
@@ -131,4 +131,40 @@ test('saved data recovers after cooldown and publishes a new successful timestam
   assert.equal(entry.value[0].goals, 6);
   assert.equal(entry.updatedAt, f.now());
   assert.equal(entry.message, undefined);
+});
+
+test('live poll can await the existing background refresh instead of returning the old score again', async () => {
+  const f=fixture(), cache=createSavedNhlCache(f.options);
+  await cache('live:2026-11-20',async()=>[{playerId:1,goals:3}],validPlayerRows,30000);
+  f.advance(30001);
+  let finish,calls=0;
+  const load=()=>{calls++;return new Promise(resolve=>{finish=resolve;});};
+  const old=await cache('live:2026-11-20',load,validPlayerRows,30000);
+  assert.equal(old[0].goals,3);
+  const poll=cache('live:2026-11-20',load,validPlayerRows,30000,{waitForRefresh:true});
+  finish([{playerId:1,goals:8}]);
+  assert.equal((await poll)[0].goals,8);
+  assert.equal(calls,1);
+});
+
+test('new live totals advance while a valid through-yesterday baseline is reused', async () => {
+  const f = fixture(), cache = createSavedNhlCache(f.options);
+  const baseline = markNhlFetched([], f.now());
+  const assemble = goals => inheritNhlFreshness([{ playerId: 1, goals }],
+    [baseline, markNhlFetched([], f.now())], 'latest-if-fresh');
+  await cache('live-season:2027', async () => assemble(3), validPlayerRows, 30000);
+  f.advance(30001);
+  const next = await cache('live-season:2027', async () => assemble(8), validPlayerRows, 30000, { waitForRefresh: true });
+  assert.equal(next[0].goals, 8);
+  assert.equal(nhlFreshness(next).updatedAt, f.now());
+  assert.equal(nhlFreshness(next).message, undefined);
+});
+
+test('a delayed composite source keeps its older timestamp and warning', () => {
+  const old = markNhlSaved([], 1000, 'Baseline is delayed');
+  const live = markNhlFetched([], 2000);
+  const composite = inheritNhlFreshness({}, [old, live], 'latest-if-fresh');
+  assert.equal(nhlFreshness(composite).updatedAt, 1000);
+  assert.equal(nhlFreshness(composite).message, 'Baseline is delayed');
+  assert.equal(nhlFreshness(inheritNhlFreshness({}, [markNhlFetched([], 1000), live])).updatedAt, 1000);
 });
