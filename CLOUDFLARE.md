@@ -803,3 +803,31 @@ fantasy formulas and the complete player/team ranking calculation block were
 compared with HEAD and are unchanged. Pending-file review found no credentials or
 changes to Supabase/authentication, database files, Wrangler configuration or the
 dependency lockfile. Existing CSS-minification and large-chunk warnings remain.
+
+## Standings overlap and device discrepancies
+
+The user confirmed both browsers were on Season 2027 / Season but showed totals
+differing by 0.6. Separate browser and edge snapshots can differ in age; account
+identity does not synchronize public NHL browser caches. The exact real-world
+player/stat difference cannot be established from the two team totals alone.
+
+A separate, reproducible standings race was found: initial stats were held behind
+the initial roster/branding Promise.all. A background update could publish newer
+stats first, then the delayed initial metadata completion restored the older stats.
+Standings now publishes initial stats independently of metadata completion and uses
+separate generation guards for season and daily requests across initial loads,
+background cache notifications and polling. Superseded requests cannot overwrite
+the latest pair of skater/goalie maps. Superseded daily loads also cannot leave the
+Updating indicator stuck. No extra API requests, cache purges or scoring changes
+are added.
+
+`npm run test:standings:runtime` uses actual standings rendering and the real
+source-update hook with isolated Chrome profiles, fixture NHL data and delayed
+read-only league metadata. Starting scores of 1544.4 and 1545 are controlled
+fixtures; 1545 is the fixture's newer source, not a verified production team total.
+The original HEAD fails the delayed-metadata scenario (`--baseline`); the fixed
+page converges in both profiles and also passes overlapping Today/Yesterday loads.
+The browser fixture blocks external data connections. Production build including
+both TypeScript checks and all 127 existing unit tests pass. Supabase, authentication,
+league data and standings scoring/lineup calculations are unchanged. This new fix
+remains local and is not committed, pushed or deployed.

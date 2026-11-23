@@ -1,7 +1,7 @@
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
 import { isNhlRateLimit } from "../../../shared/nhl-policy";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -163,6 +163,10 @@ export default function Standings() {
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Initial loads, saved-data notifications and polls can overlap. Only the
+  // newest request for each score view may publish its skater/goalie pair.
+  const seasonStatsGeneration = useRef(0);
+  const dailyStatsGeneration = useRef(0);
 
   const revision = useNhlDataRevision(statsView === 'season'
     ? [`live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
@@ -170,13 +174,15 @@ export default function Standings() {
   useEffect(() => {
     if (!revision) return;
     let active = true;
+    const generationRef = statsView === 'season' ? seasonStatsGeneration : dailyStatsGeneration;
+    const generation = ++generationRef.current;
     const request = statsView === 'season'
       ? (selectedSeason === CURRENT_LEAGUE_SEASON ? fetchNhlLiveSeasonStats(selectedSeason)
         : Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
           .then(([skaters, goalies]) => ({ skaters, goalies })))
       : fetchNhlDailyStats(getNhlStatsDate(statsView === 'yesterday' ? -1 : 0));
     request.then(stats => {
-      if (!active) return;
+      if (!active || generationRef.current !== generation) return;
       if (statsView === 'season') {
         setSkaterStats(new Map(stats.skaters.map(row => [String(row.playerId), row])));
         setGoalieStats(new Map(stats.goalies.map(row => [String(row.playerId), row])));
@@ -185,7 +191,9 @@ export default function Standings() {
         setDailySkaterStats(new Map(stats.skaters.map(row => [String(row.playerId), row])));
         setDailyGoalieStats(new Map(stats.goalies.map(row => [String(row.playerId), row])));
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      if (active && statsView !== 'season' && generationRef.current === generation) setDailyLoading(false);
+    });
     return () => { active = false; };
   }, [revision, selectedSeason, statsView]);
 
@@ -194,6 +202,7 @@ export default function Standings() {
 
     setLoading(true);
     setError("");
+    const generation = ++seasonStatsGeneration.current;
 
     const finalizedStatsRequest = () => Promise.all([
       fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
@@ -213,17 +222,16 @@ export default function Standings() {
       setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
       setPlayerSeasons(seasonRows);
     });
-    Promise.all([metadataRequest, statsRequest])
-      .then(([, stats]) => {
-        if (!active) return;
-        setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
-        setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
-      })
-      .catch((err) => {
-        if (active) {
-          setError(err.message || "Unable to load standings.");
-        }
-      })
+    // Publish stats when they arrive, not after unrelated roster metadata.
+    const publishStats = statsRequest.then(stats => {
+      if (!active || seasonStatsGeneration.current !== generation) return;
+      setSkaterStats(new Map(stats.skaters.map(record => [String(record.playerId), record])));
+      setGoalieStats(new Map(stats.goalies.map(record => [String(record.playerId), record])));
+    }).catch(err => {
+      if (active && seasonStatsGeneration.current === generation) setError(err.message || "Unable to load standings.");
+    });
+    Promise.all([metadataRequest, publishStats])
+      .catch(err => { if (active) setError(err.message || "Unable to load standings rosters."); })
       .finally(() => {
         if (active) {
           setLoading(false);
@@ -239,9 +247,10 @@ export default function Standings() {
     if (statsView !== "season" || selectedSeason !== CURRENT_LEAGUE_SEASON) return;
     let active = true;
     const refresh = async () => {
+      const generation = ++seasonStatsGeneration.current;
       try {
         const stats = await fetchNhlLiveSeasonStats(selectedSeason);
-        if (!active) return;
+        if (!active || seasonStatsGeneration.current !== generation) return;
         setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
         setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));
         setError("");
@@ -259,6 +268,7 @@ export default function Standings() {
     let active = true;
     let requestedDate = "";
     const refresh = async () => {
+      const generation = ++dailyStatsGeneration.current;
       setDailyLoading(true);
       try {
         const date = getNhlStatsDate(statsView === "yesterday" ? -1 : 0);
@@ -267,14 +277,14 @@ export default function Standings() {
           setDailySkaterStats(new Map()); setDailyGoalieStats(new Map());
         }
         const result = await fetchNhlDailyStats(date);
-        if (!active) return;
+        if (!active || dailyStatsGeneration.current !== generation) return;
         setDailySkaterStats(new Map(result.skaters.map((record) => [String(record.playerId), record])));
         setDailyGoalieStats(new Map(result.goalies.map((record) => [String(record.playerId), record])));
       } catch {
         // Preserve the last complete daily results during transient API failures.
         return false;
       } finally {
-        if (active) setDailyLoading(false);
+        if (active && dailyStatsGeneration.current === generation) setDailyLoading(false);
       }
     };
     void refresh();
