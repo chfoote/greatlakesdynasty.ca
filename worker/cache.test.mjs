@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createWorker } from "./index.ts";
+import { createSavedNhlCache, validPlayerRows } from "../src/lib/nhlSaved.ts";
+import { fetchCompleteNhlReport } from "../src/lib/nhlReports.ts";
 
 const env = { ASSETS: { fetch() { throw Error("Unexpected asset fallback"); } } };
 const req = (path) => new Request(`https://league.example${path}`);
@@ -185,7 +187,7 @@ test('shared saved data expires and malformed successes cannot replace it', asyn
   assert.equal(f.puts(), 2);
 });
 
-test('shared saved JSON returns immediately while waitUntil refreshes in the background', async t => {
+test('shared saved profile JSON returns immediately while waitUntil refreshes in the background', async t => {
   const f = fixture();
   let calls = 0, finish;
   t.mock.method(globalThis, 'fetch', async () => {
@@ -193,17 +195,56 @@ test('shared saved JSON returns immediately while waitUntil refreshes in the bac
     if (calls === 1) return Response.json({ data: [1] });
     return new Promise(resolve => { finish = resolve; });
   });
-  await f.worker.fetch(req(path), env);
-  f.advance(300_001);
+  const profile = '/nhl-web-api/player/8478402/landing';
+  await f.worker.fetch(req(profile), env);
+  f.advance(3600_001);
   const work = [];
-  const result = await f.worker.fetch(req(path), env, { waitUntil: promise => work.push(promise) });
+  const result = await f.worker.fetch(req(profile), env, { waitUntil: promise => work.push(promise) });
   assert.equal(result.headers.get('X-NHL-Stale'), '1');
   assert.deepEqual(await result.json(), { data: [1] });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls, 2);
   finish(Response.json({ data: [2] }));
   await Promise.all(work);
-  const fresh = await f.worker.fetch(req(path), env);
+  const fresh = await f.worker.fetch(req(profile), env);
   assert.equal(fresh.headers.get('X-NHL-Stale'), null);
   assert.deepEqual(await fresh.json(), { data: [2] });
+});
+
+test('successive expired report refreshes advance the assembled browser dataset instead of perpetually serving the previous cycle', async t => {
+  const f = fixture();
+  let time = start, goals = 1;
+  const saved = createSavedNhlCache({ now: () => time, storage: () => undefined, onChange() {} });
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ data: [{ playerId: 1, goals }], total: 1 }));
+  const background = [];
+  const load = () => fetchCompleteNhlReport(path, 'summary', url => f.worker.fetch(req(url), env,
+    { waitUntil: promise => background.push(promise) }));
+  const first = await saved('skaters:20262027', load, validPlayerRows);
+  assert.equal(first[0].goals, 1);
+  for (goals = 2; goals <= 3; goals++) {
+    time += 300_001; f.advance(300_001);
+    const next = await saved('skaters:20262027', load, validPlayerRows, 300_000, { waitForRefresh: true });
+    await Promise.all(background);
+    assert.equal(next[0].goals, goals, 'A successful upstream refresh must replace the prior complete report');
+  }
+});
+
+test('a two-day-old complete dataset survives an outage and is replaced when upstream recovers', async t => {
+  const f = fixture();
+  let time = start, unavailable = false, goals = 1;
+  const saved = createSavedNhlCache({ now: () => time, storage: () => undefined, onChange() {} });
+  t.mock.method(globalThis, 'fetch', async () => unavailable
+    ? Response.json({ error: 'unavailable' }, { status: 503 })
+    : Response.json({ data: [{ playerId: 1, goals }], total: 1 }));
+  const work = [];
+  const load = () => fetchCompleteNhlReport(path, 'summary', url => f.worker.fetch(req(url), env,
+    { waitUntil: promise => work.push(promise) }));
+  await saved('skaters:20262027', load, validPlayerRows);
+  time += 2 * 86400_000; f.advance(2 * 86400_000); unavailable = true;
+  const old = await saved('skaters:20262027', load, validPlayerRows, 300_000, { waitForRefresh: true });
+  await Promise.all(work);
+  assert.equal(old[0].goals, 1);
+  time += 60_001; f.advance(60_001); unavailable = false; goals = 8;
+  const recovered = await saved('skaters:20262027', load, validPlayerRows, 300_000, { waitForRefresh: true });
+  assert.equal(recovered[0].goals, 8);
 });

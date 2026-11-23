@@ -1,3 +1,5 @@
+import NhlHeadshot from "../../components/hockey/NhlHeadshot";
+import { playerMetadata } from "../../lib/nhlPlayerMetadata";
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
 import { isNhlRateLimit } from "../../../shared/nhl-policy";
@@ -24,6 +26,7 @@ import {
   getNhlStatsDate,
   fetchNhlLivePlayerIds,
   fetchNhlLiveSeasonStats,
+  fetchNhlPlayerBiographies,
   fetchNhlPlayerLanding,
   fetchNhlSkaterStats,
   formatFantasyPoints,
@@ -161,7 +164,7 @@ const lineupCardTone: Record<string, string> = {
   G: "border-purple-300 ring-purple-100 shadow-[0_7px_20px_rgba(168,85,247,0.22)] dark:border-purple-500/60 dark:ring-purple-500/20",
 };
 
-function LineupPlayerCard({ season, score, ppg, headshot, nhlTeam, birthCountry, role, isLive, contractYear, contractLength }: { season?: PlayerSeasonWithRelations; score?: number; ppg?: number; headshot?: string; nhlTeam?: string; birthCountry?: string; role?: "C" | "A"; isLive?: boolean; contractYear?: number; contractLength?: number }) {
+function LineupPlayerCard({ season, score, ppg, nhlTeam, birthCountry, role, isLive, contractYear, contractLength }: { season?: PlayerSeasonWithRelations; score?: number; ppg?: number; headshot?: string; nhlTeam?: string; birthCountry?: string; role?: "C" | "A"; isLive?: boolean; contractYear?: number; contractLength?: number }) {
   if (!season) return <div className="h-[92px] rounded-2xl border border-dashed border-sky-200/80 bg-white/35 dark:border-sky-900/70 dark:bg-gray-950/30" />;
   const apiId = playerApiId(season);
   const nhlAbbreviation = nhlTeam?.split(",")[0]?.trim();
@@ -170,12 +173,12 @@ function LineupPlayerCard({ season, score, ppg, headshot, nhlTeam, birthCountry,
     {nhlAbbreviation && <img src={`https://assets.nhle.com/logos/nhl/svg/${nhlAbbreviation}_light.svg`} alt="" aria-hidden="true" className="pointer-events-none absolute -right-[72px] top-[62%] h-[216px] w-[216px] -translate-y-1/2 object-contain opacity-10 grayscale transition group-hover:opacity-[0.15] dark:opacity-[0.12]" />}
     <div className="relative z-10 flex w-[72px] shrink-0 items-center justify-center bg-white dark:bg-gray-900">
       <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-white shadow-sm ring-1 ring-gray-200 dark:border-gray-900 dark:bg-gray-900 dark:ring-gray-700">
-        {headshot ? <img src={headshot} alt="" className="h-full w-full scale-[1.12] object-cover object-[center_22%] transition duration-200 group-hover:scale-[1.18]" /> : <span className="text-lg font-black text-gray-400 dark:text-gray-500">{playerName(season).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}
+        <NhlHeadshot playerId={apiId} name={playerName(season)} loading="eager" className="h-full w-full scale-[1.12] object-cover object-[center_22%] transition duration-200 group-hover:scale-[1.18]" fallbackClassName="text-lg font-black text-gray-400 dark:text-gray-500" />
       </div>
     </div>
     <div className="relative z-10 min-w-0 flex-1 px-2.5 py-2">
       <div className="flex items-start justify-between gap-1">
-        <div className="flex min-w-0 items-center gap-1"><PositionBadge position={position(season)} /><CountryFlagBadge countryCode={birthCountry} />{role && <LeadershipBadge role={role} />}{isLive && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-error-500" title="Live now" />}</div>
+        <div className="flex min-w-0 items-center gap-1"><PositionBadge position={position(season)} /><CountryFlagBadge countryCode={birthCountry || playerMetadata.read(apiId)?.birthCountry} />{role && <LeadershipBadge role={role} />}{isLive && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-error-500" title="Live now" />}</div>
         <span className="shrink-0 rounded-md bg-slate-900 px-1.5 py-1 text-[8px] font-black tabular-nums text-white dark:bg-brand-500">{formatFantasyPoints(score || 0)} <span className="text-white/65">({(ppg || 0).toFixed(2)})</span></span>
       </div>
       <p className="mt-1.5 truncate text-[13px] font-black leading-tight text-gray-900 group-hover:text-brand-600 dark:text-white dark:group-hover:text-brand-300">{playerName(season)}</p>
@@ -584,14 +587,15 @@ export default function HockeyTeamDetail() {
   const [multiYearLeadership, setMultiYearLeadership] = useState<Map<number, "C" | "A">>(new Map());
   const [skaters, setSkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalies, setGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
-  const [lineupHeadshots, setLineupHeadshots] = useState<Map<string, string>>(new Map());
+  const [lineupHeadshots] = useState<Map<string, string>>(new Map());
   const [nhlTeamsByPlayer, setNhlTeamsByPlayer] = useState<Map<string, string>>(new Map());
   const [birthCountriesByPlayer, setBirthCountriesByPlayer] = useState<Map<string, string>>(new Map());
   const [birthDatesByPlayer, setBirthDatesByPlayer] = useState<Map<string, string>>(new Map());
   const [statsView, setStatsView] = useState<"season" | "today" | "yesterday">("season");
   const [dailySkaters, setDailySkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [dailyGoalies, setDailyGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
-  const playerCards = useRef(new Map<string, Promise<{ headshot?: string; currentTeamAbbrev?: string; birthCountry?: string; birthDate?: string }>>());
+
+  const metadataFallbacks = useRef(new Map<string, Promise<{ currentTeamAbbrev?: string; birthCountry?: string; birthDate?: string }>>());
   const [dailyStatsError, setDailyStatsError] = useState("");
   const [dailyStatsLoading, setDailyStatsLoading] = useState(false);
   const [livePlayerIds, setLivePlayerIds] = useState<Set<string>>(new Set());
@@ -787,24 +791,45 @@ export default function HockeyTeamDetail() {
     let active = true;
     const metadataRows = viewMode === "multi" ? [...roster, ...Object.values(multiYearRosters).flat()] : roster;
     const ids = [...new Set(metadataRows.map(playerApiId))].filter(Boolean);
-    ids.forEach(id => {
-      let request = playerCards.current.get(id);
-      if (!request) {
-        request = fetchNhlPlayerLanding(Number(id)).then(({ headshot, currentTeamAbbrev, birthCountry, birthDate }) =>
-          ({ headshot, currentTeamAbbrev, birthCountry, birthDate }));
-        playerCards.current.set(id, request);
-        request.catch(() => { if (playerCards.current.get(id) === request) playerCards.current.delete(id); });
-      }
-      void request.then(landing => {
-        if (!active) return;
-        if (landing.headshot) setLineupHeadshots(current => new Map(current).set(id, landing.headshot!));
-        if (landing.currentTeamAbbrev) setNhlTeamsByPlayer(current => new Map(current).set(id, landing.currentTeamAbbrev!));
-        if (landing.birthCountry) setBirthCountriesByPlayer(current => new Map(current).set(id, landing.birthCountry!));
-        if (landing.birthDate) setBirthDatesByPlayer(current => new Map(current).set(id, landing.birthDate!));
-      }).catch(() => {});
-    });
+    const hydrate = () => {
+      if (!active) return;
+      const countries = new Map<string, string>(), dates = new Map<string, string>(), teams = new Map<string, string>();
+      ids.forEach(id => {
+        const bio = playerMetadata.read(id);
+        if (bio?.birthCountry) countries.set(id, bio.birthCountry);
+        if (bio?.birthDate) dates.set(id, bio.birthDate);
+        const stats = skaters.get(id) || goalies.get(id);
+        if (stats?.teamAbbrevs) teams.set(id, stats.teamAbbrevs);
+      });
+      if (countries.size) setBirthCountriesByPlayer(current => new Map([...current, ...countries]));
+      if (dates.size) setBirthDatesByPlayer(current => new Map([...current, ...dates]));
+      if (teams.size) setNhlTeamsByPlayer(current => new Map([...current, ...teams]));
+    };
+    // Profiles are a fallback for unplayed players or ambiguous multi-team stats,
+    // never a dependency for photos or flags already known from public bios.
+    function loadMissing() {
+      if (!active) return;
+      ids.filter(id => !playerMetadata.read(id)?.birthCountry || (skaters.get(id) || goalies.get(id))?.teamAbbrevs?.includes(",")).forEach(id => {
+        let request = metadataFallbacks.current.get(id);
+        if (!request) {
+          request = fetchNhlPlayerLanding(Number(id)).then(({ currentTeamAbbrev, birthCountry, birthDate }) => ({ currentTeamAbbrev, birthCountry, birthDate }));
+          metadataFallbacks.current.set(id, request);
+          request.catch(() => { if (metadataFallbacks.current.get(id) === request) metadataFallbacks.current.delete(id); });
+        }
+        void request.then(value => {
+          if (!active) return;
+          hydrate();
+          if (value.currentTeamAbbrev) setNhlTeamsByPlayer(current => new Map(current).set(id, value.currentTeamAbbrev!));
+        }).catch(() => {});
+      });
+    }
+    hydrate();
+    if (ids.some(id => !playerMetadata.read(id)?.birthCountry)) {
+      void fetchNhlPlayerBiographies(nhlSeasonId(selectedSeason), ids, hydrate).then(() => { hydrate(); loadMissing(); })
+        .catch(() => { hydrate(); loadMissing(); });
+    } else loadMissing();
     return () => { active = false; };
-  }, [roster, multiYearRosters, viewMode, revision]);
+  }, [roster, multiYearRosters, viewMode, selectedSeason, skaters, goalies, revision]);
 
   useEffect(() => {
     let active = true;

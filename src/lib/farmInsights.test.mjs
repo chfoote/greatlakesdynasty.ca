@@ -35,10 +35,10 @@ test('Front Office requests only its own aging candidates and the two relevant d
   assert.deepEqual([...result.agingByTeam.keys()],[1]);
   assert.equal(result.agingByTeam.get(1)[0].name,'Player One');
   assert.deepEqual(state.drafts.sort(),[state.earliest,state.earliest+1]);
-  assert.deepEqual(state.landings,[1]);
+  assert.deepEqual(state.landings,[]);
   assert.equal(result.rankings.length,0);
   await api.fetchFarmInsights(1);
-  assert.equal(state.landings.length,1);
+  assert.equal(state.landings.length,0);
 });
 
 test('full farm rankings remain available and do not reuse a team-only result',async t=>{
@@ -48,7 +48,7 @@ test('full farm rankings remain available and do not reuse a team-only result',a
   assert.equal(league.rankings.length,2);
   assert.deepEqual([...league.agingByTeam.keys()],[1,2]);
   assert.ok(state.drafts.some(year=>year>state.earliest+1));
-  assert.ok(state.landings.includes(2));
+  assert.equal(state.landings.length,0);
 });
 
 test('rankings do not wait for profile photos or league-wide birthday checks',async t=>{

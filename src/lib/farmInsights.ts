@@ -1,3 +1,4 @@
+import { playerMetadata } from "./nhlPlayerMetadata";
 import { createFarmRankingsCache } from "./farmRankingsCache";
 import { createProspectOwnershipIndex } from "./prospectOwnership";
 import { inheritNhlFreshness } from "./nhlFreshness";
@@ -69,11 +70,10 @@ export function fetchFarmInsights(teamId?: number, options: { rankingsOnly?: boo
       return { team: row.team, rank: 0, eligible: row.eligible, nhlActive: row.nhlActive, production: row.production, draftQuality, farmScore: productionIndex * 85 + draftQuality * 0.10 + depthIndex * 5, topProspects: row.topProspects };
     }).sort((a, b) => b.farmScore - a.farmScore || b.production - a.production || b.draftQuality - a.draftQuality).map((row, index) => ({ ...row, rank: index + 1 }));
     if (options.rankingsOnly) return { rankings: inheritNhlFreshness(rankingRows, [stats]), agingByTeam: new Map<number, AgingProspect[]>() };
-    const rankingsWithHeadshots = await Promise.all((teamId === undefined ? rankingRows : []).map(async (row) => ({ ...row, topProspects: await Promise.all(row.topProspects.map(async (prospect) => {
-      if (!prospect.playerId) return prospect;
-      try { const landing = await fetchNhlPlayerLanding(prospect.playerId); return landing.headshot ? { ...prospect, headshot: landing.headshot } : prospect; }
-      catch { return prospect; }
-    })) })));
+    const rankingsWithHeadshots = (teamId === undefined ? rankingRows : []).map(row => ({ ...row,
+      topProspects: row.topProspects.map(prospect => prospect.playerId
+        ? { ...prospect, headshot: `https://assets.nhle.com/mugs/nhl/latest/${prospect.playerId}.png` } : prospect),
+    }));
     const agingByTeam = new Map<number, AgingProspect[]>();
     await Promise.all(displayTeams.map(async (team) => {
       const candidates = rowsFor(team).filter((row) => !row.signed && row.year <= earliestDraftYear() + 1 && (!row.birthDate || age(row.birthDate) === 24));
@@ -82,7 +82,10 @@ export function fetchFarmInsights(teamId?: number, options: { rankingsOnly?: boo
           let playerId = row.playerId;
           if (!playerId) playerId = Number((await searchNhlPlayers(row.name)).find((result) => normalize(result.name) === normalize(row.name))?.playerId);
           if (!Number.isFinite(playerId)) return null;
-          const landing = await fetchNhlPlayerLanding(playerId!); if (!landing.birthDate) return null;
+          const knownBirthDate = row.birthDate || playerMetadata.read(playerId!)?.birthDate;
+          const landing = knownBirthDate ? { birthDate: knownBirthDate, currentTeamAbbrev: row.nhlTeam, position: row.pick.positionCode,
+            headshot: `https://assets.nhle.com/mugs/nhl/latest/${playerId}.png` } : await fetchNhlPlayerLanding(playerId!);
+          if (!landing.birthDate) return null;
           const playerAge = age(landing.birthDate); if (playerAge !== 24) return null;
           const prospect: AgingProspect = { playerId: playerId!, name: row.name, position: row.pick.positionCode || landing.position || "—", birthDate: landing.birthDate, birthday: new Date(`${landing.birthDate}T00:00:00`).toLocaleDateString("en-CA", { month: "short", day: "numeric" }), age: playerAge, draftYear: row.year, nhlTeam: landing.currentTeamAbbrev || row.nhlTeam, score: row.score };
           if (landing.headshot) prospect.headshot = landing.headshot;

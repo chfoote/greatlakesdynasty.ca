@@ -48,3 +48,13 @@ test("league date rollover keeps the existing six-hour shift and Eastern timezon
   assert.equal(nhlStatsDate(0, Date.parse("2026-11-20T10:59:00Z")), "2026-11-19");
   assert.equal(nhlStatsDate(0, Date.parse("2026-11-20T11:00:00Z")), "2026-11-20");
 });
+
+test("season totals recover every five minutes even before puck drop or after finals", () => {
+  for (const nextRefreshAt of [null, time + 8 * 3600_000]) {
+    const quiet = { date, generatedAt: time, live: false, nextRefreshAt };
+    assert.equal(shouldRefreshNhl({ ...options, schedule: quiet, mode: 'season', now: time + 300_000 }), true);
+    assert.equal(shouldRefreshNhl({ ...options, schedule: quiet, mode: 'season', now: time + 299_999 }), false);
+    assert.equal(shouldRefreshNhl({ ...options, schedule: quiet, mode: 'season', now: time + 300_000, visible: false }), false);
+    assert.equal(shouldRefreshNhl({ ...options, schedule: quiet, mode: 'live', now: time + 300_000 }), false);
+  }
+});

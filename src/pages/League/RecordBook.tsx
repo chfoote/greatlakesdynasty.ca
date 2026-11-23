@@ -1,3 +1,4 @@
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import NhlHeadshot from "../../components/hockey/NhlHeadshot";
 import type { RecordBookSection } from "../../lib/recordBook";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -152,9 +153,10 @@ export default function RecordBook() {
     return () => { active = false; };
   }, [abbreviation]);
 
-  const load = useCallback(async () => {
+  const revision = useNhlDataRevision(season ? [`skaters:${(season - 1) * 10000 + season}`, `goalies:${(season - 1) * 10000 + season}`] : []);
+  const load = useCallback(async (background = false) => {
     const generation = ++loadGeneration.current;
-    setLoading(true); setError(""); setWarnings([]);
+    if (!background) { setLoading(true); setError(""); setWarnings([]); }
     try {
       const result = await fetchRecordBookData(team?.id || null, season, undefined, section);
       if (generation !== loadGeneration.current) return;
@@ -162,7 +164,11 @@ export default function RecordBook() {
       setFranchisePositionLeaders(result.franchisePositionLeaders); setFranchiseStatLines(result.franchiseStatLines);
       setFranchises(result.teams); setHistory(result.history); setWarnings(result.warnings);
     } catch (reason) {
-      if (generation === loadGeneration.current) setError(reason instanceof Error ? reason.message : "Unable to load the Record Book.");
+      if (generation === loadGeneration.current) {
+        const message = reason instanceof Error ? reason.message : "Unable to load the Record Book.";
+        if (background) setWarnings(current => [...new Set([...current, `Record refresh delayed: ${message}`])]);
+        else setError(message);
+      }
     } finally { if (generation === loadGeneration.current) setLoading(false); }
   }, [team?.id, season, section]);
 
@@ -171,6 +177,12 @@ export default function RecordBook() {
     void load();
     return () => { loadGeneration.current++; };
   }, [load, team, abbreviation]);
+
+  useEffect(() => {
+    if (!revision || (abbreviation && (!team || team.abbreviation.toLowerCase() !== abbreviation.toLowerCase()))) return;
+    void load(true);
+    return () => { loadGeneration.current++; };
+  }, [revision, load, team, abbreviation]);
 
   useEffect(() => {
     setPreviousFranchiseStatLines(null);

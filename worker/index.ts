@@ -101,7 +101,12 @@ export function createWorker(options: WorkerOptions = {}) {
             result.headers.set("X-NHL-Cache", "HIT");
             return result;
           }
-          if (cache && context && !url.pathname.startsWith("/nhl-web-api/live-snapshot/")) {
+          // Report pages feed a second complete-dataset cache in the browser.
+          // Returning stale pages on every expiry can keep that dataset one
+          // cycle behind forever. Await revalidation here; errors still use the
+          // last-good fallback in fetch() below. Profiles/drafts may refresh later.
+          if (cache && context && route.prefix !== "/nhl-api"
+            && !url.pathname.startsWith("/nhl-web-api/live-snapshot/")) {
             const saved = await cache.match(savedKey(key));
             const stale = saved && savedResponse(saved, undefined, now(), url.pathname);
             if (stale) {

@@ -1,4 +1,5 @@
 import type { LiveSnapshot } from "../../shared/nhl-live";
+import { playerMetadata } from "./nhlPlayerMetadata";
 import { inheritNhlFreshness } from "./nhlFreshness";
 import { savedNhl, validPlayerRows, NhlBaselineAvailable } from "./nhlSaved";
 import { nhlStatsDate } from "../../shared/nhl-live";
@@ -48,6 +49,8 @@ type NhlSkaterFaceoffs = {
 type NhlPlayerBio = {
   playerId: number;
   birthDate?: string;
+  birthCountryCode?: string;
+  birthCountry?: string;
 };
 
 export type NhlSkaterRecord = NhlSkaterSummary & {
@@ -317,7 +320,9 @@ async function loadNhlLiveSeasonStats(seasonYear: number) {
 export async function fetchNhlPlayerLanding(playerId: number): Promise<NhlPlayerLanding> {
   const response = await nhlFetch(`/nhl-web-api/player/${playerId}/landing`);
   if (!response.ok) throw new Error(`Unable to load NHL player profile (${response.status})`);
-  return response.json() as Promise<NhlPlayerLanding>;
+  const player = await response.json() as NhlPlayerLanding;
+  playerMetadata.remember([{ ...player, playerId }]);
+  return player;
 }
 
 export async function searchNhlPlayers(name: string): Promise<NhlPlayerSearchResult[]> {
@@ -368,9 +373,34 @@ function fetchPlayerBios(position: "skater" | "goalie", seasonId: number) {
   const key = `${position}:${seasonId}`;
   const cached = playerBiosCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.request;
-  const request = fetchReport<NhlPlayerBio>(reportUrl(position, "bios", seasonId), `${position} bios`).catch(() => []);
-  playerBiosCache.set(key, { expiresAt: Date.now() + statsCacheTtlMs, request });
+  const request = fetchReport<NhlPlayerBio>(reportUrl(position, "bios", seasonId), `${position} bios`).then(rows => {
+    playerMetadata.remember(rows); return rows;
+  }).catch(() => { playerBiosCache.delete(key); return []; });
+  playerBiosCache.set(key, { expiresAt: Date.now() + 6 * 3600_000, request });
   return request;
+}
+
+export async function fetchNhlPlayerBiographies(seasonId: number, playerIds?: string[], onUpdate?: () => void) {
+  if (!playerIds) {
+    await Promise.all([fetchPlayerBios("skater", seasonId), fetchPlayerBios("goalie", seasonId)]);
+    onUpdate?.();
+    return;
+  }
+  const ids = [...new Set(playerIds)].filter(id => /^[1-9]\d{0,9}$/.test(id)).filter(id => !playerMetadata.read(id)?.birthCountry);
+  // A roster needs a small biography response, not eight league-wide pages.
+  // Keep URL size bounded, preserve the stats client's pacing/deduplication,
+  // and leave photos independent of this optional request.
+  for (let start = 0; start < ids.length; start += 40) {
+    const filter = ids.slice(start, start + 40).map(id => `playerId=${id}`).join(" or ");
+    const results = await Promise.allSettled((["skater", "goalie"] as const).map(async position => {
+      const params = new URLSearchParams({ limit: "100", cayenneExp: `seasonId=${seasonId} and gameTypeId=2 and (${filter})` });
+      const rows = await fetchCompleteNhlReport<NhlPlayerBio>(`/nhl-api/${position}/bios?${params}`, `${position} roster bios`, nhlFetch, { recoverRateLimit: false });
+      playerMetadata.remember(rows);
+      onUpdate?.();
+    }));
+    const failure = results.find(result => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
 }
 
 async function loadNhlSkaterStats(

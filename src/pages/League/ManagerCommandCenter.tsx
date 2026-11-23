@@ -161,13 +161,13 @@ export default function ManagerCommandCenter() {
   // Historical draft/prospect scans must not compete with the initial stats load.
   useEffect(() => {
     const teamId = assignment?.fantasy_team_id;
-    if (!teamId || !statsReady.skaters || !statsReady.goalies || activityLoading) return;
+    if (!teamId || !statsReady.skaters || !statsReady.goalies) return;
     let active = true;
     void import("../../lib/farmInsights").then(({ fetchFarmInsights }) => fetchFarmInsights(teamId)).then(insights => {
       if (active) setAgingProspects(insights.agingByTeam.get(teamId) || []);
     }).catch(() => {});
     return () => { active = false; };
-  }, [assignment?.fantasy_team_id, statsReady.skaters, statsReady.goalies, activityLoading]);
+  }, [assignment?.fantasy_team_id, statsReady.skaters, statsReady.goalies, revision]);
 
   useEffect(() => {
     if (!user) return;

@@ -1,3 +1,5 @@
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
+import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import NhlHeadshot from "../../components/hockey/NhlHeadshot";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
@@ -27,6 +29,7 @@ export default function FarmSystemRankings() {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
+  const revision = useNhlDataRevision([`live-season:${CURRENT_LEAGUE_SEASON}`]);
   useEffect(() => {
     let active = true;
     const refresh = async () => {
@@ -37,14 +40,14 @@ export default function FarmSystemRankings() {
         if (active) setError(reason instanceof Error ? reason.message : "Unable to load farm rankings.");
       } finally { if (active) setLoading(false); }
     };
-    setError(""); setLoading(!readFarmRankings()); setSlow(false);
+    setLoading(!readFarmRankings()); setSlow(false);
     void refresh();
     const slowTimer = window.setTimeout(() => { if (active) setSlow(true); }, 10_000);
     const refreshTimer = window.setInterval(() => {
       if (document.visibilityState === "visible" && navigator.onLine !== false) void refresh();
     }, 300_000);
     return () => { active = false; window.clearTimeout(slowTimer); window.clearInterval(refreshTimer); };
-  }, [attempt]);
+  }, [attempt, revision]);
   const podium = [rankings[1], rankings[0], rankings[2]].filter((row): row is FarmRanking => Boolean(row));
   return <div><PageMeta title="Farm System Rankings | GLDHL" description="League-wide GLDHL prospect pipeline rankings" /><PageBreadcrumb pageTitle="Farm System Rankings" />
     {snapshot && <p role="status" className="mb-4 text-sm text-gray-500 dark:text-gray-400">{error ? "Ranking updates are temporarily unavailable. Showing saved rankings." : snapshot.warning || "Last complete rankings"} · Updated {new Date(snapshot.updatedAt).toLocaleString()}.</p>}

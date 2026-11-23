@@ -8,6 +8,7 @@ const built = await build({ entryPoints: ["worker/index.ts"], bundle: true, form
 let calls = 0;
 const statsStarts = [];
 let failSavedRequest = false;
+let savedRevision = 1;
 const mf = new Miniflare(convertV4MiniflareOptions({
   modules: true,
   script: built.outputFiles[0].text,
@@ -22,7 +23,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
       statsStarts.push(Date.now());
       if (failSavedRequest) return Response.json({ error: 'limited' }, { status: 429, headers: { 'Retry-After': '60' } });
       await new Promise((resolve) => setTimeout(resolve, 30));
-      return Response.json({ data: [], total: 0 });
+      return Response.json({ data: [], total: 0, revision: savedRevision });
     }
     if (new URL(request.url).pathname.endsWith("/2021/all")) {
       return Response.json({ error: "limited" }, { status: 429, headers: { "Retry-After": "60" } });
@@ -92,19 +93,22 @@ try {
   assert.ok(statsStarts[1] - statsStarts[0] >= 1000);
   // Expire only the primary entry; the separate shared saved copy survives.
   const savedUrl = 'https://league.example/nhl-api/skater/summary?test=stale-runtime';
-  await assertJson(await mf.dispatchFetch(savedUrl));
+  assert.equal((await assertJson(await mf.dispatchFetch(savedUrl))).revision, 1);
   const cache = await (await mf.getCaches()).open('gld-public-nhl-v1');
+  assert.equal(await cache.delete(savedUrl), true);
+  savedRevision = 2;
+  const refreshed = await mf.dispatchFetch(savedUrl);
+  assert.equal(refreshed.headers.get('X-NHL-Stale'), null);
+  assert.equal((await assertJson(refreshed)).revision, 2);
   assert.equal(await cache.delete(savedUrl), true);
   failSavedRequest = true;
   const savedResult = await mf.dispatchFetch(savedUrl);
   assert.equal(savedResult.headers.get('X-NHL-Stale'), '1');
-  await assertJson(savedResult);
-  // Allow the waitUntil refresh to record its 429 without storing an error.
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.equal((await assertJson(savedResult)).revision, 2);
   const stillSaved = await mf.dispatchFetch(savedUrl);
   assert.equal(stillSaved.headers.get('X-NHL-Stale'), '1');
   await assertJson(stillSaved);
-  console.log("PASS: real workerd cache, concurrent snapshots and six distinct reports, paced stats, 429 cooldown, shared saved fallback, and asset delegation.");
+  console.log("PASS: real workerd cache, concurrent snapshots and six distinct reports, paced stats, expired-report recovery, 429 cooldown, shared saved fallback, and asset delegation.");
 } finally {
   await mf.dispose();
 }

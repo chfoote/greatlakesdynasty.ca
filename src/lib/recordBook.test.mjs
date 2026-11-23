@@ -41,6 +41,7 @@ async function fixture(t, changes = {}) {
         if(s.failNhl) throw Error('NHL 429');
         let score=id===20252026?10:20;
         if(start && id===20262027)score=start==='2026-07-01'?8:12;
+        score+=s.scoreBoost||0;
         const rows=[{ playerId:kind==='skater'?8000001:8000002, positionCode:kind==='skater'?'C':'G',
           gamesPlayed:5,testScore:score,goals:2,assists:1,saves:20,goalsAgainst:2 }];
         return s.stale?markNhlSaved(rows,1795000000000):rows;
@@ -128,5 +129,25 @@ test('saved NHL data is labeled and cannot be written as verified daily records'
   const data = await api.fetchRecordBookData(null, null, undefined, 'leaders');
   assert.ok(data.warnings.some(message => /saved/.test(message)));
   await assert.rejects(api.syncDailyRecordSnapshot('2026-11-19'), /Cannot capture verified/);
+  assert.equal(state.writes, 0);
+});
+
+test('every NHL record section refreshes after expiry and franchise/league caches stay separate', async t => {
+  const { state, api } = await fixture(t);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const before = new Map();
+  for (const section of ['leaders', 'franchise', 'season']) {
+    before.set(section, await api.fetchRecordBookData(null, 2027, undefined, section));
+  }
+  const owned = await api.fetchRecordBookData(1, 2027, undefined, 'leaders');
+  assert.notEqual(owned, before.get('leaders'));
+  now += 300001; state.scoreBoost = 5;
+  for (const section of ['leaders', 'franchise', 'season']) {
+    const after = await api.fetchRecordBookData(null, 2027, undefined, section);
+    assert.notEqual(after, before.get(section));
+    if (section === 'season') assert.ok(after.entries.find(row => row.key === 'top-scoring-c').value > before.get(section).entries.find(row => row.key === 'top-scoring-c').value);
+    else assert.ok(after.positionLeaders[0].fantasyPoints > before.get(section).positionLeaders[0].fantasyPoints);
+  }
   assert.equal(state.writes, 0);
 });

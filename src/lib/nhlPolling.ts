@@ -11,6 +11,9 @@ export function shouldRefreshNhl(options: {
   if (!visible) return false;
   const interval = mode === "season" && !schedule?.live ? 300_000 : 30_000;
   if (now - lastAttempt < interval) return false;
+  // Completed-game totals and yesterday's baseline can recover/correct before
+  // today's puck drop. A quiet live schedule must not stop season-data recovery.
+  if (mode === "season" && !schedule?.live) return true;
   if (!schedule) return now - lastAttempt >= (mode === "live" ? 30_000 : 300_000);
   if (schedule.date !== date) return true; // One refresh at the next league day.
   if (schedule.live) return true;

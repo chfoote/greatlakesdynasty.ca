@@ -694,3 +694,112 @@ dry run. Live season freshness tests confirm that newer daily points advance wit
 an unchanged valid baseline and that delayed sources retain their older timestamp
 and warning. Existing CSS minification and large-chunk build warnings remain.
 No credentials were found in the pending-file review; no files were staged.
+
+## November 23: old complete reports repeatedly retained
+
+Read-only production checks returned a complete November 22 snapshot (five games)
+and complete season-through-November-22 reports: 787 rows each for skater summary,
+realtime and faceoff wins, and 78 goalies. The NHL capped pages at 100 rows despite
+`limit=-1`/`limit=500`; the existing complete-report reader correctly collected all
+25 pages across these four reports. Requests were sequential, paced at 1.5 seconds,
+and stopped on failure without retries. These checks establish public endpoint
+availability at that time, not what a particular logged-in browser had loaded.
+
+A regression combining the real Worker handler, complete-report reader and saved
+browser dataset reproduced stale retention: expired reports immediately returned
+the previous successful page while `waitUntil` refreshed the edge copy. The browser
+rejected the older source timestamp. On the next cache cycle this could repeat,
+keeping the assembled dataset on its original data despite healthy upstream calls.
+The regression failed before the fix and passes afterward.
+
+Stats reports under `/nhl-api` now await revalidation after edge expiry, as live
+snapshots already do. Successful primary-cache hits are still immediate; concurrent
+requests still coalesce; failures still preserve the separately retained last-good
+copy with its true timestamp. Profile/draft background refresh is unchanged. No
+cache purge, browser authentication reset, configuration change, or paid resource
+is required. This may make an expired report wait for upstream rather than return
+old data immediately, while assembled browser data remains visible during refresh.
+
+Visible season polls also resume every five minutes before puck drop/after finals,
+so recovery of completed-game totals does not depend on today's live-game schedule.
+Live polls retain their existing 30-second timing and pause/quiet behavior. Browser
+visibility/offline restrictions, request pacing and rate-limit cooldowns remain.
+
+Regression coverage includes successive cache expirations, a two-day-old complete
+dataset retained during an outage and replaced after recovery, quiet-season retry
+scheduling, and real workerd primary-cache expiry with a newer upstream revision
+followed by 429 fallback. Supabase, authentication, league data, fantasy formulas,
+website styling, and deployment configuration are untouched. No publishing action
+is performed by these local checks.
+
+Validation: 123 unit tests passed (79 NHL/frontend, 44 Worker), production build
+including both TypeScript checks, workerd recovery/cooldown/cache integration,
+mobile-sized live-feed render/poll regression, and Wrangler deployment dry run.
+Existing CSS minification and chunk-size warnings remain. The dry run completed
+with local runtime permissions after the sandboxed attempt stalled while bundling.
+The target remains `greatlakesdynasty-ca`; no commit, push or deployment was made.
+
+## Rankings, records, Front Office, and roster metadata follow-up
+
+Power Rankings, Team Rankings and Rookie Watch use the same component. Its current
+season/period/month reports now publish before optional previous-range comparison
+reports, which previously held the entire view. Selected-view report errors preserve
+already loaded results with a warning. Source-update notifications and visible-page
+expiry checks re-read the selected report cache; changing tabs does not refetch the
+league roster. Read-only roster/transaction metadata refreshes separately every five
+minutes on visible online pages, with no overlapping metadata loads. The ranking,
+eligibility, scoring-lineup, tie and movement calculations are unchanged.
+
+Record Book refreshes the selected category in the background after NHL source
+updates and visible-page checks, rather than only loading on category changes.
+The shared path covers league/franchise position leaders, franchise records,
+seasonal positional records and contracts. Refresh failures keep existing rows and
+show a warning. Historical season/section/team cache identities and trade-date
+ownership calculations remain unchanged. No admin snapshot capture is invoked.
+
+Farm rankings react to refreshed NHL datasets while retaining the separate public
+display cache and ranking-only loader. Full farm insights use static photo URLs.
+Front Office aging alerts reuse verified birthdays already supplied by stats/public
+bios, only falling back to player profiles when missing. They refresh with NHL data
+and no longer wait for unrelated auction/trade activity before starting. The main
+manager dashboard still renders its core data independently of optional NHL/activity.
+
+Roster-preview photos now request static NHL images directly from player IDs, with
+the existing initials/error fallback. They no longer wait for player-profile API
+requests. Country/birthday metadata is stored in a separate public-only cache:
+whitelisted player ID, birth-country code, birthday and timestamp; at most 2,500
+entries/512 KB, 30-day expiry, no account/roster fields. Country labels retain the
+existing birth-country meaning. Known countries render synchronously on navigation
+and reload. Missing countries use small roster-specific skater/goalie biography
+queries, at most 40 validated IDs per query, through the existing complete-report
+reader/pacing/deduplication. No short-cooldown retry is attempted for these optional
+queries. Missing/unplayed players and ambiguous multi-team abbreviations retain a
+deduplicated profile fallback. Existing full bio reports also seed this cache and
+reuse successful reports for six hours instead of five minutes. First-time missing
+metadata can still wait for the NHL; no country is guessed or hardcoded.
+
+`npm run test:rankings:runtime` runs the actual rankings page through all nine view
+combinations with comparison reports unresolved and confirms only one roster read.
+It also exercises the actual Tage Thompson lineup-card rendering: the static image
+request and cached USA flag appear together (about 7 ms in the controlled fixture).
+This does not measure production mobile latency or download the actual photo.
+All runtime browser fixtures block external data connections. New unit coverage
+checks metadata persistence/whitelisting/expiry/storage denial, validated scoped
+biography queries, and refreshed league/franchise/seasonal record sections without
+database writes. Live production biography reads encountered the existing stats
+cooldown, so roster-filter upstream behavior still needs verification after that
+cooldown; local query construction and fallback behavior are tested.
+
+This follow-up does not change Supabase configuration, authentication, stored league
+data, scoring formulas, ranking weights, record-credit rules, or website styling.
+No commit, push or deployment is authorized or performed by these local checks.
+
+Final combined validation: 127 unit tests passed (83 NHL/frontend, 44 Worker),
+production build including frontend/Worker TypeScript, actual workerd regression,
+all nine ranking views, actual roster-card photo/cached-country first render,
+farm first-load/saved-reload, Front Office optional-data isolation, protected-route
+and failed-download browser checks, and Wrangler deployment dry run. Skater/goalie
+fantasy formulas and the complete player/team ranking calculation block were
+compared with HEAD and are unchanged. Pending-file review found no credentials or
+changes to Supabase/authentication, database files, Wrangler configuration or the
+dependency lockfile. Existing CSS-minification and large-chunk warnings remain.

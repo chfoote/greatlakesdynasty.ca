@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -10,7 +11,6 @@ import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/trans
 import {
   fetchNhlGoalieStats,
   fetchNhlGoalieStatsForPeriod,
-  fetchNhlPlayerLanding,
   fetchNhlSkaterStats,
   fetchNhlSkaterStatsForPeriod,
   formatFantasyPoints,
@@ -34,17 +34,6 @@ const periodStartBySeason: Record<number, string> = { 2026: "2025-10-06", 2027: 
 const periodsPerSeason = 14;
 const monthNames = ["October", "November", "December", "January", "February", "March", "April"];
 const currencyFormatter = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
-const headshotCacheKey = "award-headshots-v1";
-const headshotCacheAge = 24 * 60 * 60 * 1000;
-type CachedHeadshot = { url: string; savedAt: number };
-
-function readHeadshotCache(): Record<string, CachedHeadshot> {
-  try {
-    return JSON.parse(localStorage.getItem(headshotCacheKey) || "{}") as Record<string, CachedHeadshot>;
-  } catch {
-    return {};
-  }
-}
 
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 function normalizePosition(value?: string | null): Position | null {
@@ -255,13 +244,47 @@ export default function PowerRankings() {
   const [previousSkaters, setPreviousSkaters] = useState<NhlSkaterRecord[]>([]);
   const [previousGoalies, setPreviousGoalies] = useState<NhlGoalieRecord[]>([]);
   const [headshots, setHeadshots] = useState<Map<string, string>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [metadataLoading, setMetadataLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const loading = metadataLoading || statsLoading;
+  const loadedView = useRef("");
+  const revision = useNhlDataRevision([`skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`]);
+  const [comparisonWarning, setComparisonWarning] = useState("");
+  const [statsError, setError] = useState("");
+  const [metadataError, setMetadataError] = useState("");
+  const error = metadataError || statsError;
+
+  useEffect(() => {
+    let active = true, busy = false, haveMetadata = false;
+    setMetadataLoading(true); setMetadataError("");
+    const refresh = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const [teamRows, branding, seasonRows, transactionRows] = await Promise.all([
+          fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season), fetchLeagueTransactions(),
+        ]);
+        if (!active) return;
+        setTeams(teamRows.map(team => applyTeamBranding(team, branding, season)));
+        setPlayerSeasons(seasonRows); setTransactions(transactionRows); setMetadataError(""); haveMetadata = true;
+      } catch (reason) { if (active) {
+        if (haveMetadata) setComparisonWarning("Roster ownership updates are delayed. Showing the last loaded rosters.");
+        else setMetadataError(reason instanceof Error ? reason.message : "Unable to load ranking rosters.");
+      } }
+      finally { busy = false; if (active) setMetadataLoading(false); }
+    };
+    void refresh();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && navigator.onLine !== false) void refresh();
+    }, 300_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [season]);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError("");
+    const view = JSON.stringify([season, mode, month, period]);
+    if (loadedView.current !== view) { setStatsLoading(true); setPreviousSkaters([]); setPreviousGoalies([]); }
+    setError(""); setComparisonWarning("");
     const seasonId = nhlSeasonId(season);
     const selectedMonth = monthRange(season, month);
     const priorMonth = month > 0 ? monthRange(season, month - 1) : null;
@@ -269,22 +292,27 @@ export default function PowerRankings() {
     const currentEnd = mode === "month" ? selectedMonth.end : periodEnd(currentStart);
     const previousStart = mode === "month" ? priorMonth?.start : period > 1 ? shiftDate(currentStart, -14) : undefined;
     const previousEnd = mode === "month" ? priorMonth?.end : previousStart ? periodEnd(previousStart) : undefined;
-    Promise.all([
-      fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season), fetchLeagueTransactions(),
+    void Promise.all([
       mode === "season" ? fetchNhlSkaterStats(seasonId) : fetchNhlSkaterStatsForPeriod(seasonId, currentStart, currentEnd),
       mode === "season" ? fetchNhlGoalieStats(seasonId) : fetchNhlGoalieStatsForPeriod(seasonId, currentStart, currentEnd),
-      mode === "season" || !previousStart || !previousEnd ? Promise.resolve([] as NhlSkaterRecord[]) : fetchNhlSkaterStatsForPeriod(seasonId, previousStart, previousEnd),
-      mode === "season" || !previousStart || !previousEnd ? Promise.resolve([] as NhlGoalieRecord[]) : fetchNhlGoalieStatsForPeriod(seasonId, previousStart, previousEnd),
-    ]).then(([teamRows, branding, seasonRows, transactionRows, skaters, goalies, priorSkaters, priorGoalies]) => {
+    ]).then(([skaters, goalies]) => {
       if (!active) return;
-      setTeams(teamRows.map((team) => applyTeamBranding(team, branding, season)));
-      setPlayerSeasons(seasonRows);
-      setTransactions(transactionRows);
-      setCurrentSkaters(skaters); setCurrentGoalies(goalies);
-      setPreviousSkaters(priorSkaters); setPreviousGoalies(priorGoalies);
-    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Unable to load power rankings."); }).finally(() => { if (active) setLoading(false); });
+      setCurrentSkaters(skaters); setCurrentGoalies(goalies); loadedView.current = view;
+      setStatsLoading(false);
+      // Comparison reports must not hold the selected rankings behind them.
+      if (mode !== "season" && previousStart && previousEnd) void Promise.all([
+        fetchNhlSkaterStatsForPeriod(seasonId, previousStart, previousEnd),
+        fetchNhlGoalieStatsForPeriod(seasonId, previousStart, previousEnd),
+      ]).then(([priorSkaters, priorGoalies]) => {
+        if (active) { setPreviousSkaters(priorSkaters); setPreviousGoalies(priorGoalies); }
+      }).catch(() => { if (active) setComparisonWarning("Previous-period comparisons are delayed. Selected rankings remain available."); });
+    }).catch(reason => { if (active) {
+      if (loadedView.current === view) setComparisonWarning("Ranking updates are delayed. Showing the last loaded results.");
+      else setError(reason instanceof Error ? reason.message : "Unable to load power rankings.");
+    } })
+      .finally(() => { if (active) setStatsLoading(false); });
     return () => { active = false; };
-  }, [mode, month, period, season]);
+  }, [mode, month, period, season, revision]);
 
   const rankingEndDate = mode === "period"
     ? periodEnd(periodStart(season, period))
@@ -343,23 +371,8 @@ export default function PowerRankings() {
     .filter((id): id is string => Boolean(id)), [playerRankings]);
 
   useEffect(() => {
-    let active = true;
-    const cache = readHeadshotCache();
-    const cached = podiumPlayerIds.filter((id) => cache[id]?.url && Date.now() - cache[id].savedAt < headshotCacheAge).map((id) => [id, cache[id].url] as const);
-    if (cached.length) setHeadshots((current) => new Map([...current, ...cached]));
-    podiumPlayerIds.forEach((id) => {
-      if (cache[id]?.url && Date.now() - cache[id].savedAt < headshotCacheAge) return;
-      void fetchNhlPlayerLanding(Number(id)).then((landing) => {
-        if (!active || !landing.headshot) return;
-        setHeadshots((current) => new Map(current).set(id, landing.headshot!));
-        try {
-          const latest = readHeadshotCache();
-          latest[id] = { url: landing.headshot, savedAt: Date.now() };
-          localStorage.setItem(headshotCacheKey, JSON.stringify(latest));
-        } catch { /* Headshots still render if browser storage is unavailable. */ }
-      }).catch(() => {});
-    });
-    return () => { active = false; };
+    setHeadshots(new Map(podiumPlayerIds.filter(id => /^\d+$/.test(id))
+      .map(id => [id, `https://assets.nhle.com/mugs/nhl/latest/${id}.png`])));
   }, [podiumPlayerIds]);
 
   const changeSeason = (year: number) => { setSeason(year); setPeriod(latestPeriod(year)); };
@@ -383,6 +396,7 @@ export default function PowerRankings() {
         {mode === "period" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">Period {period}: {periodLabel(selectedPeriodStart)} <span className="ml-2 font-normal text-gray-400">· {period > 1 ? "Movement compares the previous two-week period" : "Opening period — no previous-period comparison"}</span></p>}
         {mode === "month" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">{monthLabel(season, month)}: {rangeLabel(selectedMonthRange.start, selectedMonthRange.end)} <span className="ml-2 font-normal text-gray-400">· {month > 0 ? "Movement compares the previous month" : "Opening award month — no previous-month comparison"}</span></p>}
       </section>
+      {comparisonWarning && <p role="status" className="mb-3 text-sm text-gray-500">{comparisonWarning}</p>}
       {loading ? <div className="grid animate-pulse gap-5"><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /></div> : error ? <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : tab === "players" ? <div className="space-y-5"><PlayerHighlights rows={playerRankings} mode={mode} tandem={goalieTandems[0]} headshots={headshots} />{positions.map((pos) => <PlayerPositionCard key={pos} position={pos} rows={playerRankings.filter((row) => row.position === pos)} />)}</div> : tab === "rookies" ? <RookieWatch rows={playerRankings} season={season} mode={mode} /> : <div className="space-y-5"><div><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Overall team rankings</h2><TeamTable rows={teamRankings} /></div><div className="pt-2"><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Positional unit rankings</h2><div className="space-y-5">{positions.map((pos) => <UnitCard key={pos} position={pos} teams={teamRankings} />)}</div></div></div>}
       {!loading && !error && <p className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400"><strong>How this works:</strong> Rankings reconstruct each player’s fantasy team as of the end of the selected period or month using the league transaction history. Team rankings count the highest-scoring 3 C, 3 LW, 3 RW, 6 D and 2 G from that historical roster. Extra roster players remain eligible for individual Player Rankings but do not add to team or positional-unit totals. Team GP is the combined number of NHL appearances by those scoring players, and FPPG is their fantasy points divided by those appearances. Players with zero games are excluded from Bottom 5 lists.</p>}
     </div>
