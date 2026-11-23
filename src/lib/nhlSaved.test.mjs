@@ -168,3 +168,60 @@ test('a delayed composite source keeps its older timestamp and warning', () => {
   assert.equal(nhlFreshness(composite).message, 'Baseline is delayed');
   assert.equal(nhlFreshness(inheritNhlFreshness({}, [markNhlFetched([], 1000), live])).updatedAt, 1000);
 });
+
+test('a new hockey day accepts a newer completed-game baseline when live data is unavailable', async () => {
+  const f = fixture(), cache = createSavedNhlCache(f.options);
+  await cache('live-season:2027', async () => [{ playerId: 1, goals: 5 }], validPlayerRows, 30000, { scope: '2026-11-20' });
+  f.advance(3 * 86400_000);
+  const result = await cache('live-season:2027', async () => {
+    throw new NhlBaselineAvailable([{ playerId: 1, goals: 8 }], 'Completed games through November 22');
+  }, validPlayerRows, 30000, { scope: '2026-11-23', waitForRefresh: true });
+  assert.equal(result[0].goals, 8, 'November 20 live points must not suppress the complete November 22 baseline');
+  assert.match(nhlFreshness(result).message, /November 22/);
+});
+
+test('same-day live data survives a baseline fallback, while baseline-only data can advance', async () => {
+  const f = fixture(), cache = createSavedNhlCache(f.options);
+  const policy = { scope: '2026-11-23', waitForRefresh: true };
+  await cache('live-season:2027', async () => [{ playerId: 1, goals: 10 }], validPlayerRows, 30000, policy);
+  f.advance(30001);
+  const fallback = () => { throw new NhlBaselineAvailable([{ playerId: 1, goals: 8 }], 'Completed games only'); };
+  assert.equal((await cache('live-season:2027', fallback, validPlayerRows, 30000, policy))[0].goals, 10);
+  await cache('baseline', fallback, validPlayerRows, 30000, policy);
+  f.advance(60001);
+  const advanced = await cache('baseline', () => { throw new NhlBaselineAvailable([{ playerId: 1, goals: 9 }], 'Corrected completed games'); }, validPlayerRows, 30000, policy);
+  assert.equal(advanced[0].goals, 9);
+});
+
+test('legacy stored totals infer the hockey day without discarding same-day live points', async () => {
+  const f = fixture(), key = 'live-season:2027';
+  f.entries.set('gld:complete-nhl:v1:' + key, JSON.stringify({ value: [{ playerId: 1, goals: 10 }], updatedAt: f.now() }));
+  f.advance(30001);
+  const result = await createSavedNhlCache(f.options)(key, () => {
+    throw new NhlBaselineAvailable([{ playerId: 1, goals: 8 }], 'Yesterday only');
+  }, validPlayerRows, 30000, { scope: '2026-11-20', waitForRefresh: true });
+  assert.equal(result[0].goals, 10);
+  assert.equal(f.entries.get('supabase-auth'), 'private-session');
+});
+
+test('fresh complete datasets retain their source time after save and storage reload', async () => {
+  const f = fixture(), key = 'skaters:20262027';
+  const first = await createSavedNhlCache(f.options)(key, async () => [{ playerId: 1 }], validPlayerRows);
+  assert.equal(nhlFreshness(first)?.updatedAt, f.now());
+  f.advance(1000);
+  const reloaded = await createSavedNhlCache(f.options)(key, async () => { throw Error('Must use fresh saved cache'); }, validPlayerRows);
+  assert.equal(nhlFreshness(reloaded)?.updatedAt, f.now() - 1000);
+  assert.equal(nhlFreshness(reloaded)?.message, undefined);
+});
+
+test('fresh corrected values with the same source timestamp replace old values without a notification loop', async () => {
+  const f = fixture(), cache = createSavedNhlCache(f.options), sourceTime = f.now();
+  await cache('live-season:2027', async () => markNhlFetched([{ playerId: 1, goals: 5 }], sourceTime), validPlayerRows, 30000);
+  f.advance(30001);
+  const load = async () => markNhlFetched([{ playerId: 1, goals: 6 }], sourceTime);
+  const next = await cache('live-season:2027', load, validPlayerRows, 30000, { waitForRefresh: true });
+  assert.equal(next[0].goals, 6);
+  assert.equal(f.changes(), 1);
+  await cache('live-season:2027', load, validPlayerRows, 30000, { waitForRefresh: true });
+  assert.equal(f.changes(), 1);
+});

@@ -8,6 +8,7 @@
     "build": "tsc -b && tsc -p tsconfig.worker.json && vite build",
     "test:worker": "node --test worker/*.test.mjs",
     "test:nhl": "node --test shared/*.test.mjs src/lib/nhlRequest.test.mjs src/lib/nhlReports.test.mjs src/lib/nhlPolling.test.mjs src/lib/nhlSaved.test.mjs src/lib/frontOfficeNhl.test.mjs src/lib/recordBook.test.mjs src/lib/farmInsights.test.mjs src/lib/farmRankingsCache.test.mjs src/lib/prospectOwnership.test.mjs src/lib/goalFeed.test.mjs src/lib/nhlLive.test.mjs src/lib/nhlPlayerMetadata.test.mjs",
+    "test:saved-recovery:runtime": "node scripts/test-saved-recovery-runtime.mjs",
     "test:standings:runtime": "node scripts/test-standings-runtime.mjs",
     "test:rankings:runtime": "node scripts/test-rankings-runtime.mjs",
     "test:live:runtime": "node scripts/test-live-feed-runtime.mjs",

@@ -294,10 +294,9 @@ function mergeGoalieRecords(baseline: NhlGoalieRecord[], live: NhlGoalieRecord[]
   return [...merged.values()];
 }
 
-async function loadNhlLiveSeasonStats(seasonYear: number) {
+async function loadNhlLiveSeasonStats(seasonYear: number, today = getNhlStatsDate()) {
   const seasonId = (seasonYear - 1) * 10000 + seasonYear;
-  const today = getNhlStatsDate();
-  const yesterday = getNhlStatsDate(-1);
+  const yesterday = new Date(Date.parse(`${today}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10);
   const seasonStart = `${seasonYear - 1}-07-01`;
   const [baselineSkaters, baselineGoalies] = await Promise.all([
     fetchNhlSkaterStatsForPeriod(seasonId, seasonStart, yesterday),
@@ -600,8 +599,9 @@ export function fetchNhlGoalieStatsForPeriod(seasonId: number, startDate: string
 }
 
 export function fetchNhlLiveSeasonStats(seasonYear: number) {
+  const hockeyDate = getNhlStatsDate();
   return savedNhl<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }>(`live-season:${seasonYear}`,
-    () => loadNhlLiveSeasonStats(seasonYear),
+    () => loadNhlLiveSeasonStats(seasonYear, hockeyDate),
     (value): value is { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] } => Boolean(value && typeof value === 'object'
-      && 'skaters' in value && 'goalies' in value && validPlayerRows(value.skaters) && validPlayerRows(value.goalies)), 30_000);
+      && 'skaters' in value && 'goalies' in value && validPlayerRows(value.skaters) && validPlayerRows(value.goalies)), 30_000, { scope: hockeyDate, staleRetryMs: 5000 });
 }

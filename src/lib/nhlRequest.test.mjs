@@ -219,7 +219,7 @@ test("denied Web Locks fall back safely without replaying failed fetches", async
   const client = createNhlClient({ fetcher: async () => { calls++; return Response.json({ data: [] }); } });
   assert.equal((await client(path)).status, 200);
   assert.equal(calls, 1);
-  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async (_name, work) => work() } });
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: async (_name, _options, work) => work() } });
   const failed = createNhlClient({ fetcher: async () => { calls++; throw Error("offline"); } });
   await assert.rejects(failed(path), /offline/);
   assert.equal(calls, 2);
@@ -249,4 +249,31 @@ test('live data starts even while both general slots are busy',async()=>{
   const live=await client('/nhl-web-api/live-snapshot/2026-11-21');
   assert.equal(live.status,200);
   releases.forEach(resolve=>resolve());await Promise.all(general);
+});
+
+test('a frozen tab cannot hold the advisory refresh locks indefinitely or cause duplicate fetches', async t => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  const keepAlive = setTimeout(() => {}, 1000);
+  t.after(() => {
+    clearTimeout(keepAlive);
+    if (previous) Object.defineProperty(navigator, 'locks', previous);
+    else delete navigator.locks;
+  });
+  let waits = 0, calls = 0;
+  const names = [];
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+    request: (name, { signal }) => new Promise((_, reject) => {
+      waits++; names.push(name); signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }),
+  } });
+  const client = createNhlClient({ statsGapMs: 1, lockWaitMs: 5, fetcher: async (_url, options) => {
+    calls++; assert.equal(options.cache, 'no-cache'); return Response.json({ data: [1] });
+  } });
+  assert.equal((await client(path)).status, 200);
+  assert.equal((await client(path)).status, 200);
+  assert.equal(calls, 1);
+  assert.equal(waits, 3); // Origin, URL, public-storage index; no action was replayed.
+  assert.equal((await client('/nhl-api/goalie/summary?limit=1')).status, 200);
+  assert.equal(names.filter(name => name === 'gld:nhl:stats-origin').length, 1, 'Do not wait on the same frozen lock for every report page');
+  assert.equal(calls, 2);
 });

@@ -6,6 +6,7 @@ interface Options {
   storage?: () => Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined;
   lock?: <T>(key: string, work: () => Promise<T>) => Promise<T>;
   statsGapMs?: number;
+  lockWaitMs?: number;
 }
 
 export function createNhlClient(options: Options = {}) {
@@ -21,16 +22,24 @@ export function createNhlClient(options: Options = {}) {
     try { return globalThis.localStorage; } catch { return undefined; }
   });
   const response = (body: string) => new Response(body, { headers: { "Content-Type": "application/json" } });
+  const unavailableLocks = new Map<string, number>();
   const lock = options.lock ?? (async <T>(key: string, work: () => Promise<T>) => {
+    if ((unavailableLocks.get(key) ?? 0) > now()) return work();
     let manager: LockManager | undefined;
     try { manager = typeof navigator === "undefined" ? undefined : navigator.locks; }
     catch { return work(); }
     if (!manager) return work();
     let entered = false;
-    try { return await manager.request(key, () => { entered = true; return work(); }); }
+    // A frozen/background tab must not own the NHL refresh queue indefinitely.
+    // This lock is an optional cross-tab optimization; local pacing, in-flight
+    // deduplication and origin cooldowns also apply when it is unavailable.
+    const signal = AbortSignal.timeout(options.lockWaitMs ?? (key.endsWith('storage-index') ? 2000 : 20_000));
+    try { return await manager.request(key, { signal }, () => { entered = true; return work(); }); }
     catch (error) {
       if (entered) throw error; // Never retry an operation that already ran.
-      return work(); // Private/restricted contexts may expose but deny Web Locks.
+      if (unavailableLocks.size >= 128) unavailableLocks.delete(unavailableLocks.keys().next().value!);
+      unavailableLocks.set(key, now() + 120_000);
+      return work(); // Denied or timed-out advisory locks use the normal safe client path.
     }
   });
   const prefix = "gld:public-nhl:v2:";
@@ -96,6 +105,9 @@ export function createNhlClient(options: Options = {}) {
       // No automatic retry: subsequent user actions/polls must respect cooldown.
       const result = await (options.fetcher ?? fetch)(key, {
         headers: { Accept: "application/json" },
+        // Our public cache and Worker already control freshness. Revalidate the
+        // browser HTTP layer once that cache expires; never add cache-bust URLs.
+        cache: "no-cache",
         signal: AbortSignal.timeout(20_000),
       });
       if (result.status === 429 || result.headers.get("X-NHL-Failure-Status") === "429") {

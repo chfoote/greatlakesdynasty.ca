@@ -1,8 +1,9 @@
-import { markNhlSaved, nhlFreshness } from "./nhlFreshness.ts";
+import { markNhlFetched, markNhlSaved, nhlFreshness } from "./nhlFreshness.ts";
+import { nhlStatsDate } from "../../shared/nhl-live.ts";
 // Only assembled public NHL datasets belong here. Never store league rosters,
 // Supabase records, authentication, or partially fetched report pages.
-export interface SavedNhlData<T> { value: T; updatedAt: number; message?: string; }
-export interface NhlDataStatus { updatedAt?: number; refreshing: boolean; saved: boolean; message?: string; }
+export interface SavedNhlData<T> { value: T; updatedAt: number; message?: string; scope?: string; baseline?: boolean; }
+export interface NhlDataStatus { updatedAt?: number; refreshing: boolean; saved: boolean; message?: string; dataset?: string; }
 const prefix = 'gld:complete-nhl:v1:';
 const retention = 7 * 86400_000;
 const statuses = new Map<string, NhlDataStatus>();
@@ -17,7 +18,7 @@ function publish() {
 }
 export function setNhlDataScope(keys: string[]) { activeKeys = new Set(keys); publish(); }
 function status(key: string, value: NhlDataStatus) {
-  statuses.set(key, value);
+  statuses.set(key, { ...value, dataset: key });
   if (statuses.size > 64) statuses.delete(statuses.keys().next().value!);
   publish();
 }
@@ -58,35 +59,52 @@ export function createSavedNhlCache(options: {
     } catch { /* A full/private browser cache must not break the page. */ }
   }
   return async function saved<T>(key: string, load: () => Promise<T>, validate: (value: unknown) => value is T,
-    ttl = 300_000, policy: { waitForRefresh?: boolean; staleRetryMs?: number } = {}): Promise<T> {
+    ttl = 300_000, policy: { waitForRefresh?: boolean; staleRetryMs?: number; scope?: string } = {}): Promise<T> {
     let previous = memory.get(key) as SavedNhlData<T> | undefined;
     if (!previous) {
       try { previous = JSON.parse(storage()?.getItem(prefix + key) || 'null') ?? undefined; } catch { /* Optional storage. */ }
     }
     if (previous && (!Number.isFinite(previous.updatedAt) || previous.updatedAt > now()
       || now() - previous.updatedAt > retention || !validate(previous.value))) previous = undefined;
+    // Entries created before daily scopes existed can be migrated from their
+    // actual source time. Do not discard today's live points during an upgrade.
+    const previousScope = previous?.scope ?? (previous && policy.scope && /^\d{4}-\d{2}-\d{2}$/.test(policy.scope)
+      ? nhlStatsDate(0, previous.updatedAt) : undefined);
+    const sameScope = !policy.scope || previousScope === policy.scope;
     if (previous) {
       memory.set(key, previous);
-      if (now() - previous.updatedAt < ttl) {
+      if (sameScope && now() - previous.updatedAt < ttl) {
         status(key, { updatedAt: previous.updatedAt, refreshing: false, saved: true, message: previous.message });
         if (previous.message) markNhlSaved(previous.value, previous.updatedAt, previous.message);
+        else markNhlFetched(previous.value, previous.updatedAt);
         return previous.value;
       }
     }
     if (previous) markNhlSaved(previous.value, previous.updatedAt, previous.message);
     const running = pending.get(key) as Promise<T> | undefined;
     if (running) return previous && !policy.waitForRefresh ? previous.value : running;
-    if (previous && (failedUntil.get(key) ?? 0) > now()) return previous.value;
+    if (previous && sameScope && (failedUntil.get(key) ?? 0) > now()) return previous.value;
     status(key, { updatedAt: previous?.updatedAt, refreshing: true, saved: Boolean(previous) });
     const refresh = Promise.resolve().then(load).then(value => {
       if (!validate(value)) throw new Error('NHL returned an invalid complete dataset.');
       const source = nhlFreshness(value);
-      if (previous && source && source.updatedAt <= previous.updatedAt) {
+      const equalSource = Boolean(previous && source && source.updatedAt === previous.updatedAt);
+      // A correction may change values without changing the scoreboard's time.
+      // Keep rejecting older/stale data, but accept a changed fresh payload.
+      const unchanged = previous && source && equalSource && !source.message && JSON.stringify(value) === JSON.stringify(previous.value);
+      if (previous && source && (source.updatedAt < previous.updatedAt || equalSource && (source.message || unchanged))) {
         failedUntil.set(key, now() + (policy.staleRetryMs ?? 60_000));
+        if (unchanged) {
+          previous = { ...previous, message: undefined, baseline: undefined, scope: policy.scope };
+          markNhlFetched(previous.value, previous.updatedAt);
+          memory.set(key, previous); persist(prefix + key, previous);
+        }
         status(key, { updatedAt: previous.updatedAt, refreshing: false, saved: true, message: source.message });
         return previous.value;
       }
-      const entry = { value, updatedAt: source?.updatedAt ?? now(), message: source?.message };
+      const entry = { value, updatedAt: source?.updatedAt ?? now(), message: source?.message, scope: policy.scope };
+      if (entry.message) markNhlSaved(value, entry.updatedAt, entry.message);
+      else markNhlFetched(value, entry.updatedAt);
       memory.set(key, entry);
       if (memory.size > 32) memory.delete(memory.keys().next().value!);
       persist(prefix + key, entry);
@@ -97,13 +115,16 @@ export function createSavedNhlCache(options: {
       if (previous) (options.onChange ?? changed)();
       return value;
     }).catch(error => {
-      if (!previous && error instanceof NhlBaselineAvailable && validate(error.value)) {
+      // Yesterday's completed total may replace a previous hockey day's live
+      // total. On the same day retain live points; baseline-only saves may advance.
+      if (error instanceof NhlBaselineAvailable && validate(error.value) && (!previous || !sameScope || previous.baseline)) {
         const source = nhlFreshness(error.value);
-        const entry = { value: error.value, updatedAt: source?.updatedAt ?? now(), message: error.message };
+        const entry = { value: error.value, updatedAt: source?.updatedAt ?? now(), message: error.message, scope: policy.scope, baseline: true };
         markNhlSaved(entry.value, entry.updatedAt, entry.message);
         memory.set(key, entry); persist(prefix + key, entry);
         failedUntil.set(key, now() + 60_000);
         status(key, { updatedAt: entry.updatedAt, refreshing: false, saved: true, message: entry.message });
+        if (previous) (options.onChange ?? changed)();
         return entry.value;
       }
       failedUntil.set(key, now() + 60_000);

@@ -831,3 +831,68 @@ The browser fixture blocks external data connections. Production build including
 both TypeScript checks and all 127 existing unit tests pass. Supabase, authentication,
 league data and standings scoring/lineup calculations are unchanged. This new fix
 remains local and is not committed, pushed or deployed.
+
+## Persisted old-data recovery after hard refresh
+
+The subsequent mobile screenshots showed November 20/21 saved data and 1461 points
+after hard refreshes. A read-only production check confirmed that the deployed
+frontend matched the tested standings build and that one season-through-November-22
+summary page returned upstream HTTP 200 (100 of 787 records). This does not establish
+the exact production 1544.4/1545.0 player/stat difference or complete refresh success
+in either user's browser. A hard refresh does not delete the app's localStorage
+datasets, so changing frontend request ordering alone cannot resolve stale fallbacks.
+
+Reproduced cache faults and local fixes:
+
+- A live-data failure raised `NhlBaselineAvailable`, but the complete cache accepted
+  that baseline only when no prior dataset existed. An older hockey day's live
+  dataset could therefore suppress newer completed games indefinitely during a live
+  outage. Live season caches now record the hockey date and whether data is baseline
+  only. A new day's completed baseline may replace an older day's saved total;
+  same-day live points remain protected from a baseline-only fallback. Baseline-only
+  saves may advance as completed-game corrections arrive. Legacy entries infer their
+  hockey day from the saved source time without deleting public or authentication
+  storage. The hockey date is captured once for the request so midnight/6 a.m.
+  rollover cannot mix date bounds inside that request.
+- Fresh completed datasets did not consistently retain source metadata after being
+  saved/restored, and equal source timestamps rejected changed fresh values. Fresh
+  values now retain metadata; changed fresh values at the same source time are
+  accepted, older/stale responses are still rejected, and unchanged values produce
+  no source-update notification loop. Live composite same-source checks use the
+  existing short live recheck delay. Existing scoring calculations are untouched.
+- Actual public HTTP fetches revalidate the browser HTTP cache after the app cache
+  expires (`cache: no-cache`). Successful app/Worker caches, full query identity,
+  pacing, deduplication and 429 cooldowns remain in place; no cache-busting URLs or
+  extra automatic retries are introduced.
+- Optional cross-tab Web Locks previously had unbounded queue waits. A frozen tab
+  can no longer hold new reads indefinitely: timed-out advisory lock acquisition
+  falls back to the same paced/deduplicated/cooldown-aware path used when locks are
+  denied or unavailable. An operation whose callback already ran is never replayed.
+  This is a bounded-wait safeguard, not a confirmed diagnosis of the user's tabs.
+
+The saved-data notice identifies the season belonging to its oldest dataset, so
+optional prior-season fallback data is distinguishable from current-season totals.
+
+`npm run test:saved-recovery:runtime` exercises actual NHL fetching, pagination,
+saved caches, scoring and standings rendering in mobile-sized Chrome with stored
+November 20/21/current-day datasets. Only public HTTP responses and read-only league
+metadata are fixtures; external connections are blocked. Old totals converge to a
+new completed-game fixture total with live data working or returning 429; account
+storage remains untouched and there is one live request. The original saved-cache
+code fails the old-data/live-outage case (`--baseline`), while the fix passes.
+The fixture disables optional Web Locks because Chrome virtual time can finish
+before lock IPC grants arrive; separate unit tests cover cross-tab coordination and
+bounded frozen-tab waits. Fixture scores are not verified real production totals.
+
+This follow-up remains local pending approval. No database, Supabase, authentication,
+scoring formula, styling, Cloudflare resource/configuration, commit, push or manual
+deployment is changed by this work.
+
+Validation: 133 unit tests (89 frontend/NHL, 44 Worker), production build including
+both TypeScript projects, actual stored-cache/live-outage recovery, standings
+convergence, live polling, Front Office isolation, all nine ranking views, farm
+reload, protected-route, real workerd checks, and deployment dry run passed. The
+original saved-cache version fails the newly reproduced live-outage recovery case.
+Scoring functions were compared with HEAD and are identical. Review found no
+protected configuration changes or private-key/GitHub-token patterns. Existing
+CSS-minification and large-chunk warnings remain. No files are staged or published.
