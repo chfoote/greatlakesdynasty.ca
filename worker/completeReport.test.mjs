@@ -4,14 +4,19 @@ import { buildCompleteReport, CompleteReportError, validateCompleteReportQuery }
 import { createWorker } from "./index.ts";
 
 const expression = 'seasonId=20262027 and gameTypeId=2 and gameDate>="2026-07-01" and gameDate<="2026-11-23"';
+const sort = JSON.stringify([{ property: "playerId", direction: "ASC" }]);
 
 test("complete report query accepts only bounded regular-season expressions", () => {
   const valid = new URL(`https://league.example/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression })}`);
   assert.equal(validateCompleteReportQuery(valid), expression);
+  const frontend = new URL(`https://league.example/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression, sort, start: "0" })}`);
+  assert.equal(validateCompleteReportQuery(frontend), expression);
   for (const path of [
     "/nhl-api/complete/skater/summary?cayenneExp=seasonId%3D20262028+and+gameTypeId%3D2",
     "/nhl-api/complete/skater/summary?cayenneExp=seasonId%3D20262027+or+gameTypeId%3D3",
     "/nhl-api/complete/skater/summary?cayenneExp=seasonId%3D20262027+and+gameTypeId%3D2+and+gameDate%3E%3D%222026-02-30%22+and+gameDate%3C%3D%222026-03-01%22",
+    `/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression, sort: JSON.stringify([{ property: "goals", direction: "DESC" }]), start: "0" })}`,
+    `/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression, sort, start: "100" })}`,
     `/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression, extra: "1" })}`,
   ]) assert.equal(validateCompleteReportQuery(new URL(path, "https://league.example")), undefined);
 });
@@ -40,7 +45,8 @@ test("one shared Worker response replaces browser-by-browser report paging", asy
     const start = Number(url.searchParams.get("start"));
     return Response.json({ data: Array.from({ length: Math.min(2, 5 - start) }, (_, index) => ({ playerId: start + index + 1 })), total: 5 });
   });
-  const url = `https://league.example/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression })}`;
+  // This is the exact URL shape produced by the deployed frontend reader.
+  const url = `https://league.example/nhl-api/complete/skater/summary?${new URLSearchParams({ cayenneExp: expression, sort, start: "0" })}`;
   const first = await worker.fetch(new Request(url), { ASSETS: { fetch() { throw Error("asset fallback"); } } });
   assert.equal(first.status, 200);
   assert.equal((await first.json()).data.length, 5);

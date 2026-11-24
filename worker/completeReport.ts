@@ -17,11 +17,17 @@ interface ReportPage {
 }
 
 const allowedExpression = /^seasonId=(\d{8}) and gameTypeId=2(?: and gameDate>="(\d{4}-\d{2}-\d{2})" and gameDate<="(\d{4}-\d{2}-\d{2})")?$/;
+const stableSort = JSON.stringify([{ property: "playerId", direction: "ASC" }]);
 const validDate = (value: string) => Number.isFinite(Date.parse(`${value}T00:00:00Z`))
   && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
 export function validateCompleteReportQuery(url: URL) {
-  if ([...url.searchParams.keys()].some((key) => key !== "cayenneExp")) return;
+  // fetchCompleteNhlReport adds this fixed ordering and initial offset before
+  // it knows the Worker will return the entire assembled report in one response.
+  // Accept only those exact values; arbitrary pagination/query options remain rejected.
+  if ([...url.searchParams.keys()].some((key) => !["cayenneExp", "sort", "start"].includes(key))) return;
+  if (url.searchParams.has("sort") && url.searchParams.get("sort") !== stableSort) return;
+  if (url.searchParams.has("start") && url.searchParams.get("start") !== "0") return;
   const expression = url.searchParams.get("cayenneExp") || "";
   const match = expression.match(allowedExpression);
   if (!match) return;
@@ -53,7 +59,7 @@ export async function buildCompleteReport(
       limit: "500",
       isAggregate: "true",
       cayenneExp: expression,
-      sort: JSON.stringify([{ property: "playerId", direction: "ASC" }]),
+      sort: stableSort,
       start: String(rows.length),
     });
     const response = await get(`/nhl-api/${position}/${report}?${params}`);
