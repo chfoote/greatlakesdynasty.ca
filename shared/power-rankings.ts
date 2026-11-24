@@ -1,7 +1,7 @@
 import type { NhlGoalieRecord, NhlSkaterRecord } from "../src/lib/nhl";
 import { getGoalieScore, getSkaterScore } from "./nhl-scoring.ts";
 
-export type RankingTeam = { id: number; team_name: string; abbreviation: string; logo: string | null };
+export type RankingTeam = { id: number; team_name: string; abbreviation: string; logo: string | null; primary_color?: string | null; secondary_color?: string | null };
 export type RankingRosterRow = {
   id: number;
   player_id: number;

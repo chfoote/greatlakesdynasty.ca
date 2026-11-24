@@ -381,14 +381,7 @@ export default function Standings() {
       <PageBreadcrumb pageTitle="Standings" />
 
       <div className="rounded-2xl border border-gray-200 bg-white px-4 py-5 dark:border-gray-800 dark:bg-white/[0.03] sm:px-6 sm:py-6">
-        <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90">
-              {selectedSeason} League Standings
-            </h3>
-            <p className="mt-1 max-w-xl text-sm text-gray-500 dark:text-gray-400">{statsView === "season" ? "Ranked by total fantasy points from each team’s scoring lineup." : `${scoreLabel}’s gain from scoring-lineup players only.`}</p>
-          </div>
-
+        <div className="mb-5 flex justify-end">
           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end lg:w-auto">
             <div><label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">Score View {dailyLoading && <span className="ml-1 text-brand-500">Updating…</span>}</label><div className="inline-flex h-11 w-full rounded-lg border border-gray-300 bg-white p-1 dark:border-gray-700 dark:bg-gray-900 sm:w-auto">{(["season", "today", "yesterday"] as const).map((view) => <button key={view} type="button" onClick={() => { setStatsView(view); if (view !== "season") setSelectedSeason(CURRENT_LEAGUE_SEASON); }} className={`rounded-md px-3 text-xs font-bold capitalize transition ${statsView === view ? "bg-brand-500 text-white" : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>{view}</button>)}</div></div>
             <button

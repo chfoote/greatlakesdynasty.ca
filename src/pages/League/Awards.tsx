@@ -150,12 +150,6 @@ export default function Awards() {
   return <div>
     <PageMeta title="Awards & Honours | Great Lakes Dynasty Hockey League" description="League champions and player award winners by season" />
     <PageBreadcrumb pageTitle="Awards & Honours" />
-    <div className="mb-6 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-6 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-transparent sm:p-8">
-      <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">League history</p>
-      <h1 className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">Awards & Champions</h1>
-      <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">Every recorded champion and individual award winner, season by season.</p>
-    </div>
-
     <div className="mb-6 inline-flex rounded-xl border border-gray-300 bg-white p-1 dark:border-gray-700 dark:bg-gray-900"><button type="button" onClick={() => setView("season")} className={`rounded-lg px-5 py-2.5 text-sm font-bold ${view === "season" ? "bg-amber-500 text-white" : "text-gray-600 dark:text-gray-300"}`}>Season Awards</button><button type="button" onClick={() => setView("monthly")} className={`rounded-lg px-5 py-2.5 text-sm font-bold ${view === "monthly" ? "bg-amber-500 text-white" : "text-gray-600 dark:text-gray-300"}`}>Monthly Honours</button></div>
 
     {view === "monthly" && <MonthlyHonours />}

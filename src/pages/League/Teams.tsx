@@ -4,6 +4,7 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, FantasyTeam } from "../../lib/fantasyTeams";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
+import { affiliateAbbreviation } from "../../lib/nhlTeamLogos";
 
 export default function Teams() {
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
@@ -27,9 +28,6 @@ export default function Teams() {
           <h3 className="font-semibold text-gray-800 text-theme-xl dark:text-white/90">
             League Teams
           </h3>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Active fantasy teams in the Great Lakes Dynasty Hockey League.
-          </p>
         </div>
 
         {loading && (
@@ -86,7 +84,8 @@ export default function Teams() {
                 to={`/teams/${team.id}`}
                 className="rounded-lg border border-gray-200 bg-white p-5 shadow-theme-xs transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-theme-md dark:border-gray-800 dark:bg-gray-900 dark:hover:border-brand-500"
               >
-                <div className="flex items-start gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-4">
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-800">
                     {team.logo ? (
                       <img
@@ -113,6 +112,17 @@ export default function Teams() {
                       </p>
                     )}
                   </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {[["Eastern", team.eastern_farm_system], ["Western", team.western_farm_system]].map(([region, name]) => {
+                      if (typeof name !== "string" || !name) return null;
+                      const abbreviation = affiliateAbbreviation(name);
+                      if (!abbreviation) return null;
+                      return <span key={region} title={`${region} affiliate: ${name}`} aria-label={`${region} affiliate: ${name}`} className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white p-1 shadow-theme-xs dark:border-gray-700 dark:bg-gray-800">
+                        <img src={`https://assets.nhle.com/logos/nhl/svg/${abbreviation}_light.svg`} alt="" className="h-full w-full object-contain" />
+                      </span>;
+                    })}
+                  </div>
                 </div>
 
                 <div className="mt-4 grid grid-cols-3 gap-2" aria-label="League finishes">
@@ -136,12 +146,6 @@ export default function Teams() {
                   </div>
                 </div>
 
-                {(team.eastern_farm_system || team.western_farm_system) && (
-                  <div className="mt-4 grid gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    {team.eastern_farm_system && <p>Eastern farm: {team.eastern_farm_system}</p>}
-                    {team.western_farm_system && <p>Western farm: {team.western_farm_system}</p>}
-                  </div>
-                )}
               </Link>
               ))}
             </div>

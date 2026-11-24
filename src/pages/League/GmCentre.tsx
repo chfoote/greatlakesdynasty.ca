@@ -83,15 +83,15 @@ export default function GmCentre() {
   return <div>
     <PageMeta title="GM Records | Great Lakes Dynasty" description="GLDHL general manager records and activity" />
     <PageBreadcrumb pageTitle="GM Records" />
-    <section className="mb-6 overflow-hidden rounded-3xl bg-gradient-to-br from-gray-950 via-slate-900 to-brand-950 p-6 text-white shadow-xl sm:p-8">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-brand-300">Front Office Records</p><h1 className="mt-2 text-3xl font-black">GM Records</h1><p className="mt-2 max-w-2xl text-sm text-gray-300">Every completed trade, signing and roster decision attributed to the manager who controlled the franchise that season.</p></div><label className="text-xs font-bold uppercase tracking-wide text-gray-300">Record period<select value={season} onChange={(event) => setSeason(event.target.value === "all" ? "all" : Number(event.target.value))} className="mt-1 block h-11 min-w-40 rounded-xl border border-white/20 bg-gray-900 px-3 text-sm font-semibold text-white"><option value="all">All-time</option>{availableSeasons.map((year) => <option key={year} value={year}>{year}</option>)}</select></label></div>
+    <section className="mb-5 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+      <label className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Record period<select value={season} onChange={(event) => setSeason(event.target.value === "all" ? "all" : Number(event.target.value))} className="mt-1 block h-11 min-w-40 rounded-xl border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="all">All-time</option>{availableSeasons.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
+      {season === "all" && <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"><input type="checkbox" checked={hideInactive} onChange={(event) => setHideInactive(event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500" />Hide inactive teams</label>}
     </section>
 
     {loading && <div className="grid animate-pulse gap-4 sm:grid-cols-2 xl:grid-cols-4">{[1,2,3,4].map((item) => <div key={item} className="h-28 rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div>}
     {error && <p className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700">{error}</p>}
     {!loading && !error && <>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        {season === "all" ? <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.03] dark:text-gray-300"><input type="checkbox" checked={hideInactive} onChange={(event) => setHideInactive(event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500" />Hide inactive teams</label> : <span />}
         <Link to="/gm-trade-network" className="inline-flex rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-bold text-white shadow-theme-xs hover:bg-brand-600">Explore the Trade Network →</Link>
       </div>
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

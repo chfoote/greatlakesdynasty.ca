@@ -9,7 +9,7 @@ export default function NhlDataNotice() {
   const season = oldest.dataset?.match(/^(?:skaters|goalies):\d{4}(\d{4})|^(?:live|league)-season:(\d{4})/);
   const label = season ? ` (${season[1] || season[2]} season)` : '';
   const message = saved.find(item => item.message)?.message;
-  return <p role="status" className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+  return <p role="status" className="mt-4 text-sm text-gray-500 dark:text-gray-400">
     {message || (saved.some(item => item.refreshing) ? 'Showing saved NHL statistics. Updating in the background.' : 'Saved NHL statistics available.')}
     {' '}Oldest saved data in use: {new Date(oldest.updatedAt!).toLocaleString()}{label}.
   </p>;
