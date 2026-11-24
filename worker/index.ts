@@ -2,6 +2,7 @@ import { savedKey, savedRetention, savedResponse } from "./saved.ts";
 import { isLiveNhlPath, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
 import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
 import { createWorkerScheduler, WorkerQueueFullError } from "./scheduler.ts";
+import { buildCompleteReport, CompleteReportError, validateCompleteReportQuery } from "./completeReport.ts";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -53,7 +54,7 @@ function fromSnapshot(snapshot: ResponseSnapshot) {
 export function createWorker(options: WorkerOptions = {}) {
   const now = options.now ?? Date.now;
   const statsGap = options.statsGapMs ?? (typeof caches === "undefined" ? 0 : 1250);
-  const schedule = createWorkerScheduler({ maximum: 4, statsGapMs: statsGap, now, reserveLiveSlot: true });
+  const schedule = createWorkerScheduler({ maximum: 4, statsGapMs: statsGap, now, reserveLiveSlot: true, maximumWaitMs: 60_000 });
   const buildSnapshot = createSnapshotBuilder(now);
   // Share bytes rather than Response streams: workerd forbids consuming I/O
   // created by a different request context, even within the same isolate.
@@ -87,6 +88,11 @@ export function createWorker(options: WorkerOptions = {}) {
       if (snapshotRoute && (!snapshotDate || url.search || !Number.isFinite(Date.parse(snapshotDate))
         || new Date(snapshotDate).toISOString().slice(0, 10) !== snapshotDate)) {
         return jsonError("A valid live snapshot date is required.", 400);
+      }
+      const completeMatch = url.pathname.match(/^\/nhl-api\/complete\/(skater|goalie)\/(summary|realtime|faceoffwins)$/);
+      const completeExpression = completeMatch ? validateCompleteReportQuery(url) : undefined;
+      if (completeMatch && (!completeExpression || (completeMatch[1] === "goalie" && completeMatch[2] !== "summary"))) {
+        return jsonError("A valid complete NHL report query is required.", 400);
       }
       let cache: PublicCache | undefined;
       // Strip browser credentials/headers from cache identity; these fixed NHL APIs
@@ -218,7 +224,47 @@ export function createWorker(options: WorkerOptions = {}) {
       };
       // Build the bundle outside the limiter: its individual fixed NHL requests
       // acquire slots themselves, avoiding nested-limiter deadlocks.
-      const work = (snapshotDate ? (async () => {
+      const work = (completeMatch && completeExpression ? (async () => {
+        try {
+          const payload = await buildCompleteReport(completeMatch[1] as "skater" | "goalie",
+            completeMatch[2] as "summary" | "realtime" | "faceoffwins", completeExpression, async path => {
+              const pageRequest = new Request(url.origin + path);
+              const result = await handle(pageRequest, env, true);
+              if (result.status < 400) return result;
+              try {
+                const saved = await cache?.match(savedKey(pageRequest));
+                const fallback = saved && savedResponse(saved, result, now(), new URL(path, url.origin).pathname);
+                if (fallback) { await result.body?.cancel(); return fallback; }
+              } catch { /* Keep the page error when no last-good page is available. */ }
+              return result;
+            });
+          const headers = new Headers({
+            "Cache-Control": `public, max-age=${nhlTtl(url, now(), payload)}`,
+            "X-NHL-Cache": "MISS",
+            "X-NHL-Source": "complete-report",
+          });
+          if (payload.savedAt) {
+            headers.set("Cache-Control", "no-store");
+            headers.set("X-NHL-Stale", "1");
+            headers.set("X-NHL-Saved-At", String(payload.savedAt));
+            if (payload.failureStatus) headers.set("X-NHL-Failure-Status", payload.failureStatus);
+          }
+          const result = Response.json({ data: payload.data, total: payload.total }, { headers });
+          // A complete response assembled from last-good pages is safe to return,
+          // but must not replace a newer complete report in shared storage.
+          if (cache && request.method === "GET" && !payload.savedAt) {
+            try { await cache.put(key, result.clone()); await remember(cache, key, result); } catch { /* Cache is optional. */ }
+          }
+          return request.method === "HEAD" ? new Response(null, result) : result;
+        } catch (error) {
+          if (error instanceof CompleteReportError) return jsonError(error.message, error.status, {
+            ...error.diagnostics,
+            "X-NHL-Source": `complete-${error.diagnostics["X-NHL-Source"] || "error"}`,
+            ...(error.retryAfter ? { "Retry-After": error.retryAfter } : {}),
+          });
+          return jsonError("Unable to build complete NHL statistics.", 502);
+        }
+      })() : snapshotDate ? (async () => {
         try {
           const payload = await buildSnapshot(snapshotDate, (path) => handle(new Request(url.origin + path), env, false));
           const result = Response.json(payload, { headers: {

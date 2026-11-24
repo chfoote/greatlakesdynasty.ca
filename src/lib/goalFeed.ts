@@ -39,7 +39,6 @@ export type GoalFeedEvent = {
   nhlTeam: { abbreviation: string; logo?: string };
   awayTeam: { abbreviation: string; score: number; logo?: string };
   homeTeam: { abbreviation: string; score: number; logo?: string };
-  scoreAtGoal?: { away: number; home: number };
   scorer: GoalFeedPlayer;
   assists: GoalFeedPlayer[];
   period: number;
@@ -112,11 +111,51 @@ export type MilestoneWatchItem = {
   recognition: "standard" | "major" | "bronze" | "silver" | "gold" | "legendary";
 };
 
+export type FeedRecordInsights = {
+  movements: RecordMovementEvent[]; chases: RecordChase[]; milestones: MilestoneWatchItem[]; warning?: string;
+};
+
+// Around the Horn consumes only these career counting stats. Keep the full
+// record book and all fantasy-scoring calculations in their existing module.
+type RecordLine = Pick<FranchiseStatLine, "playerId" | "playerName" | "team" | "currentTeam"> & {
+  skater: Pick<NonNullable<FranchiseStatLine["skater"]>, "goals" | "assists" | "points" | "gameWinningGoals"> | null;
+  goalie: Pick<NonNullable<FranchiseStatLine["goalie"]>, "wins" | "shutouts"> | null;
+};
+
+export function addDailyRecordTotals(lines: RecordLine[], skaters: Array<{ playerId: number; goals: number; assists: number; gameWinningGoals: number }>,
+  goalies: Array<{ playerId: number; wins: number; shutouts: number }>, owners: Map<string, GoalFeedPlayer>): RecordLine[] {
+  const result = lines.map(line => ({ ...line, skater: line.skater && { ...line.skater }, goalie: line.goalie && { ...line.goalie } }));
+  const byFranchise = new Map(result.map(line => [`${line.playerId}:${line.team?.id}`, line]));
+  const creditedLine = (playerId: number) => {
+    const player = owners.get(String(playerId));
+    if (!player?.fantasyTeam) return;
+    const key = `${playerId}:${player.fantasyTeam.id}`;
+    let line = byFranchise.get(key);
+    if (!line) {
+      line = { playerId: String(playerId), playerName: player.name, team: player.fantasyTeam, currentTeam: player.fantasyTeam, skater: null, goalie: null };
+      result.push(line);
+      byFranchise.set(key, line);
+    }
+    return line;
+  };
+  skaters.forEach(row => {
+    const line = creditedLine(row.playerId); if (!line) return;
+    const before = line.skater || { goals: 0, assists: 0, points: 0, gameWinningGoals: 0 };
+    line.skater = { goals: before.goals + row.goals, assists: before.assists + row.assists,
+      points: before.points + row.goals + row.assists, gameWinningGoals: before.gameWinningGoals + row.gameWinningGoals };
+  });
+  goalies.forEach(row => {
+    const line = creditedLine(row.playerId); if (!line) return;
+    line.goalie = { wins: (line.goalie?.wins || 0) + row.wins, shutouts: (line.goalie?.shutouts || 0) + row.shutouts };
+  });
+  return result;
+}
+
 type RecordMetric = {
   category: RecordMovement["category"];
   abbreviation: RecordMovement["abbreviation"];
   kind: "skater" | "goalie";
-  value: (line: FranchiseStatLine) => number;
+  value: (line: RecordLine) => number;
   dailyValue: (row: Record<string, unknown>) => number;
 };
 
@@ -134,8 +173,15 @@ const recordBookCache = new Map<string, { expiresAt: number; request: ReturnType
 function fetchDatedRecordBook(date: string) {
   const cached = recordBookCache.get(date);
   if (cached && cached.expiresAt > Date.now()) return cached.request;
-  const request = fetchRecordBookData(null, null, date);
-  recordBookCache.set(date, { expiresAt: Date.now() + (date === getNhlStatsDate() ? 60_000 : 15 * 60_000), request });
+  // Only franchise career lines are consumed here. Loading every record-book
+  // section also requested unrelated daily history, awards and season reports.
+  const request = fetchRecordBookData(null, null, date, "franchise").then(value => {
+    const entry = recordBookCache.get(date);
+    if (entry?.request === request) entry.expiresAt = Date.now() + (date === getNhlStatsDate() ? 60_000 : 15 * 60_000);
+    return value;
+  });
+  if (recordBookCache.size >= 8) recordBookCache.delete(recordBookCache.keys().next().value!);
+  recordBookCache.set(date, { expiresAt: Infinity, request });
   request.catch(() => { if (recordBookCache.get(date)?.request === request) recordBookCache.delete(date); });
   return request;
 }
@@ -145,7 +191,7 @@ function competitionRank(values: number[], value: number) {
 }
 
 function buildRecordMovements(
-  lines: FranchiseStatLine[],
+  lines: RecordLine[],
   dailySkaters: Record<string, unknown>[],
   dailyGoalies: Record<string, unknown>[],
   players: Map<string, GoalFeedPlayer>,
@@ -215,7 +261,7 @@ function buildRecordMovements(
   return results;
 }
 
-function buildRecordChases(lines: FranchiseStatLine[], rosterPlayers: Map<string, GoalFeedPlayer>) {
+function buildRecordChases(lines: RecordLine[], rosterPlayers: Map<string, GoalFeedPlayer>) {
   const chases: RecordChase[] = [];
   recordMetrics.forEach((metric) => {
     const leagueGroups = new Map<string, { name: string; value: number; team: FantasyTeam | null }>();
@@ -253,17 +299,17 @@ function buildRecordChases(lines: FranchiseStatLine[], rosterPlayers: Map<string
   return chases.sort((a, b) => a.needed - b.needed || a.targetRank - b.targetRank || a.player.name.localeCompare(b.player.name)).slice(0, 12);
 }
 
-function buildMilestoneWatch(lines: FranchiseStatLine[], dailySkaters: Record<string, unknown>[], dailyGoalies: Record<string, unknown>[], rosterPlayers: Map<string, GoalFeedPlayer>) {
+function buildMilestoneWatch(lines: RecordLine[], dailySkaters: Record<string, unknown>[], dailyGoalies: Record<string, unknown>[], rosterPlayers: Map<string, GoalFeedPlayer>) {
   const skaterDays = new Map(dailySkaters.map((row) => [String(row.playerId), row]));
   const goalieDays = new Map(dailyGoalies.map((row) => [String(row.playerId), row]));
   const metrics = [
-    { category: "Goals", abbreviation: "G", standard: [50,100,150,200,250,300,350,400,450], major: [500,600,700,800,900], tiers: { bronze: 100, silver: 250, gold: 500, legendary: 700 }, watch: 1, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.goals || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) },
-    { category: "Assists", abbreviation: "A", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_200,1_500], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 2, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.assists || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.assists || 0) },
-    { category: "Points", abbreviation: "P", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_250,1_500,1_750,2_000], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 2, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.points || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) + Number(skaterDays.get(id)?.assists || 0) },
-    { category: "Wins", abbreviation: "W", standard: [25,50,100,150,200,250,300,350], major: [400,500,600,700], tiers: { bronze: 100, silver: 250, gold: 400, legendary: 600 }, watch: 1, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.wins || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.wins || 0) },
-    { category: "Shutouts", abbreviation: "SO", standard: [10,20,25,30,40], major: [50,60,70,80,90,100], tiers: { bronze: 10, silver: 25, gold: 50, legendary: 100 }, watch: 1, value: (rows: FranchiseStatLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.shutouts || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.shutouts || 0) },
+    { category: "Goals", abbreviation: "G", standard: [50,100,150,200,250,300,350,400,450], major: [500,600,700,800,900], tiers: { bronze: 100, silver: 250, gold: 500, legendary: 700 }, watch: 1, value: (rows: RecordLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.goals || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) },
+    { category: "Assists", abbreviation: "A", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_200,1_500], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 2, value: (rows: RecordLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.assists || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.assists || 0) },
+    { category: "Points", abbreviation: "P", standard: [100,200,300,400,500,600,700,800,900], major: [1_000,1_250,1_500,1_750,2_000], tiers: { bronze: 200, silver: 500, gold: 1_000, legendary: 1_500 }, watch: 2, value: (rows: RecordLine[]) => rows.reduce((sum, row) => sum + Number(row.skater?.points || 0), 0), daily: (id: string) => Number(skaterDays.get(id)?.goals || 0) + Number(skaterDays.get(id)?.assists || 0) },
+    { category: "Wins", abbreviation: "W", standard: [25,50,100,150,200,250,300,350], major: [400,500,600,700], tiers: { bronze: 100, silver: 250, gold: 400, legendary: 600 }, watch: 1, value: (rows: RecordLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.wins || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.wins || 0) },
+    { category: "Shutouts", abbreviation: "SO", standard: [10,20,25,30,40], major: [50,60,70,80,90,100], tiers: { bronze: 10, silver: 25, gold: 50, legendary: 100 }, watch: 1, value: (rows: RecordLine[]) => rows.reduce((sum, row) => sum + Number(row.goalie?.shutouts || 0), 0), daily: (id: string) => Number(goalieDays.get(id)?.shutouts || 0) },
   ] as const;
-  const linesByPlayer = new Map<string, FranchiseStatLine[]>();
+  const linesByPlayer = new Map<string, RecordLine[]>();
   lines.forEach((line) => linesByPlayer.set(line.playerId, [...(linesByPlayer.get(line.playerId) || []), line]));
   const achieved: MilestoneWatchItem[] = [];
   const upcoming: MilestoneWatchItem[] = [];
@@ -422,7 +468,6 @@ export async function fetchGoalFeed(date: string) {
         nhlTeam: { abbreviation: (scoringIsHome ? game.homeTeam?.abbrev : game.awayTeam?.abbrev) || "NHL", logo: scoringIsHome ? game.homeTeam?.logo : game.awayTeam?.logo },
         awayTeam: { abbreviation: game.awayTeam?.abbrev || "AWAY", score: game.awayTeam?.score ?? details.awayScore ?? 0, logo: game.awayTeam?.logo },
         homeTeam: { abbreviation: game.homeTeam?.abbrev || "HOME", score: game.homeTeam?.score ?? details.homeScore ?? 0, logo: game.homeTeam?.logo },
-        scoreAtGoal: { away: details.awayScore ?? game.awayTeam?.score ?? 0, home: details.homeScore ?? game.homeTeam?.score ?? 0 },
         scorer, assists, period, periodType: play.periodDescriptor?.periodType || "REG", timeInPeriod: play.timeInPeriod || "00:00",
         strength: strengthLabel(details.situationCode, scoringIsHome), shotType: details.shotType,
         sortValue: estimatedGoalTime(game.startTimeUTC, period, play.periodDescriptor?.periodType || "REG", minutes, seconds, play.sortOrder || 0),
@@ -452,9 +497,12 @@ export async function fetchGoalFeed(date: string) {
     return game ? playerForGame(game.data, Number(playerId)) : null;
   }).filter((player): player is GoalFeedPlayer => player?.tonightPoints != null && player.tonightPoints > 0)
     .sort((a, b) => (b.tonightPoints || 0) - (a.tonightPoints || 0) || a.name.localeCompare(b.name));
-  const recordInsightsPromise = (async () => {
+  const recordInsightsPromise: Promise<FeedRecordInsights> = (async () => {
     try {
-      const recordBook = await fetchDatedRecordBook(date);
+      // Reuse completed-game history, then add this date's box score once.
+      // This avoids a fresh full career/report scan for each live score change.
+      const previousDate = new Date(Date.parse(`${date}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+      const recordBook = await fetchDatedRecordBook(previousDate);
       const feedPlayers = new Map<string, GoalFeedPlayer>();
       const metricSortValues = new Map<string, number>();
       const noteMetric = (player: GoalFeedPlayer, abbreviation: RecordMovement["abbreviation"], sortValue: number) => {
@@ -475,25 +523,47 @@ export async function fetchGoalFeed(date: string) {
         noteMetric(event.goalie, "W", event.sortValue);
         noteMetric(event.goalie, "SO", event.sortValue);
       });
-      const movements = events.length || goalieEvents.length ? buildRecordMovements(
-        recordBook.franchiseStatLines,
-        dailyStats.skaters as unknown as Record<string, unknown>[],
-        dailyStats.goalies as unknown as Record<string, unknown>[],
-        feedPlayers,
-        metricSortValues,
-        new Map([...fantasyPlayers].map(([playerId, value]) => [playerId, value.team?.id || null])),
-      ) : [];
       const rosterPlayers = new Map<string, GoalFeedPlayer>();
       fantasyPlayers.forEach((value, playerId) => {
         const prospectRight = getProspectRight(eligibleProspectRights, Number(playerId), value.row.player?.full_name || "");
         rosterPlayers.set(playerId, { playerId, name: value.row.player?.full_name || "Unknown player", fantasyTeam: value.team || prospectRight?.team || null, prospect: ["PROSPECT", "AP"].includes((value.row.position || "").toUpperCase()), tonightPoints: tonightPoints.get(playerId) ?? null });
       });
       feedPlayers.forEach((player, playerId) => rosterPlayers.set(playerId, player));
-      return { movements, chases: buildRecordChases(recordBook.franchiseStatLines, rosterPlayers), milestones: buildMilestoneWatch(recordBook.franchiseStatLines, dailyStats.skaters as unknown as Record<string, unknown>[], dailyStats.goalies as unknown as Record<string, unknown>[], rosterPlayers) };
+      const creditedPlayers = new Map([...rosterPlayers].filter(([playerId]) => {
+        const value = fantasyPlayers.get(playerId);
+        if (!value?.team) return false;
+        if (!["PROSPECT", "AP"].includes((value.row.position || "").toUpperCase())) return true;
+        return transactions.some(tx => tx.action === "called_up" && tx.player_id === value.row.player_id
+          && tx.season_year === season && tx.transaction_date <= date);
+      }));
+      const winningGoals = new Map<number, number>();
+      playByPlay.filter(({ game }) => ["OFF", "FINAL"].includes(game.gameState)).forEach(({ game, data }) => {
+        const home = game.homeTeam?.score || 0, away = game.awayTeam?.score || 0;
+        if (home === away) return;
+        const homeWon = home > away, winnerId = homeWon ? game.homeTeam?.id : game.awayTeam?.id;
+        const target = (homeWon ? away : home) + 1;
+        const goal = data?.plays?.find(play => play.typeDescKey === "goal" && play.periodDescriptor?.periodType !== "SO"
+          && play.details?.eventOwnerTeamId === winnerId && (homeWon ? play.details?.homeScore : play.details?.awayScore) === target);
+        const scorer = goal?.details?.scoringPlayerId;
+        if (scorer) winningGoals.set(scorer, (winningGoals.get(scorer) || 0) + 1);
+      });
+      const recordSkaters = dailyStats.skaters.filter(row => creditedPlayers.has(String(row.playerId)))
+        .map(row => ({ ...row, gameWinningGoals: winningGoals.get(row.playerId) || row.gameWinningGoals }));
+      const recordGoalies = dailyStats.goalies.filter(row => creditedPlayers.has(String(row.playerId)));
+      const lines = addDailyRecordTotals(recordBook.franchiseStatLines, recordSkaters, recordGoalies, creditedPlayers);
+      const delayed = recordBook.warnings?.some(message => /NHL|saved|unavailable/i.test(message));
+      const movements = !delayed && (events.length || goalieEvents.length) ? buildRecordMovements(
+        lines, recordSkaters as unknown as Record<string, unknown>[], recordGoalies as unknown as Record<string, unknown>[],
+        feedPlayers, metricSortValues, new Map([...creditedPlayers].map(([id, player]) => [id, player.fantasyTeam?.id || null])),
+      ) : [];
+      const milestones = buildMilestoneWatch(lines, recordSkaters as unknown as Record<string, unknown>[], recordGoalies as unknown as Record<string, unknown>[], rosterPlayers);
+      return { movements, chases: buildRecordChases(lines, rosterPlayers),
+        milestones: delayed ? milestones.filter(item => !item.achievedTonight) : milestones,
+        warning: delayed ? "Some career data is delayed. Showing saved record watches; new achievements await confirmed history." : undefined };
     } catch {
       // Record movement is an enhancement; live scoring should remain available
       // if the historical record book cannot be loaded.
-      return { movements: [] as RecordMovementEvent[], chases: [] as RecordChase[], milestones: [] as MilestoneWatchItem[] };
+      return { movements: [], chases: [], milestones: [], warning: "Record and milestone updates are temporarily unavailable. Live scores remain available." };
     }
   })();
   const recordEventsPromise = recordInsightsPromise.then((result) => result.movements);
@@ -520,7 +590,7 @@ export async function fetchGoalFeed(date: string) {
   const baselineStandings = seasonStats ? rankTeams(baselineSkaterScores, baselineGoalieScores) : [];
   return { standings, baselineStandings };
   });
-  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, milestoneWatchPromise, standingsPromise,
+  return { events, goalieEvents, nightlyStars, recordEventsPromise, recordChasesPromise, milestoneWatchPromise, recordInsightsPromise, standingsPromise,
     enrichmentPromise, generatedAt: snapshot.generatedAt, stale: Boolean(nhlFreshness(snapshot)?.message),
     games: games.length, live: games.some((game) => ["LIVE", "CRIT"].includes(game.gameState)), teams };
 }

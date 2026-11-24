@@ -33,7 +33,8 @@ export function createNhlClient(options: Options = {}) {
     // A frozen/background tab must not own the NHL refresh queue indefinitely.
     // This lock is an optional cross-tab optimization; local pacing, in-flight
     // deduplication and origin cooldowns also apply when it is unavailable.
-    const signal = AbortSignal.timeout(options.lockWaitMs ?? (key.endsWith('storage-index') ? 2000 : 20_000));
+    const signal = AbortSignal.timeout(options.lockWaitMs ?? (key.endsWith('storage-index') ? 2000
+      : key.includes('/nhl-api/complete/') ? 65_000 : 20_000));
     try { return await manager.request(key, { signal }, () => { entered = true; return work(); }); }
     catch (error) {
       if (entered) throw error; // Never retry an operation that already ran.
@@ -108,7 +109,7 @@ export function createNhlClient(options: Options = {}) {
         // Our public cache and Worker already control freshness. Revalidate the
         // browser HTTP layer once that cache expires; never add cache-bust URLs.
         cache: "no-cache",
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(url.pathname.startsWith("/nhl-api/complete/") ? 60_000 : 20_000),
       });
       if (result.status === 429 || result.headers.get("X-NHL-Failure-Status") === "429") {
         try { until = Math.max(until, Number(storage()?.getItem(cooldownKey)) || 0); } catch { /* Optional storage. */ }

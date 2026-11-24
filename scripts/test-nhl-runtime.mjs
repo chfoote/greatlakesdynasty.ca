@@ -64,10 +64,20 @@ try {
   assert.equal(payloadA.games.length, 2);
   assert.deepEqual(payloadA, payloadB);
   assert.equal(calls - beforeSnapshot, 5);
+
+  const completeUrl = `https://league.example/nhl-api/complete/skater/summary?${new URLSearchParams({
+    cayenneExp: 'seasonId=20262027 and gameTypeId=2 and gameDate>="2026-07-01" and gameDate<="2026-11-18"',
+  })}`;
+  const complete = await mf.dispatchFetch(completeUrl);
+  assert.deepEqual(await assertJson(complete), { data: [], total: 0 });
+  const completeHit = await mf.dispatchFetch(completeUrl);
+  assert.equal(completeHit.headers.get('X-NHL-Cache'), 'HIT');
+  await assertJson(completeHit);
+  assert.equal(calls - beforeSnapshot, 6);
   const snapshotHit = await mf.dispatchFetch(snapshotUrl);
   assert.equal(snapshotHit.headers.get("X-NHL-Cache"), "HIT");
   await assertJson(snapshotHit);
-  assert.equal(calls - beforeSnapshot, 5);
+  assert.equal(calls - beforeSnapshot, 6);
 
   // Different uncached reports must also work when separate requests queue.
   const parallelStats = await Promise.all([
@@ -81,15 +91,15 @@ try {
   const paused = await mf.dispatchFetch("https://league.example/nhl-web-api/draft/picks/2022/all");
   assert.equal(paused.headers.get("X-NHL-Source"), "cooldown");
   await assertJson(paused, 429);
-  assert.equal(calls, beforeSnapshot + 15);
+  assert.equal(calls, beforeSnapshot + 16);
 
   const home = await mf.dispatchFetch("https://league.example/standings");
   assert.equal(home.status, 200);
   assert.match(await home.text(), /<!DOCTYPE html>/);
-  assert.equal(calls, beforeSnapshot + 15);
+  assert.equal(calls, beforeSnapshot + 16);
   await assertJson(await mf.dispatchFetch("https://league.example/nhl-api/skater/summary?limit=1"));
   await assertJson(await mf.dispatchFetch("https://league.example/nhl-api/goalie/summary?limit=1"));
-  assert.equal(statsStarts.length, 8);
+  assert.equal(statsStarts.length, 9);
   assert.ok(statsStarts[1] - statsStarts[0] >= 1000);
   // Expire only the primary entry; the separate shared saved copy survives.
   const savedUrl = 'https://league.example/nhl-api/skater/summary?test=stale-runtime';
@@ -108,7 +118,7 @@ try {
   const stillSaved = await mf.dispatchFetch(savedUrl);
   assert.equal(stillSaved.headers.get('X-NHL-Stale'), '1');
   await assertJson(stillSaved);
-  console.log("PASS: real workerd cache, concurrent snapshots and six distinct reports, paced stats, expired-report recovery, 429 cooldown, shared saved fallback, and asset delegation.");
+  console.log("PASS: real workerd cache, shared complete reports, concurrent snapshots, paced stats, expired-report recovery, 429 cooldown, shared saved fallback, and asset delegation.");
 } finally {
   await mf.dispose();
 }

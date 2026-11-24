@@ -151,9 +151,11 @@ for (const seasonYear of [2026, 2027]) {
       assert.ok(stats.getGoalieScore(goalies.get(String(id))) > 0);
       assert.equal(skaters.get(String(id)).hits, 2);
       assert.equal(skaters.get(String(id)).totalFaceoffWins, 10);
-      assert.equal(goalies.get(String(id)).birthDate, "2000-01-01");
+      assert.equal(goalies.get(String(id)).birthDate, undefined);
     }
-    assert.ok(calls.some((url) => new URL(url, "https://test.example").searchParams.get("start") === "5"));
+    assert.ok(calls.some((url) => new URL(url, "https://test.example").pathname.startsWith('/nhl-api/complete/')));
+    assert.equal(calls.filter((url) => /^\/nhl-api\/(?:skater|goalie)\//.test(new URL(url, "https://test.example").pathname)).length, 0);
+    assert.equal(calls.filter((url) => url.endsWith('/bios')).length, 0);
   });
 }
 

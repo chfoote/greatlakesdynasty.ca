@@ -112,7 +112,7 @@ function GoalCard({ event, records = [], viewerTeamId }: { event: GoalFeedEvent;
     <div className="grid gap-2 p-3 pl-4 lg:grid-cols-[150px_minmax(180px,.85fr)_minmax(260px,1.2fr)_145px] lg:items-center"><div className="flex items-center gap-2.5">{event.nhlTeam.logo && <img src={event.nhlTeam.logo} alt={`${event.nhlTeam.abbreviation} logo`} className="h-9 w-9 object-contain" />}<div><div className="flex items-center gap-1.5"><span className="text-[10px] font-black uppercase tracking-[0.16em] text-red-500">Goal</span>{event.strength && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-black text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">{event.strength}</span>}</div><p className="mt-0.5 text-[10px] font-semibold text-gray-500">{periodLabel(event)} · {event.timeInPeriod}{event.shotType ? ` · ${event.shotType.replace(/-/g, " ")}` : ""}</p></div></div>
       <div className={`rounded-lg px-3 py-2 ${scorerHighlighted ? "bg-gradient-to-r from-amber-100 to-yellow-50 ring-1 ring-amber-300 dark:from-amber-500/20 dark:to-yellow-500/10 dark:ring-amber-700" : "bg-gray-50 dark:bg-gray-900/60"}`}><p className={`mb-1 text-[8px] font-black uppercase tracking-[0.14em] ${scorerHighlighted ? "text-amber-700 dark:text-amber-300" : "text-gray-400"}`}>Scored by</p><FantasyOwnership player={event.scorer} primary /><PlayerRecordLines events={records} playerId={event.scorer.playerId} /></div>
       <div>{event.assists.length ? <div className="grid gap-1.5 sm:grid-cols-2">{event.assists.map((assist) => { const highlighted = assist.fantasyTeam?.id === viewerTeamId; return <div key={assist.playerId} className={`rounded-lg border px-2.5 py-1.5 ${highlighted ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-500/10" : "border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/50"}`}><FantasyOwnership player={assist} /><PlayerRecordLines events={records} playerId={assist.playerId} /></div>; })}</div> : <p className="px-2 text-[10px] font-semibold text-gray-400">Unassisted</p>}</div>
-      <div className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-50 px-2 py-2 dark:bg-gray-900/70"><span className="text-[10px] font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-lg font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span>{event.scoreAtGoal && (event.scoreAtGoal.away !== event.awayTeam.score || event.scoreAtGoal.home !== event.homeTeam.score) && <span className="text-[7px] text-gray-400">At goal: {event.scoreAtGoal.away}–{event.scoreAtGoal.home}</span>}<span className="text-[10px] font-black text-gray-500">{event.homeTeam.abbreviation}</span>{final && <span className="text-[7px] font-black uppercase text-gray-400">Final</span>}</div>
+      <div className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-50 px-2 py-2 dark:bg-gray-900/70"><span className="text-[10px] font-black text-gray-500">{event.awayTeam.abbreviation}</span><span className="text-lg font-black text-gray-900 dark:text-white">{event.awayTeam.score}–{event.homeTeam.score}</span><span className="text-[10px] font-black text-gray-500">{event.homeTeam.abbreviation}</span>{final && <span className="text-[7px] font-black uppercase text-gray-400">Final</span>}</div>
     </div>
   </article>;
 }
@@ -132,6 +132,7 @@ export default function GoalHorn() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [viewerTeamId, setViewerTeamId] = useState<number | null>(null);
   const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordError, setRecordError] = useState("");
   const [recordChases, setRecordChases] = useState<RecordChase[]>([]);
   const [nightlyStars, setNightlyStars] = useState<GoalFeedPlayer[]>([]);
   const [milestones, setMilestones] = useState<MilestoneWatchItem[]>([]);
@@ -144,10 +145,15 @@ export default function GoalHorn() {
   const standingsEvents = useRef<StandingsFeedEvent[]>([]);
   const recordEvents = useRef<RecordFeedEvent[]>([]);
   const recordRequest = useRef(0);
+  const recordEpoch = useRef(0);
+  const acceptedRecords = useRef({ generatedAt: -Infinity, requestId: 0 });
+  const activeDate = useRef(date);
+  activeDate.current = date;
   const milestoneHeadshots = useRef(new Map<string, string | null>());
 
   const load = useCallback(async (background = false): Promise<false | undefined> => {
     const requestId = ++recordRequest.current;
+    const epoch = recordEpoch.current;
     if (background) setRefreshing(true); else setLoading(true);
     setError("");
     try {
@@ -199,12 +205,22 @@ export default function GoalHorn() {
         if (recordRequest.current === requestId && feedOrderDate.current === date) void load(true);
       });
       setRecordsLoading(true);
-      void Promise.all([result.recordEventsPromise, result.recordChasesPromise, result.milestoneWatchPromise]).then(([rows, chases, milestoneRows]) => {
-        if (recordRequest.current !== requestId || feedOrderDate.current !== date) return;
-        const nextRecords = rows.map((event) => ({ ...event, kind: "record" as const }));
+      // A slow career lookup belongs to this hockey date, not one 30-second
+      // score poll. Later polls must not starve the same pending lookup forever.
+      void result.recordInsightsPromise.then(({ movements: rows, chases, milestones: milestoneRows, warning }) => {
+        if (recordEpoch.current !== epoch || activeDate.current !== date) return;
+        const accepted = acceptedRecords.current;
+        if (result.generatedAt < accepted.generatedAt || (result.generatedAt === accepted.generatedAt && requestId < accepted.requestId)) return;
+        if (warning && !rows.length && !chases.length && !milestoneRows.length) { setRecordError(warning); setRecordsLoading(false); return; }
+        acceptedRecords.current = { generatedAt: result.generatedAt, requestId };
+        setRecordError(warning || "");
+        const nextRecords = warning ? recordEvents.current : rows.map((event) => ({ ...event, kind: "record" as const }));
         recordEvents.current = nextRecords;
         setRecordChases(chases.map((chase) => ({ ...chase, player: { ...chase.player, headshot: chase.player.headshot || milestoneHeadshots.current.get(chase.player.playerId) || undefined } })));
-        setMilestones(milestoneRows.map((milestone) => ({ ...milestone, player: { ...milestone.player, headshot: milestone.player.headshot || milestoneHeadshots.current.get(milestone.player.playerId) || undefined } })));
+        setMilestones(current => {
+          const next = milestoneRows.map((milestone) => ({ ...milestone, player: { ...milestone.player, headshot: milestone.player.headshot || milestoneHeadshots.current.get(milestone.player.playerId) || undefined } }));
+          return warning ? [...current.filter(item => item.achievedTonight), ...next.filter(item => !current.some(saved => saved.achievedTonight && saved.key === item.key))] : next;
+        });
         setEvents((current) => [...current.filter((event) => event.kind !== "record"), ...nextRecords].sort((a, b) => (feedOrder.current.get(b.key) || b.sortValue) - (feedOrder.current.get(a.key) || a.sortValue)));
         setRecordsLoading(false);
       });
@@ -213,7 +229,12 @@ export default function GoalHorn() {
     finally { if (recordRequest.current === requestId) { setLoading(false); setRefreshing(false); } }
   }, [date]);
 
-  useEffect(() => { void load(); return () => { recordRequest.current++; }; }, [load]);
+  useEffect(() => {
+    acceptedRecords.current = { generatedAt: -Infinity, requestId: 0 };
+    setRecordChases([]); setMilestones([]); setRecordError("");
+    void load();
+    return () => { recordRequest.current++; recordEpoch.current++; };
+  }, [load]);
   useEffect(() => {
     let active = true;
     if (!user) { setViewerTeamId(null); return; }
@@ -262,8 +283,10 @@ export default function GoalHorn() {
 
       <section className="rounded-xl border border-gray-200 bg-white p-2.5 dark:border-gray-800 dark:bg-white/[0.03]"><div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between"><div className="flex min-w-0 items-center gap-2"><span className="hidden shrink-0 text-[9px] font-black uppercase tracking-[0.14em] text-brand-500 sm:inline">Team</span><div className="flex min-w-0 gap-1.5 overflow-x-auto pb-0.5"><button type="button" onClick={() => setSelectedTeamId(null)} className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border px-2 text-[9px] font-black uppercase transition ${selectedTeamId == null ? "border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300" : "border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-700 dark:bg-gray-900"}`}>All</button>{teams.map((team) => <button key={team.id} type="button" title={team.team_name} aria-label={`Filter by ${team.team_name}`} onClick={() => setSelectedTeamId((current) => current === team.id ? null : team.id)} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border p-1 transition ${selectedTeamId === team.id ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500/20 dark:bg-brand-500/10" : "border-gray-200 bg-gray-50 hover:border-brand-300 dark:border-gray-700 dark:bg-gray-900"}`}>{team.logo ? <img src={team.logo} alt={`${team.team_name} logo`} className="h-full w-full object-contain" /> : <span className="text-[8px] font-black text-gray-500">{team.abbreviation}</span>}</button>)}</div>{selectedTeamId != null && <button type="button" onClick={() => setSelectedTeamId(null)} className="shrink-0 text-[9px] font-black text-brand-500 hover:underline">Clear</button>}</div><div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2 dark:border-gray-800 xl:border-l xl:border-t-0 xl:pl-3 xl:pt-0"><span className="mr-1 text-[8px] font-black uppercase tracking-[0.14em] text-gray-400">Show</span>{[["Recap", showNightlyRecap, () => setShowNightlyRecap((value) => !value), "sky"], ["Records", showRecordChases, () => setShowRecordChases((value) => !value), "amber"], ["Milestones", showMilestones, () => setShowMilestones((value) => !value), "emerald"]] .map(([label, shown, toggle, tone]) => <button key={String(label)} type="button" onClick={toggle as () => void} aria-pressed={Boolean(shown)} className={`rounded-full border px-2.5 py-1 text-[9px] font-black transition ${shown ? tone === "sky" ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-500/10 dark:text-sky-300" : tone === "amber" ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-500/10 dark:text-amber-300" : "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "border-gray-200 bg-gray-50 text-gray-400 dark:border-gray-700 dark:bg-gray-900"}`}><span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${shown ? tone === "sky" ? "bg-sky-500" : tone === "amber" ? "bg-amber-500" : "bg-emerald-500" : "bg-gray-400"}`} />{String(label)}</button>)}</div></div></section>
 
-      {!recordsLoading && ((showRecordChases && filteredChases.length > 0) || (showMilestones && filteredMilestones.length > 0)) && <div className={`grid items-start gap-3 ${showRecordChases && filteredChases.length > 0 && showMilestones && filteredMilestones.length > 0 ? "xl:grid-cols-2" : ""}`}>{showRecordChases && <RecordChaseBoard chases={filteredChases} viewerTeamId={viewerTeamId} />}{showMilestones && <MilestoneWatch milestones={filteredMilestones} viewerTeamId={viewerTeamId} />}</div>}
+      {((showRecordChases && filteredChases.length > 0) || (showMilestones && filteredMilestones.length > 0)) && <div className={`grid items-start gap-3 ${showRecordChases && filteredChases.length > 0 && showMilestones && filteredMilestones.length > 0 ? "xl:grid-cols-2" : ""}`}>{showRecordChases && <RecordChaseBoard chases={filteredChases} viewerTeamId={viewerTeamId} />}{showMilestones && <MilestoneWatch milestones={filteredMilestones} viewerTeamId={viewerTeamId} />}</div>}
 
+      {!loading && !recordsLoading && !recordError && (showRecordChases || showMilestones) && !filteredChases.length && !filteredMilestones.length && <p role="status" className="text-xs text-gray-500">No nearby record chases or milestones for this date and team filter.</p>}
+      {recordError && <p role="status" className="text-xs text-amber-600 dark:text-amber-300">{recordError}</p>}
       {updatedAt && <div className="flex items-center justify-end gap-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{recordsLoading && <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />Loading record notes</span>}<span>Updated {updatedAt.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</span></div>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm font-semibold text-error-700">{error}</p>}
       {loading ? <div className="space-y-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div> : visibleEvents.length ? <div className="space-y-3">{visibleEvents.map((event) => event.kind === "goal" ? <GoalCard key={event.key} event={event} records={recordsFor(event)} viewerTeamId={viewerTeamId} /> : event.kind === "goalie" ? <GoalieCard key={event.key} event={event} records={recordsFor(event)} viewerTeamId={viewerTeamId} /> : <StandingsCard key={event.key} event={event} />)}</div> : <section className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-16 text-center dark:border-gray-700 dark:bg-white/[0.02]"><div className="text-5xl">🥅</div><h2 className="mt-4 text-xl font-black text-gray-900 dark:text-white">The horn is quiet</h2><p className="mt-2 text-sm text-gray-500">{selectedTeamId != null ? "No scoring events involve this fantasy team on the selected date." : games ? "No scoring events yet." : "No NHL games are scheduled for this hockey date."}</p></section>}

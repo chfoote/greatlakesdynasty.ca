@@ -896,3 +896,103 @@ original saved-cache version fails the newly reproduced live-outage recovery cas
 Scoring functions were compared with HEAD and are identical. Review found no
 protected configuration changes or private-key/GitHub-token patterns. Existing
 CSS-minification and large-chunk warnings remain. No files are staged or published.
+
+## Around the Horn record/milestone restoration
+
+Removed the historical `At goal` score label and its unused feed field. Goal cards
+retain the latest game score and final-game indicator. The live polling interval,
+visibility/online checks, rate-limit handling and proxy routes are unchanged.
+
+Code review found the career lookup requested the entire record book even though
+the feed consumes only franchise career counting lines. It now requests the
+`franchise` section, skipping unrelated daily tables, awards, rookie eligibility
+and separate seasonal record sections. In-flight career lookups remain shared
+until completion, then get a bounded cache lifetime; failures remove the request
+so a subsequent refresh can recover.
+
+Career history is read through the previous hockey date and reused for 15 minutes.
+The selected day's box-score goals, assists, points, wins and shutouts are added
+once to a copy of the appropriate franchise's career line. Confirmed final games
+also supply the game-winning-goal scorer from the winning side's goal at opponent
+final score + 1; shootout events are excluded. Current ownership is resolved for
+the selected date with the existing trade-date logic; uncalled-up prospects do not
+receive signed-roster record credit. Former-franchise counts and the reusable
+baseline are never mutated. Fantasy scoring formulas, standings, milestone
+thresholds and chase/rank rules remain unchanged. Saved/delayed history is labeled
+and does not generate newly claimed achievements or rank movements.
+
+The original page tied record completion to the newest score request. A completed
+career lookup could be discarded while the next score request was still waiting
+for metadata; the original component reproduces this in the delayed browser test.
+Record completion now belongs to the selected date with a monotonic snapshot/request
+guard. Date changes/unmounts invalidate it, but ordinary score polling does not.
+Existing boards remain visible during refreshes, older results cannot replace newer
+ones, and lookup failures retain visible results with a status message. Confirmed
+earlier achievements are retained when a later refresh has only saved history.
+Successful empty results also explain that no nearby targets exist for that date
+and team filter. Failures no longer silently clear every record/milestone section.
+
+Unit coverage exercises the 50-goal milestone, point/record chases, movement in
+league/franchise rankings, final-game winning goals and goalie win/shutout milestones,
+failure/recovery, stale-history safeguards, and preservation of historical trade
+credits without double-counting the live day. `npm run test:live:runtime` uses the
+actual page/feed/record calculations in offline mobile-sized Chrome. It checks
+unresolved enrichment, fast history, a 35-second history request spanning multiple
+score refreshes, continued 30-second live updates, and a visible record error.
+The original UI fails `--baseline-records`; the updated page passes. In the controlled
+fast fixture boards appear in roughly 140 ms; this is not a production cold-start
+guarantee. A first uncached career lookup still depends on NHL response times and
+availability, while live scores remain independent and subsequent goals reuse history.
+
+No database writes, Supabase/authentication changes, styling changes, new Cloudflare
+resources or manual deployment are performed. This follow-up remains local pending
+approval to publish.
+
+Final checks: 138 unit tests passed (94 NHL/frontend, 44 Worker), production build
+including both TypeScript projects, six live-feed browser scenarios, protected-route
+checks, real workerd integration and Wrangler deployment dry run. The original page
+fails the delayed-record rendering regression. Pending changes are limited to the
+feed source, feed tests and documentation; no credentials or protected configuration
+changes were found. Existing CSS-minification/large-chunk build warnings remain.
+
+## Shared complete NHL statistics reports
+
+A production response captured on November 23 confirmed that the current failures
+come from the NHL upstream, not the Cloudflare Worker daily allowance. The response
+was HTTP 429 with `X-NHL-Source: upstream`, `X-NHL-Upstream-Status: 429`, an NHL-side
+Cloudflare ray ending in YYZ, and `Retry-After: 12`. Cloudflare was successfully
+running the Worker and reporting the upstream rejection.
+
+The NHL statistics service caps league-wide results to roughly 100 rows even when
+the client asks for every player. A cold standings baseline therefore made about
+25 paginated upstream calls: skater summary, realtime, faceoffs and goalie summary.
+Separate browsers could repeat the same assembly, while Record Book sections could
+request the same complete seasons or bounded periods again.
+
+The Worker now owns that pagination through four fixed complete-report routes. It
+validates the exact report, season, game type and optional date bounds; preserves
+query identity; fetches every page with stable player ordering; rejects changing,
+duplicate, incomplete or oversized results; and caches only a successfully assembled
+complete response. Identical visitors share the complete result and in-flight work.
+429, HTML, malformed and partial responses never replace it. Last-good complete
+responses and last-good pages remain eligible as explicitly stale fallbacks. The
+fan-out is capped below the Worker subrequest ceiling, and the route cannot proxy an
+arbitrary host, path, report or query.
+
+The browser now requests complete shared reports rather than independently paging
+the NHL. Core standings and record calculations no longer fetch league-wide player
+biographies; roster country metadata retains its existing small, ID-scoped loader,
+and headshots remain static NHL assets. A current-season baseline ending before the
+current Toronto hockey date is cached for six hours because it cannot change during
+that hockey day. Today's box scores are still merged from the separate live snapshot
+and retain their existing live refresh schedule. Historical seasons remain cached
+for one day. Complete cold fills may wait up to 60 seconds, while ordinary/live
+requests retain their shorter timeout and reserved live lane.
+
+This reduces browser-to-Worker requests for a complete season from roughly 25 page
+requests to four complete public reports (three skater facets and one goalie report),
+with the expensive pagination performed once per shared edge cache interval. It does
+not attempt to bypass the NHL's limit, forge an identity, retry aggressively, or
+cache an error. Cloudflare Cache API storage remains best-effort and per data centre;
+the browser's last complete dataset still protects a member during a cold edge or
+temporary NHL outage.

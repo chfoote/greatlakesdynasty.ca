@@ -8,6 +8,8 @@ const ttl = (path, payload) => nhlTtl(new URL(path, "https://test.example"), now
 test("freshness policy keeps live data short and historical data longer", () => {
   assert.equal(ttl("/nhl-web-api/score/2026-11-19"), 15);
   assert.equal(ttl("/nhl-api/skater/summary?cayenneExp=seasonId%3D20262027"), 300);
+  assert.equal(ttl('/nhl-api/complete/skater/summary?cayenneExp=seasonId%3D20262027%20and%20gameTypeId%3D2%20and%20gameDate%3E%3D%222026-07-01%22%20and%20gameDate%3C%3D%222026-11-18%22'), 21600);
+  assert.equal(nhlTtl(new URL('/nhl-api/complete/skater/summary?cayenneExp=seasonId%3D20262027%20and%20gameTypeId%3D2%20and%20gameDate%3E%3D%222026-07-01%22%20and%20gameDate%3C%3D%222026-11-23%22', 'https://test.example'), Date.parse('2026-11-24T06:00:00Z')), 300);
   assert.equal(ttl("/nhl-api/skater/summary?cayenneExp=seasonId%3D20252026"), 86400);
   assert.equal(ttl("/nhl-api/skater/bios"), 21600);
   assert.equal(ttl("/nhl-web-api/draft/picks/2020/all"), 604800);

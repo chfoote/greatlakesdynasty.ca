@@ -31,9 +31,9 @@ const contents=`import React from 'react';import{createRoot}from'react-dom/clien
  const requests=[];window.fetch=async(path,options)=>{requests.push({path,cache:options?.cache});const url=new URL(path,location.origin);
   if(url.pathname.startsWith('/nhl-web-api/live-snapshot/'))return offline?Response.json({error:'limited'},{status:429,headers:{'Retry-After':'600'}}):Response.json({date:getNhlStatsDate(),generatedAt:Date.now(),live:false,nextRefreshAt:Date.now()+3600000,scoreboard:{games:[]},games:[]});
   if(!url.pathname.startsWith('/nhl-api/'))throw Error('Unexpected external/private request');
-  let data=[];if(url.pathname==='/nhl-api/skater/summary')data=[row(target)];
-  if(url.pathname==='/nhl-api/skater/realtime')data=[{playerId:8478402,blockedShots:0,hits:0}];
-  if(url.pathname==='/nhl-api/skater/faceoffwins')data=[{playerId:8478402,totalFaceoffWins:0}];
+  let data=[];if(url.pathname.endsWith('/skater/summary'))data=[row(target)];
+  if(url.pathname.endsWith('/skater/realtime'))data=[{playerId:8478402,blockedShots:0,hits:0}];
+  if(url.pathname.endsWith('/skater/faceoffwins'))data=[{playerId:8478402,totalFaceoffWins:0}];
   if(url.pathname==='/nhl-api/skater/bios')data=[{playerId:8478402,birthDate:'1997-01-01',birthCountryCode:'USA'}];
   return Response.json({data,total:data.length},{headers:{Date:new Date().toUTCString()}});
  };

@@ -1,3 +1,5 @@
+import { nhlStatsDate } from "./nhl-live.ts";
+
 // Public NHL data only. Never apply this policy to Supabase or other APIs.
 export class NhlRateLimitError extends Error {
   readonly status = 429;
@@ -38,6 +40,13 @@ export function nhlTtl(url: URL, now = Date.now(), payload?: unknown): number {
     const currentSeasonEnd = date.getUTCFullYear() + (date.getUTCMonth() >= 6 ? 1 : 0);
     if (season && Number(season[1]) < currentSeasonEnd) return 86400;
     if (url.pathname.endsWith("/bios")) return 6 * 3600;
+    const endDate = url.searchParams.get("cayenneExp")?.match(/gameDate\s*<=\s*"(\d{4}-\d{2}-\d{2})"/)?.[1];
+    // A through-yesterday season baseline cannot change during the current
+    // hockey day. Today's live box scores are merged separately every 30s.
+    const hockeyDate = nhlStatsDate(0, now);
+    if (url.pathname.startsWith("/nhl-api/complete/") && endDate && endDate < hockeyDate) {
+      return 6 * 3600;
+    }
     return 300;
   }
   const scoreDate = url.pathname.match(/\/score\/(\d{4}-\d{2}-\d{2})$/)?.[1];
