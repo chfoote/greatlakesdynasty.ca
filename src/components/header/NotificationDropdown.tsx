@@ -13,6 +13,7 @@ import { Dropdown } from "../ui/dropdown/Dropdown";
 export default function NotificationDropdown() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const userId = user?.id;
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function NotificationDropdown() {
   const notifying = unreadCount > 0;
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       setNotifications([]);
       return;
     }
@@ -49,14 +50,14 @@ export default function NotificationDropdown() {
     loadNotifications();
 
     const channel = supabase
-      .channel(`notifications:${user.id}`)
+      .channel(`notifications:${userId}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "notifications",
-          filter: `recipient_user_id=eq.${user.id}`,
+          filter: `recipient_user_id=eq.${userId}`,
         },
         (payload) => {
           setNotifications((current) => {
@@ -75,7 +76,7 @@ export default function NotificationDropdown() {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [userId]);
 
   function toggleDropdown() {
     setIsOpen(!isOpen);

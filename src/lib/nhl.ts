@@ -594,12 +594,27 @@ export function fetchNhlGoalieStats(seasonId = NHL_SEASON_ID) {
 
 export function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
   return savedNhl<NhlSkaterRecord[]>(`skaters:${seasonId}:${startDate}:${endDate}`, () => loadNhlSkaterStatsForPeriod(seasonId, startDate, endDate),
-    (value): value is NhlSkaterRecord[] => validPlayerRows(value));
+    (value): value is NhlSkaterRecord[] => validPlayerRows(value), endDate < getNhlStatsDate() ? 86400_000 : statsCacheTtlMs);
 }
 
 export function fetchNhlGoalieStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
   return savedNhl<NhlGoalieRecord[]>(`goalies:${seasonId}:${startDate}:${endDate}`, () => loadNhlGoalieStatsForPeriod(seasonId, startDate, endDate),
-    (value): value is NhlGoalieRecord[] => validPlayerRows(value));
+    (value): value is NhlGoalieRecord[] => validPlayerRows(value), endDate < getNhlStatsDate() ? 86400_000 : statsCacheTtlMs);
+}
+
+// Rankings need both datasets, but starting goalies beside the three skater
+// reports creates an avoidable four-report burst against the NHL stats host.
+// Keep the pair sequential; every rankings tab reuses the same returned data.
+export async function fetchNhlSeasonStats(seasonId: number) {
+  const skaters = await fetchNhlSkaterStats(seasonId);
+  const goalies = await fetchNhlGoalieStats(seasonId);
+  return { skaters, goalies };
+}
+
+export async function fetchNhlStatsForPeriod(seasonId: number, startDate: string, endDate: string) {
+  const skaters = await fetchNhlSkaterStatsForPeriod(seasonId, startDate, endDate);
+  const goalies = await fetchNhlGoalieStatsForPeriod(seasonId, startDate, endDate);
+  return { skaters, goalies };
 }
 
 export function fetchNhlLiveSeasonStats(seasonYear: number) {

@@ -9,11 +9,9 @@ import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../.
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
 import {
-  fetchNhlGoalieStats,
-  fetchNhlGoalieStatsForPeriod,
   fetchNhlLiveSeasonStats,
-  fetchNhlSkaterStats,
-  fetchNhlSkaterStatsForPeriod,
+  fetchNhlSeasonStats,
+  fetchNhlStatsForPeriod,
   formatFantasyPoints,
   getGoalieScore,
   getSkaterScore,
@@ -294,20 +292,17 @@ export default function PowerRankings() {
     const previousStart = mode === "month" ? priorMonth?.start : period > 1 ? shiftDate(currentStart, -14) : undefined;
     const previousEnd = mode === "month" ? priorMonth?.end : previousStart ? periodEnd(previousStart) : undefined;
     const currentStats = mode === "season" && season === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(season).then(({ skaters, goalies }) => [skaters, goalies] as const)
-      : Promise.all([
-        mode === "season" ? fetchNhlSkaterStats(seasonId) : fetchNhlSkaterStatsForPeriod(seasonId, currentStart, currentEnd),
-        mode === "season" ? fetchNhlGoalieStats(seasonId) : fetchNhlGoalieStatsForPeriod(seasonId, currentStart, currentEnd),
-      ]);
-    void currentStats.then(([skaters, goalies]) => {
+      ? fetchNhlLiveSeasonStats(season)
+      : mode === "season"
+        ? fetchNhlSeasonStats(seasonId)
+        : fetchNhlStatsForPeriod(seasonId, currentStart, currentEnd);
+    void currentStats.then(({ skaters, goalies }) => {
       if (!active) return;
       setCurrentSkaters(skaters); setCurrentGoalies(goalies); loadedView.current = view;
       setStatsLoading(false);
       // Comparison reports must not hold the selected rankings behind them.
-      if (mode !== "season" && previousStart && previousEnd) void Promise.all([
-        fetchNhlSkaterStatsForPeriod(seasonId, previousStart, previousEnd),
-        fetchNhlGoalieStatsForPeriod(seasonId, previousStart, previousEnd),
-      ]).then(([priorSkaters, priorGoalies]) => {
+      if (mode !== "season" && previousStart && previousEnd) void fetchNhlStatsForPeriod(seasonId, previousStart, previousEnd)
+        .then(({ skaters: priorSkaters, goalies: priorGoalies }) => {
         if (active) { setPreviousSkaters(priorSkaters); setPreviousGoalies(priorGoalies); }
       }).catch(() => { if (active) setComparisonWarning("Previous-period comparisons are delayed. Selected rankings remain available."); });
     }).catch(reason => { if (active) {

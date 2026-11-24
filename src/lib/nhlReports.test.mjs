@@ -174,3 +174,24 @@ test('complete season baseline remains usable when the live snapshot is rate lim
   assert.equal(result.skaters[0].goals, 5);
   assert.equal(result.goalies[0].playerId, 8470001);
 });
+
+test('ranking range finishes its skater bundle before requesting goalies', async t => {
+  const built = await build({ entryPoints: ['src/lib/nhl.ts'], bundle: true, format: 'esm', platform: 'browser', write: false });
+  const stats = await import('data:text/javascript;base64,' + Buffer.from(built.outputFiles[0].text).toString('base64') + '#ranking-pair');
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async path => {
+    const url = new URL(path, 'https://test.example');
+    calls.push(url.pathname);
+    const playerId = 8470001;
+    if (url.pathname.includes('/goalie/')) return Response.json({ data: [{ playerId, gamesPlayed: 1 }], total: 1 });
+    if (url.pathname.endsWith('/realtime')) return Response.json({ data: [{ playerId, blockedShots: 1, hits: 1 }], total: 1 });
+    if (url.pathname.endsWith('/faceoffwins')) return Response.json({ data: [{ playerId, totalFaceoffWins: 1 }], total: 1 });
+    return Response.json({ data: [{ playerId, gamesPlayed: 1, teamAbbrevs: 'TOR' }], total: 1 });
+  });
+  const result = await stats.fetchNhlStatsForPeriod(20262027, '2026-09-29', '2026-10-31');
+  assert.equal(result.skaters.length, 1);
+  assert.equal(result.goalies.length, 1);
+  const goalie = calls.findIndex(pathname => pathname.includes('/goalie/'));
+  assert.equal(goalie, 3);
+  assert.ok(calls.slice(0, goalie).every(pathname => pathname.includes('/skater/')));
+});

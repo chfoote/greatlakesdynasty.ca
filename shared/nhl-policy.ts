@@ -48,7 +48,7 @@ export function nhlTtl(url: URL, now = Date.now(), payload?: unknown): number {
     // hockey day. Today's live box scores are merged separately every 30s.
     const hockeyDate = nhlStatsDate(0, now);
     if (url.pathname.startsWith("/nhl-api/complete/") && endDate && endDate < hockeyDate) {
-      return 6 * 3600;
+      return 86400;
     }
     return 300;
   }
