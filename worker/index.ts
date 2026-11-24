@@ -56,9 +56,6 @@ export function createWorker(options: WorkerOptions = {}) {
   const statsGap = options.statsGapMs ?? (typeof caches === "undefined" ? 0 : 1250);
   const schedule = createWorkerScheduler({ maximum: 4, statsGapMs: statsGap, now, reserveLiveSlot: true, maximumWaitMs: 60_000 });
   const buildSnapshot = createSnapshotBuilder(now);
-  // Share bytes rather than Response streams: workerd forbids consuming I/O
-  // created by a different request context, even within the same isolate.
-  const pending = new Map<string, Promise<ResponseSnapshot>>();
   // Only cooldown timestamps are kept, never a cached 429/error response.
   const cooldowns = new Map<string, number>();
   const getCache = options.cache ?? (async () =>
@@ -125,12 +122,6 @@ export function createWorker(options: WorkerOptions = {}) {
             }
           }
         } catch { /* Edge cache availability must not break NHL routing. */ }
-        const inFlight = pending.get(key.url);
-        if (inFlight) {
-          const result = fromSnapshot(await inFlight);
-          result.headers.set("X-NHL-Cache", "COALESCED");
-          return result;
-        }
       }
 
       const loadUpstream = async () => {
@@ -293,12 +284,17 @@ export function createWorker(options: WorkerOptions = {}) {
         statusText: result.statusText,
         headers: [...result.headers.entries()],
       }));
-      if (request.method === "GET") pending.set(key.url, work);
-      try { return fromSnapshot(await work); }
-      finally { if (pending.get(key.url) === work) pending.delete(key.url); }
+      // Do not share an in-flight promise across Worker requests. Even if its
+      // eventual value is copied into plain bytes, workerd can reject awaiting
+      // I/O owned by another request context (error 1101). The browser client
+      // already deduplicates identical calls, while Cache API handles completed
+      // responses safely across visitors.
+      return fromSnapshot(await work);
   }
   return { async fetch(request: Request, env: Env, context?: BackgroundContext) {
-    const result = await handle(request, env, true, context);
+    let result: Response;
+    try { result = await handle(request, env, true, context); }
+    catch { return jsonError("Unable to complete the NHL request.", 502, { "X-NHL-Source": "worker-error" }); }
     const url = new URL(request.url);
     if (request.method !== "GET" || result.status < 400
       || !routes.some(({ prefix }) => url.pathname === prefix || url.pathname.startsWith(prefix + "/"))

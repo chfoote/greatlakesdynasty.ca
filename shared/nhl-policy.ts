@@ -38,7 +38,10 @@ export function nhlTtl(url: URL, now = Date.now(), payload?: unknown): number {
   if (url.pathname.startsWith("/nhl-api/")) {
     const season = url.searchParams.get("cayenneExp")?.match(/seasonId\s*=\s*\d{4}(\d{4})/);
     const currentSeasonEnd = date.getUTCFullYear() + (date.getUTCMonth() >= 6 ? 1 : 0);
-    if (season && Number(season[1]) < currentSeasonEnd) return 86400;
+    // A completed regular season is immutable. Record Book views revisit many
+    // historical seasons, so refreshing every visitor/day only burns NHL and
+    // Worker requests without changing the answer.
+    if (season && Number(season[1]) < currentSeasonEnd) return 30 * 86400;
     if (url.pathname.endsWith("/bios")) return 6 * 3600;
     const endDate = url.searchParams.get("cayenneExp")?.match(/gameDate\s*<=\s*"(\d{4}-\d{2}-\d{2})"/)?.[1];
     // A through-yesterday season baseline cannot change during the current

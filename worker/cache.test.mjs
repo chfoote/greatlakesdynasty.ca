@@ -45,23 +45,23 @@ test("successful JSON is cached, then refreshed at expiry with query-specific ke
   assert.equal(calls, 3);
 });
 
-test("identical concurrent requests make one upstream call", async (t) => {
+test("identical concurrent requests stay isolated and both return valid JSON", async (t) => {
   const f = fixture();
   let calls = 0;
-  let finish;
+  const finish = [];
   t.mock.method(globalThis, "fetch", async () => {
     calls++;
-    await new Promise((resolve) => { finish = resolve; });
+    await new Promise((resolve) => { finish.push(resolve); });
     return Response.json({ data: [1] });
   });
   const a = f.worker.fetch(req(path), env);
   const b = f.worker.fetch(req(path), env);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls, 1);
-  finish();
+  assert.equal(calls, 2);
+  finish.forEach(resolve => resolve());
   const results = await Promise.all([a, b]);
   assert.deepEqual(await results[0].json(), await results[1].json());
-  assert.equal(f.puts(), 2);
+  assert.equal(f.puts(), 4);
 });
 
 test("429 is never cached; same-origin calls pause until Retry-After without retries", async (t) => {
