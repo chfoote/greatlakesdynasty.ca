@@ -178,8 +178,8 @@ export async function fetchNhlLivePlayerIds(): Promise<Set<string>> {
   return ids;
 }
 
-export async function fetchNhlDailyStats(date = getNhlStatsDate()): Promise<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }> {
-  return buildNhlDailyStats(await fetchNhlLiveSnapshot(date));
+export async function fetchNhlDailyStats(date = getNhlStatsDate(), options: { waitForRefresh?: boolean } = {}): Promise<{ skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] }> {
+  return buildNhlDailyStats(await fetchNhlLiveSnapshot(date, options));
 }
 
 export function buildNhlDailyStats(snapshot: LiveSnapshot): { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] } {
@@ -241,7 +241,7 @@ export function buildNhlDailyStats(snapshot: LiveSnapshot): { skaters: NhlSkater
   return inheritNhlFreshness({ skaters: [...skaters.values()], goalies: [...goalies.values()] }, [snapshot]);
 }
 
-function mergeSkaterRecords(baseline: NhlSkaterRecord[], live: NhlSkaterRecord[]) {
+export function mergeSkaterRecords(baseline: NhlSkaterRecord[], live: NhlSkaterRecord[]) {
   const merged = new Map(baseline.map((record) => [record.playerId, { ...record }]));
   live.forEach((record) => {
     const previous = merged.get(record.playerId);
@@ -268,7 +268,7 @@ function mergeSkaterRecords(baseline: NhlSkaterRecord[], live: NhlSkaterRecord[]
   return [...merged.values()];
 }
 
-function mergeGoalieRecords(baseline: NhlGoalieRecord[], live: NhlGoalieRecord[]) {
+export function mergeGoalieRecords(baseline: NhlGoalieRecord[], live: NhlGoalieRecord[]) {
   const merged = new Map(baseline.map((record) => [record.playerId, { ...record }]));
   live.forEach((record) => {
     const previous = merged.get(record.playerId);
@@ -463,26 +463,7 @@ export function fetchNhlPlayerSeasonStats(playerId: number, seasonId: number) {
   return request;
 }
 
-export function getSkaterScore(record: NhlSkaterRecord) {
-  const powerPlayAssists = record.ppPoints - record.ppGoals;
-  const shortHandedAssists = record.shPoints - record.shGoals;
-
-  return (
-    record.goals * 3 +
-    record.assists * 2 +
-    record.plusMinus * 0.25 +
-    record.penaltyMinutes * 0.2 +
-    record.ppGoals +
-    powerPlayAssists +
-    record.shGoals * 2 +
-    shortHandedAssists * 2 +
-    record.gameWinningGoals +
-    record.shots * 0.2 +
-    record.blockedShots * 0.2 +
-    record.hits * 0.2 +
-    record.totalFaceoffWins * 0.025
-  );
-}
+export { getGoalieScore, getSkaterScore } from "../../shared/nhl-scoring";
 
 async function loadNhlGoalieStats(
   seasonId = NHL_SEASON_ID,
@@ -553,18 +534,6 @@ async function loadNhlGoalieStatsForPeriod(seasonId: number, startDate: string, 
   return request;
 }
 
-export function getGoalieScore(record: NhlGoalieRecord) {
-  return (
-    record.wins * 3 +
-    record.otLosses +
-    record.goalsAgainst * -0.5 +
-    record.saves * 0.2 +
-    record.shutouts * 2 +
-    record.penaltyMinutes * 0.2 +
-    record.goals * 3 +
-    record.assists * 2
-  );
-}
 
 export function formatNhlStat(value: number | null | undefined, digits = 0) {
   if (value === null || value === undefined) return "—";

@@ -60,3 +60,11 @@ test('rankings refresh when the hockey day changes even if the saved snapshot is
   assert.equal(calls,2);
   assert.equal(JSON.parse(f.store.get('gld:public-farm-rankings:v1:2027')).hockeyDate,'2026-11-21');
 });
+
+test('ownership changes publish even when NHL production has the same fresh timestamp',async()=>{
+  const {markNhlFetched}=await import('./nhlFreshness.ts');
+  const f=setup();const cache=createFarmRankingsCache(f.options);await cache.load();
+  const timestamp=f.now();f.advance(300001);
+  f.options.load=async()=>markNhlFetched([{...structuredClone(row),farmScore:96,eligible:3}],timestamp);
+  const updated=await cache.load();assert.equal(updated.rankings[0].farmScore,96);assert.equal(updated.rankings[0].eligible,3);
+});

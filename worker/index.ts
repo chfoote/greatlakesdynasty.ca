@@ -4,9 +4,13 @@ import { nhlStatsDate } from "../shared/nhl-live.ts";
 import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
 import { createWorkerScheduler, WorkerQueueFullError } from "./scheduler.ts";
 import { buildCompleteReport, CompleteReportError, validateCompleteReportQuery } from "./completeReport.ts";
+import { farmSnapshotCron, refreshFarmSnapshot } from "./farmSnapshots.ts";
+import { rankingSnapshotCron, refreshRankingSnapshot } from "./rankingSnapshots.ts";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
+  RANKING_SNAPSHOTS_SUPABASE_URL?: string;
+  RANKING_SNAPSHOTS_SERVICE_ROLE_KEY?: string;
 }
 
 const routes = [
@@ -45,6 +49,7 @@ interface WorkerOptions {
   cache?: () => Promise<PublicCache | undefined>;
   now?: () => number;
   statsGapMs?: number;
+  fetcher?: typeof fetch;
 }
 
 interface ResponseSnapshot {
@@ -167,7 +172,7 @@ export function createWorker(options: WorkerOptions = {}) {
         const signal = AbortSignal.timeout(15_000);
         try {
           for (let redirects = 0; redirects <= (cacheEnabled ? 3 : 0); redirects++) {
-            const upstream = await fetch(upstreamUrl, {
+            const upstream = await (options.fetcher ?? fetch)(upstreamUrl, {
               method: request.method,
               headers: { Accept: "application/json" },
               redirect: "manual",
@@ -340,7 +345,38 @@ export function createWorker(options: WorkerOptions = {}) {
       }
     } catch { /* Keep the original error if shared storage is unavailable. */ }
     return preventOuterNhlCaching(result);
-  }, async scheduled(_controller: unknown, env: Env, context: BackgroundContext) {
+  }, async scheduled(controller: { cron?: string }, env: Env, context: BackgroundContext) {
+    if (controller.cron === farmSnapshotCron) {
+      const url = env.RANKING_SNAPSHOTS_SUPABASE_URL, key = env.RANKING_SNAPSHOTS_SERVICE_ROLE_KEY;
+      if (!url || !key) return;
+      let subrequests = 0;
+      const limitedFetch: typeof fetch = (input, init) => {
+        if (++subrequests > 49) return Promise.reject(new Error("Farm snapshot subrequest budget exhausted."));
+        return fetch(input, init);
+      };
+      const source = createWorker({cache:async()=>undefined,fetcher:limitedFetch});
+      context.waitUntil(refreshFarmSnapshot({url,key,fetcher:limitedFetch,now:now(),
+        getReport:path=>source.fetch(new Request(`https://farm-snapshot.gldhl.invalid${path}`),env)}));
+      return;
+    }
+    if (controller.cron === rankingSnapshotCron) {
+      const url = env.RANKING_SNAPSHOTS_SUPABASE_URL;
+      const key = env.RANKING_SNAPSHOTS_SERVICE_ROLE_KEY;
+      if (!url || !key) return;
+      // Read from the provider so completed ranges can pick up corrections
+      // even when the visitor-facing historical report cache is still warm.
+      let subrequests = 0;
+      const limitedFetch: typeof fetch = (input, init) => {
+        if (++subrequests > 49) return Promise.reject(new Error("Ranking snapshot subrequest budget exhausted."));
+        return fetch(input, init);
+      };
+      const source = createWorker({ cache: async () => undefined, statsGapMs: 15_000, now, fetcher: limitedFetch });
+      context.waitUntil(refreshRankingSnapshot({
+        url, key, now: now(), fetcher: limitedFetch,
+        getReport: path => source.fetch(new Request(`https://ranking-snapshot.gldhl.invalid${path}`), env),
+      }));
+      return;
+    }
     // One shared refresh after the overnight NHL window keeps every stats-backed
     // page ready without making every member rebuild the same reports. Keep the
     // work sequential so this maintenance run cannot burst the upstream API.

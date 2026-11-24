@@ -3,8 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import {
-  fetchNhlGoalieStats,
-  fetchNhlLiveSeasonStats,
   formatFantasyPoints,
   formatNhlStat,
   getGoalieScore,
@@ -22,6 +20,7 @@ import PlayerInterestButton from "./PlayerInterestButton";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import { fetchSeasonLeadership } from "../../lib/teamLeadership";
 import PositionBadge from "../../components/hockey/PositionBadge";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 
 const statsSeasons = playedAndCurrentSeasons;
@@ -67,13 +66,11 @@ export default function GoalieStats() {
   const [sort, setSort] = useState<{ key: GoalieSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
 
-  const revision = useNhlDataRevision([`live-season:${selectedSeason}`, `goalies:${nhlSeasonId(selectedSeason)}`]);
+  const revision = useNhlDataRevision([`league-season:${selectedSeason}`, `live-season:${selectedSeason}`, `goalies:${nhlSeasonId(selectedSeason)}`]);
   useEffect(() => {
     if (!revision) return;
     let active = true;
-    const request = selectedSeason === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(selectedSeason).then(stats => stats.goalies)
-      : fetchNhlGoalieStats(nhlSeasonId(selectedSeason));
+    const request = fetchLeagueSeasonStats(selectedSeason).then(stats => stats.goalies);
     request.then(data => { if (active) { setRecords(data); setError(null); } }).catch(() => {});
     return () => { active = false; };
   }, [revision, selectedSeason]);
@@ -82,9 +79,7 @@ export default function GoalieStats() {
     let active = true;
     setLoading(true);
     setProspectRights(new Map());
-    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(selectedSeason).then((stats) => stats.goalies)
-      : fetchNhlGoalieStats(nhlSeasonId(selectedSeason));
+    const statsRequest = fetchLeagueSeasonStats(selectedSeason).then(stats => stats.goalies);
     statsRequest
       .then((data) => {
         if (!active) return;

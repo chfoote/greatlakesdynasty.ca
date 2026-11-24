@@ -58,6 +58,41 @@ export type LeagueTransaction = {
   related_trade_offer: { id: number } | null;
 };
 
+type RankingTrade = Pick<LeagueTransaction, "transaction_date" | "created_at"> & {
+  trade_offer: {
+    trade_offer_players: Array<{
+      from_team_id: number;
+      player_season: Pick<PlayerSeasonWithRelations, "player_id"> | null;
+    }>;
+  } | null;
+};
+
+export async function fetchRankingTrades(seasonYear: number): Promise<RankingTrade[]> {
+  const pageSize = 500;
+  const trades: RankingTrade[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from("league_transactions")
+      .select(`
+        transaction_date,
+        created_at,
+        trade_offer:trade_offers!league_transactions_trade_offer_id_fkey(
+          trade_offer_players(from_team_id, player_season:player_seasons(player_id))
+        )
+      `)
+      .eq("season_year", seasonYear)
+      .eq("transaction_type", "trade")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as RankingTrade[];
+    trades.push(...page);
+    if (page.length < pageSize) return trades;
+  }
+}
+
 export async function fetchLeagueTransactions() {
   const { data, error } = await supabase
     .from("league_transactions")

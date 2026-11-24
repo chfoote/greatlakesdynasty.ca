@@ -1,3 +1,6 @@
+import { buildRankings, indexTradeHistory, positions, type RankingTeam, type RankingRosterRow, type PeriodMode, type Position, type PlayerRanking, type TeamRanking, type GoalieTandem } from "../../../shared/power-rankings";
+import { parseDate, periodEnd, periodStart, latestPeriod, periodsPerSeason, monthRange, monthNames, shiftDate } from "../../../shared/ranking-ranges";
+import { fetchRankingSnapshot, type RankingSnapshot } from "../../lib/rankingSnapshots";
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
@@ -7,41 +10,22 @@ import PositionBadge from "../../components/hockey/PositionBadge";
 import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
-import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
+import { fetchRankingTrades } from "../../lib/transactions";
 import {
   fetchNhlLiveSeasonStats,
   fetchNhlSeasonStats,
   fetchNhlStatsForPeriod,
   formatFantasyPoints,
-  getGoalieScore,
-  getSkaterScore,
   type NhlGoalieRecord,
   type NhlSkaterRecord,
 } from "../../lib/nhl";
 
-type Position = "C" | "LW" | "RW" | "D" | "G";
-type PeriodMode = "period" | "month" | "season";
-type PlayerRanking = { season: PlayerSeasonWithRelations; team: FantasyTeam; position: Position; nhlTeam: string; birthDate?: string; gamesPlayed: number; goals: number; assists: number; nhlPoints: number; wins: number; saves: number; savePct: number | null; goalsAgainstAverage: number | null; points: number; rank: number; movement: number | null };
-type TeamRanking = { team: FantasyTeam; gamesPlayed: number; points: number; rank: number; movement: number | null; units: Record<Position, { gamesPlayed: number; points: number }> };
-type GoalieTandem = { team: FantasyTeam; goalies: PlayerRanking[]; gamesPlayed: number; wins: number; saves: number; goalsAgainst: number; points: number };
-
-const positions: Position[] = ["C", "LW", "RW", "D", "G"];
 const positionNames: Record<Position, string> = { C: "Centres", LW: "Left Wings", RW: "Right Wings", D: "Defence", G: "Goalies" };
-const scoringLimits: Record<Position, number> = { C: 3, LW: 3, RW: 3, D: 6, G: 2 };
 const seasonOptions = playedAndCurrentSeasons;
-const periodStartBySeason: Record<number, string> = { 2026: "2025-10-06", 2027: "2026-09-29" };
-const periodsPerSeason = 14;
-const monthNames = ["October", "November", "December", "January", "February", "March", "April"];
 const currencyFormatter = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
-function normalizePosition(value?: string | null): Position | null {
-  const code = (value || "").toUpperCase();
-  if (code === "L") return "LW";
-  if (code === "R") return "RW";
-  return positions.includes(code as Position) ? code as Position : null;
-}
-function playerName(row: PlayerSeasonWithRelations) { return row.player?.full_name || [row.player?.first_name, row.player?.last_name].filter(Boolean).join(" ") || "Unknown player"; }
+function playerName(row: RankingRosterRow) { return row.player?.full_name || [row.player?.first_name, row.player?.last_name].filter(Boolean).join(" ") || "Unknown player"; }
 function ageFromBirthDate(birthDate?: string) {
   if (!birthDate) return null;
   const [year, month, day] = birthDate.split("-").map(Number);
@@ -60,34 +44,11 @@ function playerMeta(row: PlayerRanking) {
     row.season.term_end_year,
   ].filter(Boolean).join(" | ");
 }
-function formatDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
-function parseDate(value: string) { const [year, month, day] = value.split("-").map(Number); return new Date(year, month - 1, day); }
-function shiftDate(value: string, days: number) { const date = parseDate(value); date.setDate(date.getDate() + days); return formatDate(date); }
-function periodEnd(value: string) { return shiftDate(value, 13); }
 function periodLabel(start: string) {
   const end = parseDate(periodEnd(start));
   const startDate = parseDate(start);
   const formatter = new Intl.DateTimeFormat("en-CA", { month: "short", day: "numeric" });
   return `${formatter.format(startDate)} – ${formatter.format(end)}, ${end.getFullYear()}`;
-}
-function periodStart(season: number, period: number) {
-  return shiftDate(periodStartBySeason[season], (period - 1) * 14);
-}
-function latestPeriod(season: number) {
-  let latest = 1;
-  for (let period = 1; period <= periodsPerSeason; period += 1) {
-    const end = parseDate(periodEnd(periodStart(season, period)));
-    end.setHours(23, 59, 59, 999);
-    if (Date.now() > end.getTime()) latest = period;
-  }
-  return latest;
-}
-function monthRange(season: number, monthIndex: number) {
-  const calendarMonth = monthIndex < 3 ? monthIndex + 10 : monthIndex - 2;
-  const year = monthIndex < 3 ? season - 1 : season;
-  const start = season === 2027 && monthIndex === 0 ? `${year}-09-29` : formatDate(new Date(year, calendarMonth - 1, 1));
-  const end = formatDate(new Date(year, calendarMonth, 0));
-  return { start, end };
 }
 function monthLabel(season: number, monthIndex: number) {
   return season === 2027 && monthIndex === 0 ? "September / October" : monthNames[monthIndex];
@@ -95,27 +56,6 @@ function monthLabel(season: number, monthIndex: number) {
 function rangeLabel(start: string, end: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", { month: "short", day: "numeric", year: "numeric" });
   return `${formatter.format(parseDate(start))} – ${formatter.format(parseDate(end))}`;
-}
-function historicalTeamId(row: PlayerSeasonWithRelations, transactions: LeagueTransaction[], asOfDate: string) {
-  let teamId = row.fantasy_team_id;
-  transactions
-    .filter((transaction) => transaction.season_year === row.season_year && transaction.transaction_type === "trade" && transaction.transaction_date > asOfDate)
-    .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date) || b.created_at.localeCompare(a.created_at))
-    .forEach((transaction) => {
-      const move = transaction.trade_offer?.trade_offer_players.find((candidate) => candidate.player_season?.player_id === row.player_id);
-      if (move) teamId = move.from_team_id;
-    });
-  return teamId;
-}
-function scoreForPlayer(row: PlayerSeasonWithRelations, skaters: Map<string, NhlSkaterRecord>, goalies: Map<string, NhlGoalieRecord>) {
-  const id = row.player?.player_api_id || "";
-  const goalie = goalies.get(id);
-  const skater = skaters.get(id);
-  return goalie
-    ? { teamAbbrevs: goalie.teamAbbrevs, birthDate: goalie.birthDate, gamesPlayed: goalie.gamesPlayed, goals: goalie.goals, assists: goalie.assists, nhlPoints: goalie.goals + goalie.assists, wins: goalie.wins, saves: goalie.saves, savePct: goalie.savePct, goalsAgainstAverage: goalie.goalsAgainstAverage, points: getGoalieScore(goalie) }
-    : skater
-      ? { teamAbbrevs: skater.teamAbbrevs, birthDate: skater.birthDate, gamesPlayed: skater.gamesPlayed, goals: skater.goals, assists: skater.assists, nhlPoints: skater.goals + skater.assists, wins: 0, saves: 0, savePct: null, goalsAgainstAverage: null, points: getSkaterScore(skater) }
-      : { teamAbbrevs: "", birthDate: undefined, gamesPlayed: 0, goals: 0, assists: 0, nhlPoints: 0, wins: 0, saves: 0, savePct: null, goalsAgainstAverage: null, points: 0 };
 }
 function movementLabel(value: number | null) {
   if (value === null) return <span className="text-gray-300">New</span>;
@@ -133,7 +73,7 @@ function categoryWinners(rows: PlayerRanking[]) {
   ].filter((winner): winner is { label: string; icon: string; row: PlayerRanking } => Boolean(winner.row));
 }
 
-function TeamMark({ team, size = "small" }: { team: FantasyTeam; size?: "small" | "large" }) {
+function TeamMark({ team, size = "small" }: { team: RankingTeam; size?: "small" | "large" }) {
   const dimensions = size === "large" ? "h-11 w-11" : "h-7 w-7";
   return <span className={`flex ${dimensions} shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white p-0.5 text-[9px] font-black text-gray-500 dark:border-gray-700 dark:bg-gray-900`}>{team.logo ? <img src={team.logo} alt="" className="h-full w-full object-contain" /> : team.abbreviation}</span>;
 }
@@ -235,9 +175,16 @@ export default function PowerRankings() {
   const [mode, setMode] = useState<PeriodMode>("period");
   const [period, setPeriod] = useState(() => latestPeriod(CURRENT_LEAGUE_SEASON));
   const [month, setMonth] = useState(0);
+  const snapshotIndex = mode === "month" ? month : mode === "period" ? period : 0;
+  const snapshotKey = `${season}:${mode}:${snapshotIndex}`;
+  const [snapshotLookup, setSnapshotLookup] = useState<{ key: string; value: RankingSnapshot | null }>();
+  const snapshotEnabled = import.meta.env.VITE_RANKING_SNAPSHOTS === "true";
+  const snapshot = snapshotLookup?.key === snapshotKey ? snapshotLookup.value : null;
+  const checkingSnapshot = snapshotEnabled && snapshotLookup?.key !== snapshotKey;
+  const useFallback = !checkingSnapshot && !snapshot;
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
-  const [transactions, setTransactions] = useState<LeagueTransaction[]>([]);
+  const [tradeHistory, setTradeHistory] = useState<ReturnType<typeof indexTradeHistory>>(() => new Map());
   const [currentSkaters, setCurrentSkaters] = useState<NhlSkaterRecord[]>([]);
   const [currentGoalies, setCurrentGoalies] = useState<NhlGoalieRecord[]>([]);
   const [previousSkaters, setPreviousSkaters] = useState<NhlSkaterRecord[]>([]);
@@ -245,27 +192,49 @@ export default function PowerRankings() {
   const [headshots, setHeadshots] = useState<Map<string, string>>(new Map());
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
-  const loading = metadataLoading || statsLoading;
+  const loading = checkingSnapshot || (useFallback && (metadataLoading || statsLoading));
   const loadedView = useRef("");
   const revision = useNhlDataRevision([`live-season:${season}`, `skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`]);
   const [comparisonWarning, setComparisonWarning] = useState("");
   const [statsError, setError] = useState("");
   const [metadataError, setMetadataError] = useState("");
-  const error = metadataError || statsError;
+  const error = useFallback ? metadataError || statsError : "";
 
   useEffect(() => {
+    if (!snapshotEnabled) return;
+    const controller = new AbortController();
+    const refresh = async () => {
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(2500)]);
+      try {
+        const value = await fetchRankingSnapshot(season, mode, snapshotIndex, signal);
+        if (!controller.signal.aborted) setSnapshotLookup(previous =>
+          !value && previous?.key === snapshotKey ? previous : { key: snapshotKey, value });
+      } catch {
+        if (!controller.signal.aborted) setSnapshotLookup(previous =>
+          previous?.key === snapshotKey ? previous : { key: snapshotKey, value: null });
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 300_000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [snapshotEnabled, snapshotKey, season, mode, snapshotIndex]);
+
+  useEffect(() => {
+    if (!useFallback) return;
     let active = true, busy = false, haveMetadata = false;
     setMetadataLoading(true); setMetadataError("");
     const refresh = async () => {
       if (busy) return;
       busy = true;
       try {
-        const [teamRows, branding, seasonRows, transactionRows] = await Promise.all([
-          fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season), fetchLeagueTransactions(),
+        const [teamRows, branding, seasonRows, trades] = await Promise.all([
+          fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(season), fetchRankingTrades(season),
         ]);
         if (!active) return;
         setTeams(teamRows.map(team => applyTeamBranding(team, branding, season)));
-        setPlayerSeasons(seasonRows); setTransactions(transactionRows); setMetadataError(""); haveMetadata = true;
+        setPlayerSeasons(seasonRows); setTradeHistory(indexTradeHistory(trades)); setMetadataError(""); haveMetadata = true;
       } catch (reason) { if (active) {
         if (haveMetadata) setComparisonWarning("Roster ownership updates are delayed. Showing the last loaded rosters.");
         else setMetadataError(reason instanceof Error ? reason.message : "Unable to load ranking rosters.");
@@ -277,9 +246,10 @@ export default function PowerRankings() {
       if (document.visibilityState === "visible" && navigator.onLine !== false) void refresh();
     }, 300_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [season]);
+  }, [season, useFallback]);
 
   useEffect(() => {
+    if (!useFallback) return;
     let active = true;
     const view = JSON.stringify([season, mode, month, period]);
     if (loadedView.current !== view) { setStatsLoading(true); setPreviousSkaters([]); setPreviousGoalies([]); }
@@ -311,7 +281,7 @@ export default function PowerRankings() {
     } })
       .finally(() => { if (active) setStatsLoading(false); });
     return () => { active = false; };
-  }, [mode, month, period, season, revision]);
+  }, [mode, month, period, season, revision, useFallback]);
 
   const rankingEndDate = mode === "period"
     ? periodEnd(periodStart(season, period))
@@ -324,46 +294,10 @@ export default function PowerRankings() {
       ? monthRange(season, month - 1).end
       : rankingEndDate;
 
-  const { playerRankings, teamRankings, goalieTandems } = useMemo(() => {
-    const currentSkaterMap = new Map(currentSkaters.map((row) => [String(row.playerId), row]));
-    const currentGoalieMap = new Map(currentGoalies.map((row) => [String(row.playerId), row]));
-    const previousSkaterMap = new Map(previousSkaters.map((row) => [String(row.playerId), row]));
-    const previousGoalieMap = new Map(previousGoalies.map((row) => [String(row.playerId), row]));
-    const teamMap = new Map(teams.map((team) => [team.id, team]));
-    const rosterAt = (asOfDate: string) => playerSeasons
-      .map((row) => ({ ...row, fantasy_team_id: historicalTeamId(row, transactions, asOfDate) }))
-      .filter((row) => Boolean(row.fantasy_team_id && row.player?.player_api_id && normalizePosition(row.position)));
-    const eligible = rosterAt(rankingEndDate);
-    const previousEligible = rosterAt(previousRankingEndDate);
-    const previousRanks = new Map<number, number>();
-    positions.forEach((pos) => eligible.filter((row) => normalizePosition(row.position) === pos).map((row) => ({ row, ...scoreForPlayer(row, previousSkaterMap, previousGoalieMap) })).filter((item) => item.gamesPlayed > 0).sort((a, b) => b.points - a.points).forEach((item, index) => previousRanks.set(item.row.id, index + 1)));
-    const players: PlayerRanking[] = [];
-    positions.forEach((pos) => {
-      const positional = eligible.filter((row) => normalizePosition(row.position) === pos).map((row) => ({ row, team: teamMap.get(row.fantasy_team_id!), ...scoreForPlayer(row, currentSkaterMap, currentGoalieMap) })).filter((item): item is typeof item & { team: FantasyTeam } => Boolean(item.team)).sort((a, b) => Number(b.gamesPlayed > 0) - Number(a.gamesPlayed > 0) || b.points - a.points || b.gamesPlayed - a.gamesPlayed);
-      let playedRank = 0;
-      positional.forEach((item) => { const rank = item.gamesPlayed > 0 ? ++playedRank : 0; const prior = previousRanks.get(item.row.id); players.push({ season: item.row, team: item.team, position: pos, nhlTeam: item.teamAbbrevs, birthDate: item.birthDate, gamesPlayed: item.gamesPlayed, goals: item.goals, assists: item.assists, nhlPoints: item.nhlPoints, wins: item.wins, saves: item.saves, savePct: item.savePct, goalsAgainstAverage: item.goalsAgainstAverage, points: item.points, rank, movement: mode === "season" ? 0 : prior && rank ? prior - rank : null }); });
-    });
-    const emptyUnits = () => Object.fromEntries(positions.map((pos) => [pos, { gamesPlayed: 0, points: 0 }])) as TeamRanking["units"];
-    const scoringLineup = (roster: PlayerSeasonWithRelations[], teamId: number, skaterMap: Map<string, NhlSkaterRecord>, goalieMap: Map<string, NhlGoalieRecord>) => positions.flatMap((pos) => roster
-      .filter((row) => row.fantasy_team_id === teamId && normalizePosition(row.position) === pos)
-      .map((row) => ({ row, pos, score: scoreForPlayer(row, skaterMap, goalieMap) }))
-      .sort((a, b) => b.score.points - a.score.points || b.score.gamesPlayed - a.score.gamesPlayed)
-      .slice(0, scoringLimits[pos]));
-    const currentTeams = teams.map((team) => {
-      const units = emptyUnits();
-      scoringLineup(eligible, team.id, currentSkaterMap, currentGoalieMap).forEach(({ pos, score }) => { units[pos].gamesPlayed += score.gamesPlayed; units[pos].points += score.points; });
-      return { team, units, gamesPlayed: positions.reduce((sum, pos) => sum + units[pos].gamesPlayed, 0), points: positions.reduce((sum, pos) => sum + units[pos].points, 0) };
-    }).sort((a, b) => b.points - a.points);
-    const previousTeamRanks = new Map<number, number>();
-    teams.map((team) => ({ team, points: scoringLineup(previousEligible, team.id, previousSkaterMap, previousGoalieMap).reduce((sum, item) => sum + item.score.points, 0) })).sort((a, b) => b.points - a.points).forEach((row, index) => previousTeamRanks.set(row.team.id, index + 1));
-    const rankedTeams: TeamRanking[] = currentTeams.map((row, index) => ({ ...row, rank: index + 1, movement: mode === "season" ? 0 : (previousTeamRanks.get(row.team.id) || 0) - (index + 1) }));
-    const goalieTandems = teams.map((team) => {
-      const goalies = players.filter((row) => row.team.id === team.id && row.position === "G" && row.gamesPlayed > 0).sort((a, b) => b.points - a.points).slice(0, scoringLimits.G);
-      const source = goalies.map((row) => currentGoalieMap.get(row.season.player?.player_api_id || "")).filter(Boolean) as NhlGoalieRecord[];
-      return { team, goalies, gamesPlayed: source.reduce((sum, row) => sum + row.gamesPlayed, 0), wins: source.reduce((sum, row) => sum + row.wins, 0), saves: source.reduce((sum, row) => sum + row.saves, 0), goalsAgainst: source.reduce((sum, row) => sum + row.goalsAgainst, 0), points: goalies.reduce((sum, row) => sum + row.points, 0) };
-    }).filter((row) => row.goalies.length >= 2).sort((a, b) => b.points - a.points);
-    return { playerRankings: players, teamRankings: rankedTeams, goalieTandems };
-  }, [currentGoalies, currentSkaters, mode, playerSeasons, previousGoalies, previousRankingEndDate, previousSkaters, rankingEndDate, teams, transactions]);
+  const { playerRankings, teamRankings, goalieTandems } = useMemo(() => snapshot?.results ?? buildRankings({
+    currentGoalies, currentSkaters, mode, playerSeasons, previousGoalies, previousRankingEndDate,
+    previousSkaters, rankingEndDate, teams, tradeHistory,
+  }), [snapshot, currentGoalies, currentSkaters, mode, playerSeasons, previousGoalies, previousRankingEndDate, previousSkaters, rankingEndDate, teams, tradeHistory]);
 
   const podiumPlayerIds = useMemo(() => categoryWinners(playerRankings)
     .map(({ row }) => row.season.player?.player_api_id)
@@ -395,7 +329,8 @@ export default function PowerRankings() {
         {mode === "period" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">Period {period}: {periodLabel(selectedPeriodStart)} <span className="ml-2 font-normal text-gray-400">· {period > 1 ? "Movement compares the previous two-week period" : "Opening period — no previous-period comparison"}</span></p>}
         {mode === "month" && <p className="mt-3 text-sm font-semibold text-gray-600 dark:text-gray-300">{monthLabel(season, month)}: {rangeLabel(selectedMonthRange.start, selectedMonthRange.end)} <span className="ml-2 font-normal text-gray-400">· {month > 0 ? "Movement compares the previous month" : "Opening award month — no previous-month comparison"}</span></p>}
       </section>
-      {comparisonWarning && <p role="status" className="mb-3 text-sm text-gray-500">{comparisonWarning}</p>}
+      {snapshot && <p className="text-sm text-gray-500">Stats through {snapshot.stats_through} · Updated {new Date(snapshot.generated_at).toLocaleString()}</p>}
+      {useFallback && comparisonWarning && <p role="status" className="mb-3 text-sm text-gray-500">{comparisonWarning}</p>}
       {loading ? <div className="grid animate-pulse gap-5"><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /><div className="h-72 rounded-2xl bg-gray-100 dark:bg-gray-800" /></div> : error ? <div className="rounded-xl border border-error-200 bg-error-50 p-5 text-error-700">{error}</div> : tab === "players" ? <div className="space-y-5"><PlayerHighlights rows={playerRankings} mode={mode} tandem={goalieTandems[0]} headshots={headshots} />{positions.map((pos) => <PlayerPositionCard key={pos} position={pos} rows={playerRankings.filter((row) => row.position === pos)} />)}</div> : tab === "rookies" ? <RookieWatch rows={playerRankings} season={season} mode={mode} /> : <div className="space-y-5"><div><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Overall team rankings</h2><TeamTable rows={teamRankings} /></div><div className="pt-2"><h2 className="mb-3 text-xl font-black text-gray-900 dark:text-white">Positional unit rankings</h2><div className="space-y-5">{positions.map((pos) => <UnitCard key={pos} position={pos} teams={teamRankings} />)}</div></div></div>}
       {!loading && !error && <p className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs leading-5 text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400"><strong>How this works:</strong> Rankings reconstruct each player’s fantasy team as of the end of the selected period or month using the league transaction history. Team rankings count the highest-scoring 3 C, 3 LW, 3 RW, 6 D and 2 G from that historical roster. Extra roster players remain eligible for individual Player Rankings but do not add to team or positional-unit totals. Team GP is the combined number of NHL appearances by those scoring players, and FPPG is their fantasy points divided by those appearances. Players with zero games are excluded from Bottom 5 lists.</p>}
     </div>

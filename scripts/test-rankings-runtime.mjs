@@ -18,18 +18,23 @@ const mocks = {
  PageMeta:'export default function PageMeta(){return null}',
  fantasyTeams:`${common} export const applyTeamBranding=t=>t;export const fetchFantasyTeams=()=>{globalThis.__metadataCalls=(globalThis.__metadataCalls||0)+1;return delay([${JSON.stringify(team)}]);};export const fetchTeamBrandingHistory=()=>delay([]);`,
  fantasyPlayers:`${common} export const fetchPlayerSeasonsBySeason=()=>delay([${JSON.stringify(row)}]);`,
- transactions:`${common} export const fetchLeagueTransactions=()=>delay([]);`,
+ transactions:`${common} export const fetchRankingTrades=()=>delay([]);`,
+ rankingSnapshots:`${common} export const fetchRankingSnapshot=()=>delay(globalThis.__rankingFixture ?? null);`,
  nhl:`${common} const skaters=[{playerId:8479420,skaterFullName:'Tage Thompson',positionCode:'C',teamAbbrevs:'BUF',gamesPlayed:10,goals:3,assists:4,points:7,testScore:25}];
  export const formatFantasyPoints=n=>n.toFixed(2);export const getSkaterScore=r=>r.testScore;export const getGoalieScore=()=>0;
  export const fetchNhlSkaterStats=()=>delay(skaters);export const fetchNhlGoalieStats=()=>delay([]);
  function period(start,value){if(!globalThis.__selectedStart)globalThis.__selectedStart=start;
  if(start!==globalThis.__selectedStart){globalThis.__comparisonCalls=(globalThis.__comparisonCalls||0)+1;return new Promise(()=>{});}return delay(value);}
  export const fetchNhlSkaterStatsForPeriod=(id,start)=>period(start,skaters);export const fetchNhlGoalieStatsForPeriod=(id,start)=>period(start,[]);
+ const countNhlLoad=()=>{globalThis.__nhlLoads=(globalThis.__nhlLoads||0)+1;};
+ export const fetchNhlSeasonStats=async()=>{countNhlLoad();return {skaters:await delay(skaters),goalies:[]};};
+ export const fetchNhlLiveSeasonStats=fetchNhlSeasonStats;
+ export const fetchNhlStatsForPeriod=async(id,start)=>{countNhlLoad();return {skaters:await period(start,skaters),goalies:[]};};
  export const fetchNhlPlayerLanding=()=>{throw Error('Photo must not fetch a profile');};`,
 };
 async function bundle(contents, card=false) {
  return (await build({stdin:{contents,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',
- define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'offline-ranking-fixtures',setup(plugin){
+ define:{'process.env.NODE_ENV':'"production"','import.meta.env.VITE_RANKING_SNAPSHOTS':'"true"'},plugins:[{name:'offline-ranking-fixtures',setup(plugin){
   plugin.onResolve({filter:/.*/},args=>{const name=args.path.split('/').at(-1).replace(/\.ts$/,'');
    if(args.importer===page&&name in mocks)return{path:name,namespace:'fixture'};
    if(card&&name==='supabase')return{path:'supabase',namespace:'fixture'};});
@@ -38,6 +43,13 @@ async function bundle(contents, card=false) {
  }}]})).outputFiles[0].text;
 }
 const rankingScript=await bundle(`import React from 'react';import{createRoot}from'react-dom/client';import{BrowserRouter}from'react-router';import Page from ${JSON.stringify(page)};
+ if(location.pathname==='/snapshot'){
+  const team=${JSON.stringify(team)},season=${JSON.stringify(row)};
+  globalThis.__rankingFixture={generated_at:'2026-11-24T15:35:00Z',stats_through:'2026-11-23',results:{
+   playerRankings:[{season,team,position:'C',nhlTeam:'BUF',gamesPlayed:10,goals:3,assists:4,nhlPoints:7,points:25,movement:null}],
+   teamRankings:[{team,gamesPlayed:10,points:25,rank:1,movement:null,units:Object.fromEntries(['C','LW','RW','D','G'].map(pos=>[pos,{gamesPlayed:10,points:25}]))}],
+   goalieTandems:[]}};
+ }
  createRoot(document.getElementById('root')).render(<BrowserRouter><Page/></BrowserRouter>);
  const results=[];const click=label=>[...document.querySelectorAll('button')].find(b=>b.textContent===label)?.click();
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -47,7 +59,7 @@ const rankingScript=await bundle(`import React from 'react';import{createRoot}fr
   for(const tab of ['Player Rankings','Team Rankings','Rookie Watch']){click(tab);await wait(100);
    const text=document.body.textContent;results.push({mode,tab,ready:text.includes(tab==='Team Rankings'?'Fixture Franchise':'Tage Thompson')&&!document.querySelector('.animate-pulse')});}
  }
- document.body.setAttribute('data-results',JSON.stringify(results));document.body.setAttribute('data-metadata-calls',String(globalThis.__metadataCalls));document.body.setAttribute('data-comparison-calls',String(globalThis.__comparisonCalls||0));})();`);
+ document.body.setAttribute('data-results',JSON.stringify(results));document.body.setAttribute('data-metadata-calls',String(globalThis.__metadataCalls||0));document.body.setAttribute('data-nhl-loads',String(globalThis.__nhlLoads||0));document.body.setAttribute('data-comparison-calls',String(globalThis.__comparisonCalls||0));})();`);
 const cardScript=await bundle(`import React from'react';import{createRoot}from'react-dom/client';import{BrowserRouter}from'react-router';import{LineupPlayerCard}from ${JSON.stringify(roster)};import{playerMetadata}from './src/lib/nhlPlayerMetadata';
  playerMetadata.remember([{playerId:8479420,birthCountryCode:'USA',birthDate:'1997-10-30'}]);
  const start=performance.now();new MutationObserver(()=>{const img=document.querySelector('img[alt="Tage Thompson headshot"]');const flag=document.querySelector('[aria-label="Born in United States"]');
@@ -56,10 +68,12 @@ const cardScript=await bundle(`import React from'react';import{createRoot}from'r
 const server=createServer((req,res)=>{res.setHeader('Content-Security-Policy',"default-src 'self';connect-src 'none';img-src 'self' data:;style-src 'unsafe-inline'");
  if(req.url.endsWith('.js')){res.setHeader('Content-Type','text/javascript');res.end(req.url==='/card.js'?cardScript:rankingScript);}else{res.setHeader('Content-Type','text/html');res.end('<!doctype html><body><div id="root"></div><script src="'+(req.url==='/card'?'/card.js':'/rankings.js')+'"></script></body>');}});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-try{for(const route of ['/rankings','/card']){const profile=await mkdtemp(join(tmpdir(),'gld-ranking-runtime-'));
+try{for(const route of ['/rankings','/snapshot','/card']){const profile=await mkdtemp(join(tmpdir(),'gld-ranking-runtime-'));
  try{const{stdout}=await run(chrome,['--headless','--disable-gpu','--no-first-run','--disable-extensions','--disable-background-networking',`--user-data-dir=${profile}`,'--window-size=390,844',`--virtual-time-budget=${route==='/card'?1500:5000}`,'--dump-dom',`http://127.0.0.1:${server.address().port}${route}`],{timeout:20000,maxBuffer:2000000});
- if(route==='/rankings'){const raw=stdout.match(/data-results="([^"]+)"/);assert.ok(raw,'Ranking scenarios did not finish');const results=JSON.parse(raw[1].replaceAll('&quot;','"').replaceAll('&amp;','&'));
- assert.equal(results.length,9);assert.ok(results.every(r=>r.ready),JSON.stringify(results));assert.match(stdout,/data-metadata-calls="1"/);assert.ok(Number(stdout.match(/data-comparison-calls="(\d+)"/)[1])>0);console.log('PASS: all 9 player/team/rookie × period/month/season views render while previous reports remain unresolved; roster metadata fetched once.');
+ if(route!=='/card'){const raw=stdout.match(/data-results="([^"]+)"/);assert.ok(raw,'Ranking scenarios did not finish');const results=JSON.parse(raw[1].replaceAll('&quot;','"').replaceAll('&amp;','&'));
+ assert.equal(results.length,9);assert.ok(results.every(r=>r.ready),JSON.stringify(results));
+ if(route==='/snapshot'){assert.match(stdout,/data-metadata-calls="0"/);assert.match(stdout,/data-nhl-loads="0"/);assert.match(stdout,/Stats through 2026-11-23/);console.log('PASS: all 9 ranking views render from a snapshot without roster or NHL requests.');}
+ else{assert.ok(Number(stdout.match(/data-comparison-calls="(\d+)"/)[1])>0);console.log('PASS: all 9 ranking views fall back while previous reports remain unresolved.');}
  }else{const ready=stdout.match(/data-ready-ms="(\d+)"/);assert.ok(ready,'Roster card waited for a profile before its headshot and cached flag');assert.ok(Number(ready[1])<1000);assert.match(stdout,/data-photo-url="https:\/\/assets.nhle.com\/mugs\/nhl\/latest\/8479420.png"/);console.log('PASS: actual Tage Thompson roster card requests its static photo and renders the cached USA flag at '+ready[1]+' ms without an NHL profile request.');}
  }finally{await rm(profile,{recursive:true,force:true}).catch(()=>{});}
 }}finally{server.closeAllConnections();await new Promise(r=>server.close(r));}

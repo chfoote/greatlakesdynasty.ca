@@ -29,7 +29,7 @@ export default function FarmSystemRankings() {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
-  const revision = useNhlDataRevision([`live-season:${CURRENT_LEAGUE_SEASON}`]);
+  const revision = useNhlDataRevision([`league-season:${CURRENT_LEAGUE_SEASON}`, `live-season:${CURRENT_LEAGUE_SEASON}`]);
   useEffect(() => {
     let active = true;
     const refresh = async () => {

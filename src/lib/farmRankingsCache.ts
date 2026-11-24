@@ -5,7 +5,7 @@ export interface FarmRankingsSnapshot { seasonYear: number; updatedAt: number; h
 
 // Store only the public ranking display, never full roster rows, team notes,
 // manager/account details, authentication, or the private insights object.
-function displayRows(rows: FarmRanking[]): FarmRanking[] {
+export function displayRows(rows: FarmRanking[]): FarmRanking[] {
   return rows.map(row => ({ rank: row.rank, eligible: row.eligible, nhlActive: row.nhlActive,
     production: row.production, draftQuality: row.draftQuality, farmScore: row.farmScore,
     team: { id: row.team.id, team_name: row.team.team_name, abbreviation: row.team.abbreviation,
@@ -15,7 +15,7 @@ function displayRows(rows: FarmRanking[]): FarmRanking[] {
       draftYear: prospect.draftYear, overallPick: prospect.overallPick })),
   }));
 }
-function validRows(value: unknown): value is FarmRanking[] {
+export function validRows(value: unknown): value is FarmRanking[] {
   return Array.isArray(value) && value.length > 0 && value.length <= 100
     && new Set(value.map(row => row?.team?.id)).size === value.length
     && value.every((row, index) => row && row.rank === index + 1 && Number.isSafeInteger(row.team?.id)
@@ -52,7 +52,7 @@ export function createFarmRankingsCache(options: {
     pending = Promise.resolve().then(options.load).then(rows => {
       if (!validRows(rows)) throw new Error('The ranking data is incomplete. Saved rankings were kept.');
       const source = nhlFreshness(rows);
-      if (saved && source && source.updatedAt <= saved.updatedAt) {
+      if (saved && source && (source.updatedAt < saved.updatedAt || source.updatedAt === saved.updatedAt && JSON.stringify(displayRows(rows)) === JSON.stringify(saved.rankings))) {
         failedUntil = now() + 60_000;
         return { ...saved, warning: source.message || 'Showing the last complete saved rankings.' };
       }

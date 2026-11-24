@@ -25,7 +25,6 @@ import {
   fetchNhlDailyStats,
   getNhlStatsDate,
   fetchNhlLivePlayerIds,
-  fetchNhlLiveSeasonStats,
   fetchNhlPlayerBiographies,
   fetchNhlPlayerLanding,
   fetchNhlSkaterStats,
@@ -38,6 +37,7 @@ import {
 } from "../../lib/nhl";
 import { fetchAwards, fetchPlayerAwards, mapAwardsByPlayer, type Award, type PlayerAward } from "../../lib/awards";
 import PlayerAwardBadges from "./PlayerAwardBadges";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 import TeamIdentityCard from "./TeamIdentityCard";
 import { fetchTradeBlockListings } from "../../lib/tradeMarket";
@@ -597,28 +597,34 @@ export default function HockeyTeamDetail() {
     setSearchParams({ season: String(year) }, { replace: true });
   }
 
+  const seasonStatsGeneration = useRef(0);
+  const dailyStatsGeneration = useRef(0);
+
   const revision = useNhlDataRevision(statsView === 'season'
-    ? [`live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
+    ? [`league-season:${selectedSeason}`, `live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
     : [`live:${getNhlStatsDate(statsView === 'yesterday' ? -1 : 0)}`]);
   useEffect(() => {
     if (!revision) return;
     let active = true;
+    const generation = statsView === 'season' ? ++seasonStatsGeneration.current : ++dailyStatsGeneration.current;
     const request = statsView === 'season'
-      ? (selectedSeason === CURRENT_LEAGUE_SEASON ? fetchNhlLiveSeasonStats(selectedSeason)
-        : Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
-          .then(([skaters, goalies]) => ({ skaters, goalies })))
+      ? fetchLeagueSeasonStats(selectedSeason)
       : fetchNhlDailyStats(getNhlStatsDate(statsView === 'yesterday' ? -1 : 0));
     request.then(stats => {
       if (!active) return;
       if (statsView === 'season') {
+        if (generation !== seasonStatsGeneration.current) return;
         setSkaters(new Map(stats.skaters.map(row => [String(row.playerId), row])));
         setGoalies(new Map(stats.goalies.map(row => [String(row.playerId), row])));
         setStatsError('');
       } else {
+        if (generation !== dailyStatsGeneration.current) return;
         setDailySkaters(new Map(stats.skaters.map(row => [String(row.playerId), row])));
         setDailyGoalies(new Map(stats.goalies.map(row => [String(row.playerId), row])));
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      if (active && statsView !== 'season' && generation === dailyStatsGeneration.current) setDailyStatsLoading(false);
+    });
     return () => { active = false; };
   }, [revision, selectedSeason, statsView]);
 
@@ -627,9 +633,11 @@ export default function HockeyTeamDetail() {
   }, [abbreviation]);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
     fetchFantasyTeamByAbbreviation(abbreviation)
       .then(async (row) => {
+        if (!active) return;
         setTeam(row);
         if (row) {
           const [tenures, finishes, branding, historicalRosters, allContractRows] = await Promise.all([
@@ -639,6 +647,7 @@ export default function HockeyTeamDetail() {
             fetchPlayerSeasonsByTeam(row.id),
             fetchPlayerSeasons(),
           ]);
+          if (!active) return;
           setManagerTenures(tenures);
           setTeamFinishes(finishes);
           setBrandingHistory(branding);
@@ -651,63 +660,67 @@ export default function HockeyTeamDetail() {
             setContractHistory([]);
         }
       })
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err: Error) => { if (active) setError(err.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [abbreviation]);
 
   useEffect(() => {
     if (!team) return;
+    let active = true;
     Promise.all([fetchPlayerSeasonsByTeamAndSeason(team.id, selectedSeason), fetchBuyoutPenalties(selectedSeason, team.id).catch(() => [] as BuyoutPenalty[]), fetchRetentionAdjustments(selectedSeason, team.id).catch(() => [] as RetentionAdjustment[])])
       .then(([seasonRows, penaltyRows, adjustmentRows]) => {
+        if (!active) return;
         setRoster(seasonRows);
         setBuyoutPenalties(penaltyRows);
         setRetentionAdjustments(adjustmentRows);
         setError("");
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => { if (active) setError(err.message); });
 
     fetchTradeBlockListings(selectedSeason)
-      .then((rows) => setTradeBlockIds(new Set(rows.map((row) => row.player_season_id))))
-      .catch(() => setTradeBlockIds(new Set()));
+      .then((rows) => { if (active) setTradeBlockIds(new Set(rows.map((row) => row.player_season_id))); })
+      .catch(() => { if (active) setTradeBlockIds(new Set()); });
 
-    const finalizedStatsRequest = () => Promise.all([
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
-    ]).then(([seasonSkaters, seasonGoalies]) => ({ skaters: seasonSkaters, goalies: seasonGoalies }));
-    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(selectedSeason).catch((error: unknown) => {
-          if (isNhlRateLimit(error)) throw error;
-          return finalizedStatsRequest();
-        })
-      : finalizedStatsRequest();
+    const generation = ++seasonStatsGeneration.current;
+    const statsRequest = fetchLeagueSeasonStats(selectedSeason).catch((reason: unknown) => {
+      if (selectedSeason !== CURRENT_LEAGUE_SEASON || isNhlRateLimit(reason)) throw reason;
+      return Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
+        .then(([skaters, goalies]) => ({ skaters, goalies }));
+    });
     statsRequest
       .then((stats) => {
+        if (!active || generation !== seasonStatsGeneration.current) return;
         setSkaters(new Map(stats.skaters.map((row) => [String(row.playerId), row])));
         setGoalies(new Map(stats.goalies.map((row) => [String(row.playerId), row])));
         setStatsError("");
       })
-      .catch((err: Error) => setStatsError(err.message));
+      .catch((err: Error) => { if (active && generation === seasonStatsGeneration.current) setStatsError(err.message); });
 
     Promise.all([fetchPlayerAwards(), fetchAwards(true)])
       .then(([rows, definitions]) => {
+        if (!active) return;
         setPlayerAwards(rows);
         setAwardsByPlayer(mapAwardsByPlayer(rows));
         setAwardDefinitions(definitions);
       })
       .catch(() => {
+        if (!active) return;
         setPlayerAwards([]);
         setAwardsByPlayer(new Map());
         setAwardDefinitions([]);
       });
+    return () => { active = false; };
   }, [team, selectedSeason]);
 
   useEffect(() => {
     if (selectedSeason !== CURRENT_LEAGUE_SEASON || statsView !== "season") return;
     let active = true;
     const refreshSeasonStats = async () => {
+      const generation = ++seasonStatsGeneration.current;
       try {
-        const stats = await fetchNhlLiveSeasonStats(selectedSeason);
-        if (!active) return;
+        const stats = await fetchLeagueSeasonStats(selectedSeason);
+        if (!active || generation !== seasonStatsGeneration.current) return;
         setSkaters(new Map(stats.skaters.map((row) => [String(row.playerId), row])));
         setGoalies(new Map(stats.goalies.map((row) => [String(row.playerId), row])));
         setStatsError("");
@@ -734,16 +747,19 @@ export default function HockeyTeamDetail() {
 
   useEffect(() => {
     if (!team || viewMode !== "multi") return;
+    let active = true;
     Promise.all(multiYearSeasons.map(async (year) => {
       const [players, leaders] = await Promise.all([fetchPlayerSeasonsByTeamAndSeason(team.id, year), fetchTeamLeadership(team.id, year)]);
       return { year, players, leaders };
     }))
       .then((results) => {
+        if (!active) return;
         setMultiYearRosters(Object.fromEntries(results.map(({ year, players }) => [year, players])));
         setMultiYearLeadership(new Map(results.flatMap(({ leaders }) => leaders.map((entry) => [entry.player_season_id, entry.slot === "C" ? "C" as const : "A" as const] as const))));
         setError("");
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => { if (active) setError(err.message); });
+    return () => { active = false; };
   }, [team, viewMode, multiYearSeasons]);
 
   useEffect(() => {
@@ -819,6 +835,7 @@ export default function HockeyTeamDetail() {
     let active = true;
     let requestedDate = "";
     const refreshDailyStats = async () => {
+      const generation = ++dailyStatsGeneration.current;
       setDailyStatsLoading(true);
       try {
         const date = getNhlStatsDate(statsView === "yesterday" ? -1 : 0);
@@ -827,17 +844,17 @@ export default function HockeyTeamDetail() {
           setDailySkaters(new Map()); setDailyGoalies(new Map());
         }
         const result = await fetchNhlDailyStats(date);
-        if (active) {
+        if (active && generation === dailyStatsGeneration.current) {
           setDailyStatsError("");
           setDailySkaters(new Map(result.skaters.map((row) => [String(row.playerId), row])));
           setDailyGoalies(new Map(result.goalies.map((row) => [String(row.playerId), row])));
         }
       } catch {
         // Preserve the last complete daily results during transient API failures.
-        if (active) setDailyStatsError("Daily NHL data is delayed. Any last successful results remain visible.");
+        if (active && generation === dailyStatsGeneration.current) setDailyStatsError("Daily NHL data is delayed. Any last successful results remain visible.");
         return false;
       } finally {
-        if (active) setDailyStatsLoading(false);
+        if (active && generation === dailyStatsGeneration.current) setDailyStatsLoading(false);
       }
     };
     void refreshDailyStats();

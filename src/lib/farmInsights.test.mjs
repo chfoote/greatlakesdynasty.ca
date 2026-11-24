@@ -9,6 +9,8 @@ async function fixture(t, changes = {}) {
   globalThis.__farmFixture=state;
   t.after(()=>{delete globalThis.__farmFixture;});
   const sources={
+    leagueSeasonStats:`export {fetchNhlLiveSeasonStats as fetchLeagueSeasonStats} from './nhl';`,
+    farmSharedSnapshot:`export const fetchFarmSharedSnapshot=async()=>null;export const fetchFarmOwnershipRows=async()=>[];`,
     fantasyTeams:`export const applyTeamBranding=t=>t; export async function fetchTeamBrandingHistory(){return []}
       export async function fetchFantasyTeams(){return [{id:1,team_name:'Team 1',eastern_farm_system:'TOR'},{id:2,team_name:'Team 2',eastern_farm_system:'BOS'}]}`,
     fantasyPlayers:`export async function fetchPlayerSeasons(){return []}`,
@@ -22,7 +24,7 @@ async function fixture(t, changes = {}) {
   };
   const built=await build({entryPoints:['src/lib/farmInsights.ts'],bundle:true,format:'esm',platform:'browser',write:false,
     plugins:[{name:'farm-read-only-fixtures',setup(plugin){
-      plugin.onResolve({filter:/^\.\/(fantasyTeams|fantasyPlayers|nhl)$/},args=>({path:args.path.slice(2),namespace:'farm-fixture'}));
+      plugin.onResolve({filter:/^\.\/(fantasyTeams|fantasyPlayers|nhl|leagueSeasonStats|farmSharedSnapshot)$/},args=>({path:args.path.slice(2),namespace:'farm-fixture'}));
       plugin.onLoad({filter:/.*/,namespace:'farm-fixture'},args=>({contents:sources[args.path]}));
     }}]});
   const api=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64')+`#farm-${sequence++}`);

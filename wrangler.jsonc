@@ -4,8 +4,11 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-19",
   "keep_vars": true,
+  "vars": {
+    "RANKING_SNAPSHOTS_SUPABASE_URL": "https://ptexqhshfyjfnmlwyzzv.supabase.co"
+  },
   "triggers": {
-    "crons": ["30 11 * * *"]
+    "crons": ["30 11 * * *", "5,35 * * * *", "10,25,40,55 * * * *"]
   },
   "assets": {
     "directory": "./dist",

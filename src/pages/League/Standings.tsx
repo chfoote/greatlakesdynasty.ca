@@ -14,7 +14,6 @@ import {
 import {
   fetchNhlGoalieStats,
   fetchNhlDailyStats,
-  fetchNhlLiveSeasonStats,
   getNhlStatsDate,
   fetchNhlSkaterStats,
   getGoalieScore,
@@ -22,6 +21,7 @@ import {
   type NhlGoalieRecord,
   type NhlSkaterRecord,
 } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 
 const seasonOptions = playedAndCurrentSeasons;
@@ -169,7 +169,7 @@ export default function Standings() {
   const dailyStatsGeneration = useRef(0);
 
   const revision = useNhlDataRevision(statsView === 'season'
-    ? [`live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
+    ? [`league-season:${selectedSeason}`, `live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`, `goalies:${nhlSeasonId(selectedSeason)}`]
     : [`live:${getNhlStatsDate(statsView === 'yesterday' ? -1 : 0)}`]);
   useEffect(() => {
     if (!revision) return;
@@ -177,9 +177,7 @@ export default function Standings() {
     const generationRef = statsView === 'season' ? seasonStatsGeneration : dailyStatsGeneration;
     const generation = ++generationRef.current;
     const request = statsView === 'season'
-      ? (selectedSeason === CURRENT_LEAGUE_SEASON ? fetchNhlLiveSeasonStats(selectedSeason)
-        : Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
-          .then(([skaters, goalies]) => ({ skaters, goalies })))
+      ? fetchLeagueSeasonStats(selectedSeason)
       : fetchNhlDailyStats(getNhlStatsDate(statsView === 'yesterday' ? -1 : 0));
     request.then(stats => {
       if (!active || generationRef.current !== generation) return;
@@ -204,16 +202,11 @@ export default function Standings() {
     setError("");
     const generation = ++seasonStatsGeneration.current;
 
-    const finalizedStatsRequest = () => Promise.all([
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)),
-    ]).then(([skaters, goalies]) => ({ skaters, goalies }));
-    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
-      ? fetchNhlLiveSeasonStats(selectedSeason).catch((error: unknown) => {
-          if (isNhlRateLimit(error)) throw error;
-          return finalizedStatsRequest();
-        })
-      : finalizedStatsRequest();
+    const statsRequest = fetchLeagueSeasonStats(selectedSeason).catch((reason: unknown) => {
+      if (selectedSeason !== CURRENT_LEAGUE_SEASON || isNhlRateLimit(reason)) throw reason;
+      return Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
+        .then(([skaters, goalies]) => ({ skaters, goalies }));
+    });
 
     const metadataRequest = Promise.all([
       fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason),
@@ -249,7 +242,7 @@ export default function Standings() {
     const refresh = async () => {
       const generation = ++seasonStatsGeneration.current;
       try {
-        const stats = await fetchNhlLiveSeasonStats(selectedSeason);
+        const stats = await fetchLeagueSeasonStats(selectedSeason);
         if (!active || seasonStatsGeneration.current !== generation) return;
         setSkaterStats(new Map(stats.skaters.map((record) => [String(record.playerId), record])));
         setGoalieStats(new Map(stats.goalies.map((record) => [String(record.playerId), record])));

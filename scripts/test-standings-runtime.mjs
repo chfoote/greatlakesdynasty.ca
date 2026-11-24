@@ -17,7 +17,7 @@ const mocks={
  export const fetchFantasyTeams=()=>new Promise(r=>setTimeout(()=>r([{id:1,team_name:'Georgian Bay Bears',abbreviation:'GBB'}]),1000));`,
  fantasyPlayers:`export const fetchPlayerSeasonsBySeason=()=>new Promise(r=>setTimeout(()=>r([{id:1,player_id:1,season_year:2027,fantasy_team_id:1,position:'C',player:{player_api_id:'8478402',full_name:'Fixture Player'}}]),1000));`,
  nhl:`let calls=0,dailyCalls=0;const initial=()=>Number(new URLSearchParams(location.search).get('initial'));const data=score=>({skaters:[{playerId:8478402,gamesPlayed:20,testScore:score}],goalies:[]});function stats(){calls++;return Promise.resolve(data(calls===1?initial():1545));}
- export const fetchNhlLiveSeasonStats=()=>stats();export const fetchNhlSkaterStats=async()=>[];export const fetchNhlGoalieStats=async()=>[];
+ export const fetchNhlLiveSeasonStats=()=>stats();export const fetchLeagueSeasonStats=()=>stats();export const fetchNhlSkaterStats=async()=>[];export const fetchNhlGoalieStats=async()=>[];
  export const fetchNhlDailyStats=()=>++dailyCalls===1?new Promise(r=>setTimeout(()=>r(data(initial())),500)):Promise.resolve(data(1545));export const getNhlStatsDate=()=> '2026-11-23';export const getSkaterScore=r=>r.testScore;export const getGoalieScore=()=>0;`,
 };
 const built=await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';import{BrowserRouter}from'react-router';import Page from ${JSON.stringify(page)};
@@ -26,7 +26,7 @@ const built=await build({stdin:{contents:`import React from 'react';import{creat
  setTimeout(()=>window.dispatchEvent(new Event('nhl-data-updated')),100);
  setTimeout(()=>{document.body.setAttribute('data-latest-total',String(document.body.textContent.includes('1545')&&!document.body.textContent.includes('Updating…')));},1800);`,loader:'tsx',resolveDir:process.cwd()},
  bundle:true,write:false,format:'iife',platform:'browser',jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'standings-read-only-fixture',setup(plugin){
- plugin.onResolve({filter:/.*/},args=>{const name=args.path.split('/').at(-1).replace(/\.ts$/,'');if(args.importer===page&&name in mocks)return{path:name,namespace:'fixture'};});
+ plugin.onResolve({filter:/.*/},args=>{const name=args.path.split('/').at(-1).replace(/\.ts$/,'');if(args.importer===page&&name==='leagueSeasonStats')return{path:'nhl',namespace:'fixture'};if(args.importer===page&&name in mocks)return{path:name,namespace:'fixture'};});
  plugin.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path]}));
  if(original)plugin.onLoad({filter:/Standings\.tsx$/},()=>({contents:original,loader:'tsx',resolveDir:resolve('src/pages/League')}));
  }}]});
