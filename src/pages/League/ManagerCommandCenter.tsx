@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import PageMeta from "../../components/common/PageMeta";
 import PositionBadge from "../../components/hockey/PositionBadge";
+import TeamLeadershipEditor from "../../components/hockey/TeamLeadershipEditor";
 import { useAuth } from "../../context/AuthContext";
 import { fetchAuctions, type Auction } from "../../lib/auctions";
 import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
@@ -17,6 +18,7 @@ import { fetchTradeOffers, type TradeOffer } from "../../lib/tradeOffers";
 import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
 import { fetchNhlGoalieStats, fetchNhlSkaterStats, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
 import type { AgingProspect } from "../../lib/farmInsights";
+import { fetchTeamLeadership, setTeamLeadershipSlot, type LeadershipSlot, type TeamLeadership } from "../../lib/teamLeadership";
 
 const activePositions = new Set(["C", "LW", "RW", "D", "G"]);
 const capPositions = new Set([...activePositions, "W", "IR", "RETENTION", "BUYOUT"]);
@@ -119,6 +121,9 @@ export default function ManagerCommandCenter() {
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState("");
   const [previousSeasonLoading, setPreviousSeasonLoading] = useState(true);
+  const [leadership, setLeadership] = useState<TeamLeadership[]>([]);
+  const [leadershipBusy, setLeadershipBusy] = useState(false);
+  const [leadershipError, setLeadershipError] = useState("");
   const [error, setError] = useState("");
 
   const revision = useNhlDataRevision([`skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`, `skaters:${nhlSeasonId(season - 1)}`, `goalies:${nhlSeasonId(season - 1)}`]);
@@ -217,6 +222,35 @@ export default function ManagerCommandCenter() {
   }, [season, user]);
 
   const teamId = assignment?.fantasy_team_id;
+  useEffect(() => {
+    if (!teamId) {
+      setLeadership([]);
+      return;
+    }
+    let active = true;
+    setLeadershipError("");
+    void fetchTeamLeadership(teamId, season).then((rows) => {
+      if (active) setLeadership(rows);
+    }).catch((reason) => {
+      if (active) setLeadershipError(reason instanceof Error ? reason.message : "Unable to load team leadership.");
+    });
+    return () => { active = false; };
+  }, [teamId, season]);
+
+  async function updateLeadership(slot: LeadershipSlot, playerSeasonId: number | null) {
+    if (!teamId || leadershipBusy) return;
+    setLeadershipBusy(true);
+    setLeadershipError("");
+    try {
+      await setTeamLeadershipSlot({ teamId, seasonYear: season, slot, playerSeasonId });
+      setLeadership(await fetchTeamLeadership(teamId, season));
+    } catch (reason) {
+      setLeadershipError(reason instanceof Error ? reason.message : "Unable to update team leadership.");
+    } finally {
+      setLeadershipBusy(false);
+    }
+  }
+
   const activeRoster = roster.filter((row) => activePositions.has(position(row)));
   const payroll = roster.filter((row) => capPositions.has(position(row))).reduce((sum, row) => sum + (row.salary || 0), 0)
     + penalties.reduce((sum, row) => sum + row.amount, 0)
@@ -316,6 +350,9 @@ export default function ManagerCommandCenter() {
       <SummaryCard label="Pending Trades" value={activityLoading ? "…" : activityError ? "—" : String(pendingOffers.length)} detail={activityLoading ? "Loading activity…" : activityError ? "Activity unavailable" : offersToReview.length ? `${offersToReview.length} waiting for your response` : "No response required right now"} tone={offersToReview.length ? "warning" : "brand"} />
       <SummaryCard label="Active Auctions" value={activityLoading ? "…" : activityError ? "—" : String(activeAuctions.length)} detail={activityLoading ? "Loading activity…" : activityError ? "Activity unavailable" : activeAuctions.length ? "Bidding is currently active" : "No players currently nominated"} tone={activeAuctions.length ? "warning" : "brand"} />
     </section>
+
+    <TeamLeadershipEditor roster={roster} leadership={leadership} disabled={leadershipBusy} onChange={(slot, playerSeasonId) => void updateLeadership(slot, playerSeasonId)} />
+    {leadershipError && <p role="alert" className="-mt-4 text-sm text-warning-700 dark:text-warning-300">Team leadership: {leadershipError}</p>}
 
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
       <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6">

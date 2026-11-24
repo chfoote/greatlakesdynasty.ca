@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import {
+  fetchNhlLiveSeasonStats,
   fetchNhlSkaterStats,
   formatFantasyPoints,
   formatNhlStat,
@@ -74,11 +75,14 @@ export default function SkaterStats() {
   const [sort, setSort] = useState<{ key: SkaterSortKey; direction: SortDirection }>({ key: "score", direction: "desc" });
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
 
-  const revision = useNhlDataRevision([`skaters:${nhlSeasonId(selectedSeason)}`]);
+  const revision = useNhlDataRevision([`live-season:${selectedSeason}`, `skaters:${nhlSeasonId(selectedSeason)}`]);
   useEffect(() => {
     if (!revision) return;
     let active = true;
-    fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).then(data => {
+    const request = selectedSeason === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(selectedSeason).then(stats => stats.skaters)
+      : fetchNhlSkaterStats(nhlSeasonId(selectedSeason));
+    request.then(data => {
       if (active) { setRecords(data); setError(null); }
     }).catch(() => {});
     return () => { active = false; };
@@ -88,7 +92,9 @@ export default function SkaterStats() {
     let active = true;
     setLoading(true);
     setProspectRights(new Map());
-    const statsRequest = fetchNhlSkaterStats(nhlSeasonId(selectedSeason));
+    const statsRequest = selectedSeason === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(selectedSeason).then(stats => stats.skaters)
+      : fetchNhlSkaterStats(nhlSeasonId(selectedSeason));
     statsRequest
       .then((data) => {
         if (!active) return;

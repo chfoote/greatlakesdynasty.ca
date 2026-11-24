@@ -142,6 +142,9 @@ for (const seasonYear of [2026, 2027]) {
       await stats.fetchNhlLivePlayerIds();
       assert.equal(calls.filter((url) => url.includes("/live-snapshot/")).length, 1);
       assert.equal(calls.filter((url) => url.includes("/gamecenter/")).length, 0);
+      assert.ok(calls.filter((url) => url.includes("/nhl-api/complete/"))
+        .every((requestUrl) => !new URL(requestUrl, "https://test.example").searchParams.get("cayenneExp")?.includes("gameDate")),
+      "a quiet-day load should reuse the stable full-season report instead of rebuilding a dated baseline");
     }
     // These are the same string-ID maps used by team pages and standings.
     const skaters = new Map(result.skaters.map((row) => [String(row.playerId), row]));

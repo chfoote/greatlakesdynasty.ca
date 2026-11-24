@@ -134,7 +134,11 @@ export function createSavedNhlCache(options: {
       throw error;
     }).finally(() => { pending.delete(key); });
     pending.set(key, refresh);
-    if (previous && !policy.waitForRefresh) { void refresh.catch(() => {}); return previous.value; }
+    // Stale-while-refresh is useful within one hockey day, but crossing the
+    // 6 a.m. ET boundary must await a refresh attempt. Otherwise every new day
+    // initially renders yesterday's standings from localStorage even when the
+    // shared Worker already has fresh completed-game totals.
+    if (previous && sameScope && !policy.waitForRefresh) { void refresh.catch(() => {}); return previous.value; }
     return refresh;
   };
 }

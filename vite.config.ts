@@ -27,11 +27,16 @@ export default defineConfig({
   },
   plugins: [
     {
-      name: "nhl-live-snapshot-dev",
+      name: "nhl-worker-routes-dev",
       configureServer(server) {
-        // Run the same bundle handler locally, ahead of Vite's existing proxies.
+        // Run the same Worker-only aggregate routes locally, ahead of Vite's
+        // direct NHL proxies. The upstream NHL API has neither /complete nor
+        // /live-snapshot paths, so forwarding these routes produces a 404.
         server.middlewares.use((req, res, next) => {
-          if (!req.url?.startsWith("/nhl-web-api/live-snapshot")) return next();
+          const path = req.url || "";
+          const workerRoute = path.startsWith("/nhl-web-api/live-snapshot/")
+            || path.startsWith("/nhl-api/complete/");
+          if (!workerRoute) return next();
           const request = new Request(`http://localhost${req.url}`, { method: req.method });
           const env = { ASSETS: { async fetch() { return new Response(null, { status: 404 }); } } };
           void nhlWorker.fetch(request, env).then(async (response) => {

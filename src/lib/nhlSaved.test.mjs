@@ -180,6 +180,22 @@ test('a new hockey day accepts a newer completed-game baseline when live data is
   assert.match(nhlFreshness(result).message, /November 22/);
 });
 
+test('a new hockey day waits for fresh data instead of first rendering the prior day', async () => {
+  const f = fixture(), cache = createSavedNhlCache(f.options);
+  await cache('skaters:20262027', async () => [{ playerId: 1, goals: 5 }], validPlayerRows,
+    300_000, { scope: '2026-11-20' });
+  f.advance(86400_000);
+  let finish;
+  const next = cache('skaters:20262027', () => new Promise(resolve => { finish = resolve; }), validPlayerRows,
+    300_000, { scope: '2026-11-21' });
+  let settled = false;
+  void next.finally(() => { settled = true; });
+  await flush();
+  assert.equal(settled, false, 'the previous hockey day must not be returned while refresh is running');
+  finish([{ playerId: 1, goals: 8 }]);
+  assert.equal((await next)[0].goals, 8);
+});
+
 test('same-day live data survives a baseline fallback, while baseline-only data can advance', async () => {
   const f = fixture(), cache = createSavedNhlCache(f.options);
   const policy = { scope: '2026-11-23', waitForRefresh: true };

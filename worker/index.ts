@@ -1,5 +1,6 @@
 import { savedKey, savedRetention, savedResponse } from "./saved.ts";
 import { isLiveNhlPath, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
+import { nhlStatsDate } from "../shared/nhl-live.ts";
 import { createSnapshotBuilder, SnapshotError } from "./liveSnapshot.ts";
 import { createWorkerScheduler, WorkerQueueFullError } from "./scheduler.ts";
 import { buildCompleteReport, CompleteReportError, validateCompleteReportQuery } from "./completeReport.ts";
@@ -23,6 +24,16 @@ function jsonError(message: string, status: number, headers?: HeadersInit) {
   });
 }
 
+function preventOuterNhlCaching(response: Response) {
+  const headers = new Headers(response.headers);
+  // The Worker Cache API above is the single freshness authority for public
+  // NHL JSON. Prevent zone/browser defaults from stretching a 30-second or
+  // five-minute API response to four hours on the custom domain.
+  headers.set("Cache-Control", "no-store");
+  headers.set("Cloudflare-CDN-Cache-Control", "no-store");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 interface PublicCache {
   match(request: Request): Promise<Response | undefined>;
   put(request: Request, response: Response): Promise<void>;
@@ -41,6 +52,25 @@ interface ResponseSnapshot {
   status: number;
   statusText: string;
   headers: Array<[string, string]>;
+}
+
+export function dailyWarmPaths(timestamp = Date.now()) {
+  const hockeyDate = nhlStatsDate(0, timestamp);
+  const year = Number(hockeyDate.slice(0, 4));
+  const month = Number(hockeyDate.slice(5, 7));
+  const startYear = month >= 7 ? year : year - 1;
+  const seasonId = startYear * 10000 + startYear + 1;
+  const expression = `seasonId=${seasonId} and gameTypeId=2`;
+  const sort = JSON.stringify([{ property: "playerId", direction: "ASC" }]);
+  const report = (position: "skater" | "goalie", name: "summary" | "realtime" | "faceoffwins") => {
+    const params = new URLSearchParams({ cayenneExp: expression, sort, start: "0" });
+    return `/nhl-api/complete/${position}/${name}?${params}`;
+  };
+  return [
+    report("skater", "summary"), report("skater", "realtime"),
+    report("skater", "faceoffwins"), report("goalie", "summary"),
+    `/nhl-web-api/live-snapshot/${hockeyDate}`,
+  ];
 }
 
 function fromSnapshot(snapshot: ResponseSnapshot) {
@@ -291,24 +321,39 @@ export function createWorker(options: WorkerOptions = {}) {
       // responses safely across visitors.
       return fromSnapshot(await work);
   }
-  return { async fetch(request: Request, env: Env, context?: BackgroundContext) {
+  const worker = { async fetch(request: Request, env: Env, context?: BackgroundContext) {
     let result: Response;
     try { result = await handle(request, env, true, context); }
     catch { return jsonError("Unable to complete the NHL request.", 502, { "X-NHL-Source": "worker-error" }); }
     const url = new URL(request.url);
-    if (request.method !== "GET" || result.status < 400
-      || !routes.some(({ prefix }) => url.pathname === prefix || url.pathname.startsWith(prefix + "/"))
-      || [400, 404, 405].includes(result.status)) return result;
+    const nhlRoute = routes.some(({ prefix }) => url.pathname === prefix || url.pathname.startsWith(prefix + "/"));
+    if (!nhlRoute) return result;
+    if (request.method !== "GET" || result.status < 400 || [400, 404, 405].includes(result.status)) {
+      return preventOuterNhlCaching(result);
+    }
     try {
       const cache = await getCache();
       const saved = await cache?.match(savedKey(request));
       if (saved) {
         const fallback = savedResponse(saved, result, now(), url.pathname);
-        if (fallback) { await result.body?.cancel(); return fallback; }
+        if (fallback) { await result.body?.cancel(); return preventOuterNhlCaching(fallback); }
       }
     } catch { /* Keep the original error if shared storage is unavailable. */ }
-    return result;
+    return preventOuterNhlCaching(result);
+  }, async scheduled(_controller: unknown, env: Env, context: BackgroundContext) {
+    // One shared refresh after the overnight NHL window keeps every stats-backed
+    // page ready without making every member rebuild the same reports. Keep the
+    // work sequential so this maintenance run cannot burst the upstream API.
+    context.waitUntil((async () => {
+      for (const path of dailyWarmPaths(now())) {
+        try {
+          const response = await worker.fetch(new Request(`https://daily-cache.gldhl.invalid${path}`), env, context);
+          await response.body?.cancel();
+        } catch { /* The next visitor can safely retry any dataset that failed to warm. */ }
+      }
+    })());
   } };
+  return worker;
 
 }
 

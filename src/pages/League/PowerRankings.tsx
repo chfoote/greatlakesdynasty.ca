@@ -11,6 +11,7 @@ import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/trans
 import {
   fetchNhlGoalieStats,
   fetchNhlGoalieStatsForPeriod,
+  fetchNhlLiveSeasonStats,
   fetchNhlSkaterStats,
   fetchNhlSkaterStatsForPeriod,
   formatFantasyPoints,
@@ -248,7 +249,7 @@ export default function PowerRankings() {
   const [statsLoading, setStatsLoading] = useState(true);
   const loading = metadataLoading || statsLoading;
   const loadedView = useRef("");
-  const revision = useNhlDataRevision([`skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`]);
+  const revision = useNhlDataRevision([`live-season:${season}`, `skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`]);
   const [comparisonWarning, setComparisonWarning] = useState("");
   const [statsError, setError] = useState("");
   const [metadataError, setMetadataError] = useState("");
@@ -292,10 +293,13 @@ export default function PowerRankings() {
     const currentEnd = mode === "month" ? selectedMonth.end : periodEnd(currentStart);
     const previousStart = mode === "month" ? priorMonth?.start : period > 1 ? shiftDate(currentStart, -14) : undefined;
     const previousEnd = mode === "month" ? priorMonth?.end : previousStart ? periodEnd(previousStart) : undefined;
-    void Promise.all([
-      mode === "season" ? fetchNhlSkaterStats(seasonId) : fetchNhlSkaterStatsForPeriod(seasonId, currentStart, currentEnd),
-      mode === "season" ? fetchNhlGoalieStats(seasonId) : fetchNhlGoalieStatsForPeriod(seasonId, currentStart, currentEnd),
-    ]).then(([skaters, goalies]) => {
+    const currentStats = mode === "season" && season === CURRENT_LEAGUE_SEASON
+      ? fetchNhlLiveSeasonStats(season).then(({ skaters, goalies }) => [skaters, goalies] as const)
+      : Promise.all([
+        mode === "season" ? fetchNhlSkaterStats(seasonId) : fetchNhlSkaterStatsForPeriod(seasonId, currentStart, currentEnd),
+        mode === "season" ? fetchNhlGoalieStats(seasonId) : fetchNhlGoalieStatsForPeriod(seasonId, currentStart, currentEnd),
+      ]);
+    void currentStats.then(([skaters, goalies]) => {
       if (!active) return;
       setCurrentSkaters(skaters); setCurrentGoalies(goalies); loadedView.current = view;
       setStatsLoading(false);

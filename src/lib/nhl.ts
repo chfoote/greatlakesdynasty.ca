@@ -6,6 +6,7 @@ import { nhlStatsDate } from "../../shared/nhl-live";
 import { fetchNhlLiveSnapshot } from "./nhlLive";
 import { nhlFetch } from "./nhlRequest";
 import { fetchCompleteNhlReport } from "./nhlReports";
+import { CURRENT_LEAGUE_SEASON } from "./leagueSeasons";
 export const NHL_SEASON_ID = 20252026;
 export const FANTASY_SEASON_YEAR = 2026;
 
@@ -298,16 +299,26 @@ async function loadNhlLiveSeasonStats(seasonYear: number, today = getNhlStatsDat
   const seasonId = (seasonYear - 1) * 10000 + seasonYear;
   const yesterday = new Date(Date.parse(`${today}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10);
   const seasonStart = `${seasonYear - 1}-07-01`;
+  let daily: { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] };
+  try { daily = await fetchNhlDailyStats(today); }
+  catch {
+    const [skaters, goalies] = await Promise.all([fetchNhlSkaterStats(seasonId), fetchNhlGoalieStats(seasonId)]);
+    throw new NhlBaselineAvailable(inheritNhlFreshness({ skaters, goalies }, [skaters, goalies]),
+      "Live NHL updates unavailable. Showing the latest complete season totals.");
+  }
+  // Before today's games begin there is nothing to merge. The NHL's stable
+  // full-season report already includes last night's completed games and uses
+  // the same cache key every day, avoiding a slow new baseline rebuild each
+  // morning. Once any player has appeared today, use the through-yesterday
+  // baseline plus box scores so an in-progress game cannot be double-counted.
+  if (!daily.skaters.length && !daily.goalies.length) {
+    const [skaters, goalies] = await Promise.all([fetchNhlSkaterStats(seasonId), fetchNhlGoalieStats(seasonId)]);
+    return inheritNhlFreshness({ skaters, goalies }, [skaters, goalies]);
+  }
   const [baselineSkaters, baselineGoalies] = await Promise.all([
     fetchNhlSkaterStatsForPeriod(seasonId, seasonStart, yesterday),
     fetchNhlGoalieStatsForPeriod(seasonId, seasonStart, yesterday),
   ]);
-  let daily: { skaters: NhlSkaterRecord[]; goalies: NhlGoalieRecord[] };
-  try { daily = await fetchNhlDailyStats(today); }
-  catch {
-    throw new NhlBaselineAvailable(inheritNhlFreshness({ skaters: baselineSkaters, goalies: baselineGoalies }, [baselineSkaters, baselineGoalies]),
-      `Live NHL updates unavailable. Season totals include completed games through ${yesterday}.`);
-  }
   // A still-valid through-yesterday baseline is intentionally reused. A newer
   // live box score must advance this composite; delayed sources stay labeled.
   return inheritNhlFreshness({
@@ -568,13 +579,17 @@ export function formatFantasyPoints(value: number) {
 }
 
 export function fetchNhlSkaterStats(seasonId = NHL_SEASON_ID) {
+  const scope = seasonId === (CURRENT_LEAGUE_SEASON - 1) * 10000 + CURRENT_LEAGUE_SEASON
+    ? getNhlStatsDate() : undefined;
   return savedNhl<NhlSkaterRecord[]>(`skaters:${seasonId}`, () => loadNhlSkaterStats(seasonId),
-    (value): value is NhlSkaterRecord[] => validPlayerRows(value));
+    (value): value is NhlSkaterRecord[] => validPlayerRows(value), statsCacheTtlMs, { scope });
 }
 
 export function fetchNhlGoalieStats(seasonId = NHL_SEASON_ID) {
+  const scope = seasonId === (CURRENT_LEAGUE_SEASON - 1) * 10000 + CURRENT_LEAGUE_SEASON
+    ? getNhlStatsDate() : undefined;
   return savedNhl<NhlGoalieRecord[]>(`goalies:${seasonId}`, () => loadNhlGoalieStats(seasonId),
-    (value): value is NhlGoalieRecord[] => validPlayerRows(value));
+    (value): value is NhlGoalieRecord[] => validPlayerRows(value), statsCacheTtlMs, { scope });
 }
 
 export function fetchNhlSkaterStatsForPeriod(seasonId: number, startDate: string, endDate: string) {

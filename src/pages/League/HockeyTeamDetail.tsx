@@ -46,9 +46,7 @@ import PlayerInterestButton from "./PlayerInterestButton";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
 import { fetchRetentionAdjustments, type RetentionAdjustment } from "../../lib/retentions";
-import { useAuth } from "../../context/AuthContext";
-import { fetchUserTeamAssignment } from "../../lib/teamUserAssignments";
-import { fetchTeamLeadership, setTeamLeadershipSlot, type LeadershipSlot, type TeamLeadership } from "../../lib/teamLeadership";
+import { fetchTeamLeadership, type TeamLeadership } from "../../lib/teamLeadership";
 import PositionBadge from "../../components/hockey/PositionBadge";
 import InjuryDesignationBadge from "../../components/hockey/InjuryDesignationBadge";
 import CountryFlagBadge from "../../components/hockey/CountryFlagBadge";
@@ -550,22 +548,7 @@ function MultiYearView({
 const emptySkater: NhlSkaterRecord = { playerId: 0, skaterFullName: "", positionCode: "", teamAbbrevs: "", gamesPlayed: 0, goals: 0, assists: 0, plusMinus: 0, penaltyMinutes: 0, ppGoals: 0, ppPoints: 0, shGoals: 0, shPoints: 0, gameWinningGoals: 0, shots: 0, blockedShots: 0, hits: 0, totalFaceoffWins: 0 };
 const emptyGoalie: NhlGoalieRecord = { playerId: 0, goalieFullName: "", teamAbbrevs: "", gamesPlayed: 0, gamesStarted: 0, wins: 0, losses: 0, otLosses: 0, goalsAgainst: 0, saves: 0, shutouts: 0, penaltyMinutes: 0, goals: 0, assists: 0, savePct: null, goalsAgainstAverage: null };
 
-function TeamLeadershipEditor({ roster, leadership, disabled, onChange }: { roster: PlayerSeasonWithRelations[]; leadership: TeamLeadership[]; disabled: boolean; onChange: (slot: LeadershipSlot, playerSeasonId: number | null) => void }) {
-  const eligible = roster.filter((season) => ["C", "LW", "RW", "D", "G"].includes(position(season))).sort((a, b) => playerName(a).localeCompare(playerName(b)));
-  const selected = new Map(leadership.map((entry) => [entry.slot, entry.player_season_id]));
-  const slots: Array<[LeadershipSlot, string]> = [["C", "Captain"], ["A1", "Alternate Captain 1"], ["A2", "Alternate Captain 2"]];
-  return <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/[0.06]">
-    <div><h4 className="font-semibold text-gray-900 dark:text-white">Team Leadership</h4><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Choose one captain and two alternate captains for this season.</p></div>
-    <div className="mt-3 grid gap-3 md:grid-cols-3">{slots.map(([slot, label]) => {
-      const current = selected.get(slot) ?? "";
-      const chosenElsewhere = new Set([...selected.entries()].filter(([otherSlot]) => otherSlot !== slot).map(([, playerId]) => playerId));
-      return <label key={slot} className="text-xs font-semibold text-gray-700 dark:text-gray-300">{label}<select disabled={disabled} value={current} onChange={(event) => onChange(slot, event.target.value ? Number(event.target.value) : null)} className="mt-1 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm disabled:cursor-wait disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900"><option value="">Unassigned</option>{eligible.map((season) => <option key={season.id} value={season.id} disabled={chosenElsewhere.has(season.id)}>{playerName(season)} · {position(season)}</option>)}</select></label>;
-    })}</div>
-  </div>;
-}
-
 export default function HockeyTeamDetail() {
-  const { user, isAdmin } = useAuth();
   const { abbreviation = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSeason = Number(searchParams.get("season"));
@@ -576,7 +559,7 @@ export default function HockeyTeamDetail() {
   const [selectedSeason, setSelectedSeason] = useState(
     seasonOptions.includes(requestedSeason) ? requestedSeason : CURRENT_LEAGUE_SEASON,
   );
-  const [viewMode, setViewMode] = useState<"single" | "lineup" | "multi">("lineup");
+  const [viewMode, setViewMode] = useState<"single" | "lineup" | "multi">("single");
   const [showTrophyCase, setShowTrophyCase] = useState(false);
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
@@ -608,9 +591,6 @@ export default function HockeyTeamDetail() {
   const [teamPlayerSeasons, setTeamPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [contractHistory, setContractHistory] = useState<PlayerSeasonWithRelations[]>([]);
   const [leadership, setLeadership] = useState<TeamLeadership[]>([]);
-  const [canManageLeadership, setCanManageLeadership] = useState(false);
-  const [leadershipBusy, setLeadershipBusy] = useState(false);
-  const [leadershipError, setLeadershipError] = useState("");
 
   function handleSeasonChange(year: number) {
     setSelectedSeason(year);
@@ -643,7 +623,7 @@ export default function HockeyTeamDetail() {
   }, [revision, selectedSeason, statsView]);
 
   useEffect(() => {
-    setViewMode("lineup");
+    setViewMode("single");
   }, [abbreviation]);
 
   useEffect(() => {
@@ -743,33 +723,12 @@ export default function HockeyTeamDetail() {
   useEffect(() => {
     if (!team) return;
     let active = true;
-    Promise.all([
-      fetchTeamLeadership(team.id, selectedSeason),
-      user ? fetchUserTeamAssignment(user.id, selectedSeason).catch(() => null) : Promise.resolve(null),
-    ]).then(([rows, assignment]) => {
+    fetchTeamLeadership(team.id, selectedSeason).then((rows) => {
       if (!active) return;
       setLeadership(rows);
-      setCanManageLeadership(isAdmin || assignment?.fantasy_team_id === team.id);
-      setLeadershipError("");
-    }).catch((err: Error) => {
-      if (active) setLeadershipError(err.message);
-    });
+    }).catch(() => { if (active) setLeadership([]); });
     return () => { active = false; };
-  }, [team, selectedSeason, user, isAdmin]);
-
-  async function updateLeadership(slot: LeadershipSlot, playerSeasonId: number | null) {
-    if (!team || !canManageLeadership) return;
-    setLeadershipBusy(true);
-    setLeadershipError("");
-    try {
-      await setTeamLeadershipSlot({ teamId: team.id, seasonYear: selectedSeason, slot, playerSeasonId });
-      setLeadership(await fetchTeamLeadership(team.id, selectedSeason));
-    } catch (err) {
-      setLeadershipError(err instanceof Error ? err.message : "Unable to update team leadership.");
-    } finally {
-      setLeadershipBusy(false);
-    }
-  }
+  }, [team, selectedSeason]);
 
   const multiYearSeasons = useMemo(() => Array.from({ length: 5 }, (_, index) => selectedSeason + index), [selectedSeason]);
 
@@ -798,6 +757,7 @@ export default function HockeyTeamDetail() {
         const bio = playerMetadata.read(id);
         if (bio?.birthCountry) countries.set(id, bio.birthCountry);
         if (bio?.birthDate) dates.set(id, bio.birthDate);
+        if (bio?.currentTeamAbbrev) teams.set(id, bio.currentTeamAbbrev);
         const stats = skaters.get(id) || goalies.get(id);
         if (stats?.teamAbbrevs) teams.set(id, stats.teamAbbrevs);
       });
@@ -809,7 +769,11 @@ export default function HockeyTeamDetail() {
     // never a dependency for photos or flags already known from public bios.
     function loadMissing() {
       if (!active) return;
-      ids.filter(id => !playerMetadata.read(id)?.birthCountry || (skaters.get(id) || goalies.get(id))?.teamAbbrevs?.includes(",")).forEach(id => {
+      ids.filter(id => {
+        const saved = playerMetadata.read(id);
+        const teamAbbrevs = (skaters.get(id) || goalies.get(id))?.teamAbbrevs;
+        return !saved?.currentTeamAbbrev && (!teamAbbrevs || teamAbbrevs.includes(","));
+      }).forEach(id => {
         let request = metadataFallbacks.current.get(id);
         if (!request) {
           request = fetchNhlPlayerLanding(Number(id)).then(({ currentTeamAbbrev, birthCountry, birthDate }) => ({ currentTeamAbbrev, birthCountry, birthDate }));
@@ -818,16 +782,19 @@ export default function HockeyTeamDetail() {
         }
         void request.then(value => {
           if (!active) return;
+          playerMetadata.remember([{ playerId: Number(id), ...value }]);
           hydrate();
           if (value.currentTeamAbbrev) setNhlTeamsByPlayer(current => new Map(current).set(id, value.currentTeamAbbrev!));
         }).catch(() => {});
       });
     }
     hydrate();
+    // Club logos are visible in the first roster rows, so resolve missing team
+    // abbreviations immediately instead of waiting for optional biography data.
+    loadMissing();
     if (ids.some(id => !playerMetadata.read(id)?.birthCountry)) {
-      void fetchNhlPlayerBiographies(nhlSeasonId(selectedSeason), ids, hydrate).then(() => { hydrate(); loadMissing(); })
-        .catch(() => { hydrate(); loadMissing(); });
-    } else loadMissing();
+      void fetchNhlPlayerBiographies(nhlSeasonId(selectedSeason), ids, hydrate).then(hydrate).catch(hydrate);
+    }
     return () => { active = false; };
   }, [roster, multiYearRosters, viewMode, selectedSeason, skaters, goalies, revision]);
 
@@ -925,8 +892,6 @@ export default function HockeyTeamDetail() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="font-semibold text-gray-800 text-theme-lg dark:text-white/90">Roster &amp; Payroll</h3><p className="text-xs text-gray-500">Active roster limit: {ROSTER_LIMIT} players.</p></div><div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end"><div className="inline-flex min-h-11 flex-wrap rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setViewMode("lineup")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "lineup" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Lineup</button><button type="button" onClick={() => setViewMode("single")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "single" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Roster</button><button type="button" onClick={() => setViewMode("multi")} className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === "multi" ? "bg-brand-500 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"}`}>Multi-Year</button></div><div className="w-full sm:w-44"><label htmlFor="season" className="mb-1 block text-sm font-medium">{viewMode === "multi" ? "Starting Season" : "Season"}</label><select id="season" value={selectedSeason} onChange={(event) => handleSeasonChange(Number(event.target.value))} className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 dark:border-gray-700 dark:bg-gray-900">{seasonOptions.map((year) => <option key={year}>{year}</option>)}</select></div></div></div>
           {viewMode === "single" && <div className="mt-4 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center"><div className="inline-flex rounded-lg border border-gray-300 p-1 dark:border-gray-700"><button type="button" onClick={() => setStatsView("season")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "season" ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "text-gray-500"}`}>Season</button><button type="button" onClick={() => setStatsView("today")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "today" ? "bg-error-500 text-white" : "text-gray-500"}`}>Today</button><button type="button" onClick={() => setStatsView("yesterday")} className={`rounded-md px-3 py-1.5 text-xs font-bold ${statsView === "yesterday" ? "bg-brand-500 text-white" : "text-gray-500"}`}>Yesterday</button></div>{statsView !== "season" && <span className="text-xs text-gray-500">{dailyStatsLoading ? "Updating…" : statsView === "today" ? "Live provisional stats · updates every 30 seconds" : `${getNhlStatsDate(-1)} results`}</span>}</div>}
           {viewMode !== "multi" && <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7"><PayrollCard label="Salary Cap" value={money.format(salaryCap)} /><PayrollCard label="Cap Salary" value={money.format(capSalary)} /><PayrollCard label="Buyout Penalties" value={money.format(buyoutPenaltyTotal)} detail={`${buyoutSlotsUsed} of 2 used`} danger={buyoutSlotsUsed > 2} /><PayrollCard label="Retention Net" value={money.format(retentionNet)} detail={`${retentionSlotsUsed} of 1 used`} danger={retentionNet > 0 || retentionSlotsUsed > 1} /><PayrollCard label={capSpace >= 0 ? "Cap Space" : "Over Cap"} value={money.format(Math.abs(capSpace))} danger={capSpace < 0} /><PayrollCard label="Active Roster" value={`${rosterCount} / ${ROSTER_LIMIT}`} danger={rosterCount > ROSTER_LIMIT} /><PayrollCard label="Average Age" value={averageRosterAge === null ? "Loading…" : `${averageRosterAge.toFixed(1)} years`} detail={`${ageRoster.length} active, IR, LTIR and waiver players`} /></div>}
-          {viewMode === "single" && canManageLeadership && <TeamLeadershipEditor roster={roster} leadership={leadership} disabled={leadershipBusy} onChange={(slot, playerSeasonId) => void updateLeadership(slot, playerSeasonId)} />}
-          {leadershipError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Team leadership: {leadershipError}</div>}
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsView !== "season" && dailyStatsError && <p role="status" className="mt-3 text-sm text-gray-500 dark:text-gray-400">{dailyStatsError}</p>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}

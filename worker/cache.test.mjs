@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createWorker } from "./index.ts";
+import { createWorker, dailyWarmPaths } from "./index.ts";
 import { createSavedNhlCache, validPlayerRows } from "../src/lib/nhlSaved.ts";
 import { fetchCompleteNhlReport } from "../src/lib/nhlReports.ts";
 
@@ -28,13 +28,26 @@ function fixture() {
   return { worker, entries, puts: () => puts, advance: (ms) => { time += ms; } };
 }
 
+test("daily warm-up covers every shared current-season report and today's live snapshot", () => {
+  const paths = dailyWarmPaths(Date.parse("2026-11-24T17:00:00Z"));
+  assert.equal(paths.length, 5);
+  assert.equal(new Set(paths).size, paths.length);
+  assert.ok(paths.every((value) => value.includes("20262027") || value.endsWith("/2026-11-24")));
+  for (const report of ["skater/summary", "skater/realtime", "skater/faceoffwins", "goalie/summary"]) {
+    const path = paths.find((value) => value.includes(report));
+    assert.ok(path);
+    assert.equal(new URL(path, "https://test.invalid").searchParams.get("start"), "0");
+  }
+});
+
 test("successful JSON is cached, then refreshed at expiry with query-specific keys", async (t) => {
   const f = fixture();
   let calls = 0;
   t.mock.method(globalThis, "fetch", async () => Response.json({ data: [++calls] }));
   const first = await f.worker.fetch(req(path), env);
   assert.equal(first.headers.get("X-NHL-Cache"), "MISS");
-  assert.equal(first.headers.get("Cache-Control"), "public, max-age=300");
+  assert.equal(first.headers.get("Cache-Control"), "no-store");
+  assert.equal(first.headers.get("Cloudflare-CDN-Cache-Control"), "no-store");
   const second = await f.worker.fetch(req(path), env);
   assert.equal(second.headers.get("X-NHL-Cache"), "HIT");
   assert.deepEqual(await second.json(), { data: [1] });

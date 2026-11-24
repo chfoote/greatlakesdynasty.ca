@@ -7,9 +7,10 @@ test('public country metadata survives reload without retaining full profiles or
   const entries = new Map([['supabase-auth', 'untouched']]);
   const storage = () => ({ getItem: key => entries.get(key), setItem: (key, value) => entries.set(key, value) });
   const first = createPlayerMetadataCache({ storage });
-  first.remember([{ playerId: 8479420, birthCountryCode: 'USA', birthDate: '1997-10-30', notes: 'DO_NOT_SAVE', credentials: 'DO_NOT_SAVE' }]);
+  first.remember([{ playerId: 8479420, birthCountryCode: 'USA', birthDate: '1997-10-30', currentTeamAbbrev: 'BUF', notes: 'DO_NOT_SAVE', credentials: 'DO_NOT_SAVE' }]);
   const reloaded = createPlayerMetadataCache({ storage });
   assert.equal(reloaded.read('8479420').birthCountry, 'USA');
+  assert.equal(reloaded.read('8479420').currentTeamAbbrev, 'BUF');
   assert.equal(entries.get('supabase-auth'), 'untouched');
   assert.ok(!entries.get('gld:public-player-bios:v1').includes('DO_NOT_SAVE'));
 });
@@ -22,6 +23,18 @@ test('country metadata handles disabled storage, expiry, and invalid countries w
   assert.equal(cache.read(2), undefined);
   now += 30 * 86400_000;
   assert.equal(cache.read(1), undefined);
+});
+
+test('club metadata refreshes daily without expiring stable biography fields', () => {
+  let now = 100000;
+  const entries = new Map();
+  const storage = () => ({ getItem: key => entries.get(key), setItem: (key, value) => entries.set(key, value) });
+  const cache = createPlayerMetadataCache({ now: () => now, storage });
+  cache.remember([{ playerId: 1, birthCountry: 'CAN', currentTeamAbbrev: 'TOR' }]);
+  assert.equal(cache.read(1).currentTeamAbbrev, 'TOR');
+  now += 86400_000;
+  assert.equal(cache.read(1).currentTeamAbbrev, undefined);
+  assert.equal(cache.read(1).birthCountry, 'CAN');
 });
 
 test('biographies share reports, scope roster queries, and never request individual photos', async () => {

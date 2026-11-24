@@ -1,6 +1,7 @@
 import type { FarmRanking } from './farmInsights';
 import { nhlFreshness } from './nhlFreshness.ts';
-export interface FarmRankingsSnapshot { seasonYear: number; updatedAt: number; rankings: FarmRanking[]; warning?: string; }
+import { nhlStatsDate } from '../../shared/nhl-live.ts';
+export interface FarmRankingsSnapshot { seasonYear: number; updatedAt: number; hockeyDate?: string; rankings: FarmRanking[]; warning?: string; }
 
 // Store only the public ranking display, never full roster rows, team notes,
 // manager/account details, authentication, or the private insights object.
@@ -43,7 +44,9 @@ export function createFarmRankingsCache(options: {
   }
   function load(): Promise<FarmRankingsSnapshot> {
     const saved = read();
-    if (saved && now() - saved.updatedAt < 300_000 && !saved.warning) return Promise.resolve(saved);
+    const hockeyDate = nhlStatsDate(0, now());
+    const savedHockeyDate = saved?.hockeyDate ?? (saved ? nhlStatsDate(0, saved.updatedAt) : undefined);
+    if (saved && savedHockeyDate === hockeyDate && now() - saved.updatedAt < 300_000 && !saved.warning) return Promise.resolve(saved);
     if (pending) return pending;
     if (failedUntil > now()) return Promise.reject(new Error('Ranking refresh is cooling down. Saved rankings remain available.'));
     pending = Promise.resolve().then(options.load).then(rows => {
@@ -53,7 +56,7 @@ export function createFarmRankingsCache(options: {
         failedUntil = now() + 60_000;
         return { ...saved, warning: source.message || 'Showing the last complete saved rankings.' };
       }
-      const snapshot = { seasonYear: options.seasonYear, updatedAt: source?.updatedAt ?? now(),
+      const snapshot = { seasonYear: options.seasonYear, updatedAt: source?.updatedAt ?? now(), hockeyDate,
         rankings: displayRows(rows), warning: source?.message };
       memory = snapshot;
       if (snapshot.warning) failedUntil = now() + 60_000; else failedUntil = 0;

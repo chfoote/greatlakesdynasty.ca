@@ -50,3 +50,13 @@ test('disabled storage still permits rankings and stale NHL sources keep their t
   const cache=createFarmRankingsCache({...f.options,storage:()=>{throw Error('blocked');},load:async()=>markNhlSaved([structuredClone(row)],savedAt)});
   const data=await cache.load();assert.equal(data.updatedAt,savedAt);assert.match(data.warning,/saved/);assert.ok(cache.read());
 });
+test('rankings refresh when the hockey day changes even if the saved snapshot is recent',async()=>{
+  let calls=0;const f=setup(async()=>{calls++;return [structuredClone(row)];});
+  const cache=createFarmRankingsCache(f.options);await cache.load();
+  const saved=JSON.parse(f.store.get('gld:public-farm-rankings:v1:2027'));
+  saved.hockeyDate='2026-11-20';saved.updatedAt=f.now()-1000;
+  f.store.set('gld:public-farm-rankings:v1:2027',JSON.stringify(saved));
+  const reloaded=createFarmRankingsCache(f.options);await reloaded.load();
+  assert.equal(calls,2);
+  assert.equal(JSON.parse(f.store.get('gld:public-farm-rankings:v1:2027')).hockeyDate,'2026-11-21');
+});
