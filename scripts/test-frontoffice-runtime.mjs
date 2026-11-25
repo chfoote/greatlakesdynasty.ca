@@ -22,6 +22,7 @@ const row = { id: 1, player_id: 1, season_year: 2027, fantasy_team_id: 1, positi
 const common = `const delay=(value,ms=30000)=>new Promise(resolve=>setTimeout(()=>resolve(value),ms));`;
 const mocks = {
   AuthContext: `const user={id:'fixture-user',email:'fixture@example.invalid'}; export const useAuth=()=>({user});`,
+  teamLeadership: `${common} export const fetchTeamLeadership=()=>delay([]); export const setTeamLeadershipSlot=()=>{throw Error('Unexpected write')};`,
   PageMeta: `export default function PageMeta(){return null}`,
   useNhlDataRevision: `export const useNhlDataRevision=()=>0;`,
   leagueSeasons: `export const CURRENT_LEAGUE_SEASON=2027;`,
@@ -36,6 +37,7 @@ const mocks = {
   tradeMarket: `${common} export const fetchPlayerTradeInterests=()=>delay([]); export const fetchTradeBlockListings=()=>delay([]);`,
   transactions: `${common} export const fetchLeagueTransactions=()=>delay([]);`,
   farmInsights: `${common} export const fetchFarmInsights=()=>delay({agingByTeam:new Map()});`,
+  leagueSeasonStats: `${common} export const fetchLeagueSkaterStats=()=>delay([]); export const fetchLeagueGoalieStats=()=>delay([]);`,
   nhl: `${common} export const fetchNhlSkaterStats=()=>delay([]); export const fetchNhlGoalieStats=()=>delay([]);
     export const formatFantasyPoints=value=>value.toFixed(2); export const getSkaterScore=()=>0; export const getGoalieScore=()=>0;`,
 };

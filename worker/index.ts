@@ -1,3 +1,4 @@
+import { recordBookSnapshotCron, refreshRecordBookSnapshot } from "./recordBookSnapshots.ts";
 import { savedKey, savedRetention, savedResponse } from "./saved.ts";
 import { isLiveNhlPath, nhlTtl, retryAfterMs } from "../shared/nhl-policy.ts";
 import { nhlStatsDate } from "../shared/nhl-live.ts";
@@ -346,6 +347,15 @@ export function createWorker(options: WorkerOptions = {}) {
     } catch { /* Keep the original error if shared storage is unavailable. */ }
     return preventOuterNhlCaching(result);
   }, async scheduled(controller: { cron?: string }, env: Env, context: BackgroundContext) {
+    if (controller.cron === recordBookSnapshotCron) {
+      const url=env.RANKING_SNAPSHOTS_SUPABASE_URL,key=env.RANKING_SNAPSHOTS_SERVICE_ROLE_KEY;
+      if(!url||!key)return;
+      let subrequests=0;
+      const limitedFetch:typeof fetch=(input,init)=>++subrequests>49?Promise.reject(Error("Record snapshot subrequest budget exhausted.")):fetch(input,init);
+      const source=createWorker({fetcher:limitedFetch,statsGapMs:15000});
+      context.waitUntil(refreshRecordBookSnapshot({url,key,now:now(),fetcher:limitedFetch,getReport:path=>source.fetch(new Request(`https://record-inputs.gldhl.invalid${path}`),env)}));
+      return;
+    }
     if (controller.cron === farmSnapshotCron) {
       const url = env.RANKING_SNAPSHOTS_SUPABASE_URL, key = env.RANKING_SNAPSHOTS_SERVICE_ROLE_KEY;
       if (!url || !key) return;

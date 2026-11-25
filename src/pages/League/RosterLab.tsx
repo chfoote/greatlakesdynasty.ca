@@ -4,11 +4,14 @@ import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
 import { fetchBuyoutPenalties } from "../../lib/buyouts";
 import { fetchFantasyTeams, type FantasyTeam } from "../../lib/fantasyTeams";
-import { fetchPlayerSeasons, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import type { PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 import { fetchRetentionAdjustments } from "../../lib/retentions";
-import { fetchProspectRights } from "../../lib/prospectRights";
-import { fetchNhlLiveSeasonStats, formatFantasyPoints, getGoalieScore, getSkaterScore } from "../../lib/nhl";
+import type { ProspectRight } from "../../lib/prospectRights";
+import { fetchRosterLabContracts, fetchRosterLabProspectRights } from "../../lib/rosterLabData";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
+import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
+import { formatFantasyPoints, getGoalieScore, getSkaterScore } from "../../lib/nhl";
 import { fetchLatestUserTeamAssignment, fetchUserTeamAssignment } from "../../lib/teamUserAssignments";
 
 const rosterLimit = 23;
@@ -44,7 +47,13 @@ export default function RosterLab() {
   const [rows, setRows] = useState<LabRow[]>([]);
   const [baseAdjustments, setBaseAdjustments] = useState<Adjustment[]>([]);
   const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
-  const [rightsProspects, setRightsProspects] = useState<LabRow[]>([]);
+  const [prospectRights, setProspectRights] = useState<Map<string, ProspectRight>>(new Map());
+  const [rightsNotice, setRightsNotice] = useState("Loading prospect rights…");
+  const [statsNotice, setStatsNotice] = useState("Loading NHL production…");
+  const [statsReady, setStatsReady] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [loadedUser, setLoadedUser] = useState<string | null | undefined>(undefined);
+  const revision = useNhlDataRevision([`league-season:${CURRENT_LEAGUE_SEASON}`, `live-season:${CURRENT_LEAGUE_SEASON}`]);
   const [production, setProduction] = useState<Map<string, Production>>(new Map());
   const [productionByName, setProductionByName] = useState<Map<string, Production>>(new Map());
   const [history, setHistory] = useState<Snapshot[]>([]);
@@ -65,14 +74,18 @@ export default function RosterLab() {
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setError("");
+    setHistory([]); setPlayerKey("");
+    setYear(CURRENT_LEAGUE_SEASON); setMode("status");
     Promise.all([
       fetchFantasyTeams(),
-      fetchPlayerSeasons(),
-      fetchProspectRights(CURRENT_LEAGUE_SEASON).catch(() => new Map()),
-      fetchNhlLiveSeasonStats(CURRENT_LEAGUE_SEASON).catch(() => ({ skaters: [], goalies: [] })),
-      Promise.all(years.map(async (seasonYear) => ({ seasonYear, buyouts: await fetchBuyoutPenalties(seasonYear).catch(() => []), retentions: await fetchRetentionAdjustments(seasonYear).catch(() => []) }))),
+      fetchRosterLabContracts(),
+      Promise.all(years.map(async (seasonYear) => {
+        const [buyouts, retentions] = await Promise.all([fetchBuyoutPenalties(seasonYear), fetchRetentionAdjustments(seasonYear)]);
+        return { seasonYear, buyouts, retentions };
+      })),
       userId ? fetchUserTeamAssignment(userId, CURRENT_LEAGUE_SEASON).then((assignment) => assignment || fetchLatestUserTeamAssignment(userId)).catch(() => null) : Promise.resolve(null),
-    ]).then(([teamRows, seasonRows, prospectRights, liveStats, financialRows, assignment]) => {
+    ]).then(([teamRows, seasonRows, financialRows, assignment]) => {
       if (!active) return;
       // Keep historical rows in the sandbox as well: prospect rights are often
       // recorded before the first projected contract season.
@@ -81,13 +94,52 @@ export default function RosterLab() {
         ...buyouts.map((item) => ({ key: `buyout:${item.id}`, teamId: item.fantasy_team_id, year: seasonYear, amount: item.amount, label: item.player?.full_name || "Buyout penalty", kind: "buyout" as const })),
         ...retentions.map((item) => ({ key: `retention:${item.id}`, teamId: item.fantasy_team_id, year: seasonYear, amount: item.amount, label: item.player?.full_name || "Salary retention", kind: "retention" as const })),
       ]);
+      setTeams(teamRows); setBaseRows(labRows); setRows(cloneRows(labRows)); setBaseAdjustments(financialAdjustments); setAdjustments(financialAdjustments);
+      setLoadedUser(userId);
+      const preferred = assignment?.fantasy_team_id || teamRows[0]?.id || null;
+      setFocusTeamId(preferred); setTradeSourceTeamId(preferred); setDestinationTeamId(teamRows.find((team) => team.id !== preferred)?.id || null);
+    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Unable to open the Roster Lab."); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [userId, retry]);
+
+  useEffect(() => {
+    let active = true;
+    setProspectRights(new Map()); setRightsNotice("Loading prospect rights…");
+    void fetchRosterLabProspectRights().then(rights => {
+      if (active) { setProspectRights(rights); setRightsNotice(""); }
+    }).catch(() => { if (active) setRightsNotice("Prospect rights are unavailable. Roster and cap tools remain usable."); });
+    return () => { active = false; };
+  }, [userId, retry]);
+
+  useEffect(() => {
+    setProduction(new Map()); setProductionByName(new Map());
+    setStatsReady(false); setStatsNotice("Loading NHL production…");
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+    void fetchLeagueSeasonStats(CURRENT_LEAGUE_SEASON).then(liveStats => {
+      if (!active) return;
+      const liveProduction = new Map<string, Production>();
+      const namedProduction = new Map<string, Production>();
+      liveStats.skaters.forEach((record) => { const item = { points: getSkaterScore(record), gamesPlayed: record.gamesPlayed, position: record.positionCode || "" }; liveProduction.set(String(record.playerId), item); namedProduction.set(normalizedName(record.skaterFullName), item); });
+      liveStats.goalies.forEach((record) => { const item = { points: getGoalieScore(record), gamesPlayed: record.gamesPlayed, position: "G" }; liveProduction.set(String(record.playerId), item); namedProduction.set(normalizedName(record.goalieFullName), item); });
+      setProduction(liveProduction);
+      setProductionByName(namedProduction);
+
+      setStatsReady(true); setStatsNotice("");
+    }).catch(() => { if (active) setStatsNotice("NHL production is unavailable. Roster and cap tools remain usable."); });
+    return () => { active = false; };
+  }, [userId, retry, revision]);
+
+  const rightsProspects = useMemo(() => {
       const uniqueRights = [...prospectRights.values()].filter((right, index, all) => {
         const key = `${right.team.id}:${right.playerApiId || right.playerName || ""}`;
         return Boolean(right.playerApiId || right.playerName) && all.findIndex((candidate) => `${candidate.team.id}:${candidate.playerApiId || candidate.playerName || ""}` === key) === index;
       });
       const rightRows: LabRow[] = uniqueRights.map((right, index) => {
-        const existing = seasonRows.find((row) => right.playerApiId && row.player?.player_api_id === right.playerApiId)
-          || seasonRows.find((row) => right.playerName && playerName(row).localeCompare(right.playerName, undefined, { sensitivity: "base" }) === 0);
+        const existing = baseRows.find((row) => right.playerApiId && row.player?.player_api_id === right.playerApiId)
+          || baseRows.find((row) => right.playerName && playerName(row).localeCompare(right.playerName, undefined, { sensitivity: "base" }) === 0);
         const syntheticId = -1_000_000 - index;
         return {
           id: syntheticId, player_id: existing?.player_id || syntheticId, season_year: CURRENT_LEAGUE_SEASON,
@@ -97,19 +149,9 @@ export default function RosterLab() {
           fantasy_team: right.team, labKey: `right:${right.team.id}:${right.playerApiId || right.playerName || index}`,
         };
       });
-      setTeams(teamRows); setBaseRows(labRows); setRows(cloneRows(labRows)); setBaseAdjustments(financialAdjustments); setAdjustments(financialAdjustments);
-      setRightsProspects(rightRows);
-      const liveProduction = new Map<string, Production>();
-      const namedProduction = new Map<string, Production>();
-      liveStats.skaters.forEach((record) => { const item = { points: getSkaterScore(record), gamesPlayed: record.gamesPlayed, position: record.positionCode || "" }; liveProduction.set(String(record.playerId), item); namedProduction.set(normalizedName(record.skaterFullName), item); });
-      liveStats.goalies.forEach((record) => { const item = { points: getGoalieScore(record), gamesPlayed: record.gamesPlayed, position: "G" }; liveProduction.set(String(record.playerId), item); namedProduction.set(normalizedName(record.goalieFullName), item); });
-      setProduction(liveProduction);
-      setProductionByName(namedProduction);
-      const preferred = assignment?.fantasy_team_id || teamRows[0]?.id || null;
-      setFocusTeamId(preferred); setTradeSourceTeamId(preferred); setDestinationTeamId(teamRows.find((team) => team.id !== preferred)?.id || null);
-    }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Unable to open the Roster Lab."); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [userId]);
+
+    return rightRows;
+  }, [prospectRights, baseRows]);
 
   const playerProduction = useCallback((row: PlayerSeasonWithRelations) => production.get(row.player?.player_api_id || "") || productionByName.get(normalizedName(playerName(row))) || { points: 0, gamesPlayed: 0, position: "" }, [production, productionByName]);
   const playerPosition = useCallback((row: PlayerSeasonWithRelations) => { const code = position(row); return ["PROSPECT", "AP"].includes(code) ? playerProduction(row).position || (row.contract_group && row.contract_group !== "PROSPECT_RIGHTS" ? row.contract_group : code) : code; }, [playerProduction]);
@@ -211,19 +253,21 @@ export default function RosterLab() {
     return { team, points };
   }).sort((a, b) => b.points - a.points || a.team.id - b.team.id).map((item, index) => ({ ...item, rank: index + 1 })), [teams, baseRows, playerProduction]);
   const rosterGroups = [...activePositions, "W", "IR", "LTIR"].map((code) => ({ code, players: focusRows.filter((row) => position(row) === code) })).filter((group) => group.players.length);
-  function productionLabel(row: PlayerSeasonWithRelations) { const item = playerProduction(row); return `${formatFantasyPoints(item.points)} FPTS · ${item.gamesPlayed ? formatFantasyPoints(item.points / item.gamesPlayed) : "—"} FPPG`; }
+  function productionLabel(row: PlayerSeasonWithRelations) { if (!statsReady) return "Production pending"; const item = playerProduction(row); return `${formatFantasyPoints(item.points)} FPTS · ${item.gamesPlayed ? formatFantasyPoints(item.points / item.gamesPlayed) : "—"} FPPG`; }
   function changed(row: LabRow) {
     if (row.labKey.startsWith("lab-")) return true;
     const original = baseRows.find((item) => item.labKey === row.labKey);
     return !original || original.fantasy_team_id !== row.fantasy_team_id || original.position !== row.position || original.salary !== row.salary;
   }
 
-  if (loading) return <div className="grid gap-4"><div className="h-44 animate-pulse rounded-3xl bg-gray-200 dark:bg-gray-800" /><div className="h-96 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" /></div>;
+  if (loading || (!error && loadedUser !== userId)) return <div className="grid gap-4"><div className="h-44 animate-pulse rounded-3xl bg-gray-200 dark:bg-gray-800" /><div className="h-96 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" /></div>;
+  if (error) return <div role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-error-700"><p>Roster Lab could not load complete roster and financial data. {error}</p><button type="button" onClick={() => setRetry(value => value + 1)} className="mt-3 rounded-lg border px-4 py-2 font-bold">Retry</button></div>;
   return <div>
     <PageMeta title="Roster Lab | GLDHL" description="Private GLDHL roster and cap move simulator" />
     <PageBreadcrumb pageTitle="Roster Lab" />
     <div className="space-y-5">
-      {error && <p className="rounded-xl border border-error-200 bg-error-50 p-4 text-error-700">{error}</p>}
+      {statsNotice && <p role="status" className="rounded-xl border border-gray-200 p-4 text-sm text-gray-500">{statsNotice}</p>}
+      {rightsNotice && <p role="status" className="rounded-xl border border-gray-200 p-4 text-sm text-gray-500">{rightsNotice}</p>}
       <section className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-sm font-black text-gray-900 dark:text-white">Lab controls</h2><div className="flex gap-2"><button type="button" disabled={!history.length} onClick={undo} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/[0.04]">Undo</button><button type="button" disabled={!history.length} onClick={reset} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-black text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-40">Reset Lab</button></div></div><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-black uppercase text-gray-500">Focus Team<select value={focusTeamId ?? ""} onChange={(event) => setFocusTeamId(Number(event.target.value))} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm font-bold dark:border-gray-700 dark:bg-gray-900">{teams.map((team) => <option key={team.id} value={team.id}>{team.team_name}</option>)}</select></label><label className="text-xs font-black uppercase text-gray-500">Starting Season<select value={year} onChange={(event) => setYear(Number(event.target.value))} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm font-bold dark:border-gray-700 dark:bg-gray-900">{years.map((item) => <option key={item}>{item}</option>)}</select></label></div>
         {current && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"><SummaryMetric label="Payroll" value={money.format(current.payroll)} detail={`${money.format(capForYear(year))} cap`} danger={current.space < 0} /><SummaryMetric label={current.space < 0 ? "Over Cap" : "Cap Space"} value={money.format(Math.abs(current.space))} detail={`Season ${year}`} danger={current.space < 0} /><SummaryMetric label="Active Roster" value={`${current.active} / ${rosterLimit}`} detail={current.missing.length ? current.missing.join(" · ") : "Position minimums met"} danger={current.active > rosterLimit || Boolean(current.missing.length)} /><SummaryMetric label="Retention Slots" value={`${current.retentionSlots} / 1`} detail="Active retained contracts" danger={current.retentionSlots > 1} /><SummaryMetric label="Buyout Slots" value={`${current.buyoutSlots} / 2`} detail="Active buyout penalties" danger={current.buyoutSlots > 2} /><SummaryMetric label="Compliance" value={current.compliant ? "PASS" : "CHECK"} detail={current.compliant ? "Cap, size, positions and move limits are legal" : "Review highlighted limits"} danger={!current.compliant} /></div>}
       </section>
@@ -237,11 +281,11 @@ export default function RosterLab() {
             {mode === "trade" && <><div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-bold uppercase text-gray-500">Trading From<select value={tradeSourceTeamId ?? ""} onChange={(event) => { const sourceId = Number(event.target.value); setTradeSourceTeamId(sourceId); setDestinationTeamId(focusTeamId !== sourceId ? focusTeamId : teams.find((team) => team.id !== sourceId)?.id || null); }} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900">{teams.map((team) => <option key={team.id} value={team.id}>{team.team_name}</option>)}</select></label><label className="block text-xs font-bold uppercase text-gray-500">Trading To<select value={destinationTeamId ?? ""} onChange={(event) => setDestinationTeamId(Number(event.target.value))} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900">{teams.filter((team) => team.id !== tradeSourceTeamId).map((team) => <option key={team.id} value={team.id}>{team.team_name}</option>)}</select></label></div><p className="text-xs font-semibold text-gray-500">Choose another franchise above to mock one of its players onto {selectedTeam?.team_name || "your roster"}.</p><label className="block text-xs font-bold uppercase text-gray-500">Salary Retained by {teamName(tradeSourceTeamId)}: {retentionPercent}%<input type="range" min="0" max="25" step="5" value={retentionPercent} onChange={(event) => setRetentionPercent(Number(event.target.value))} className="mt-2 w-full accent-brand-500" /></label></>}
             {(mode === "callup" || mode === "signing") && <div className="grid grid-cols-3 gap-3"><label className="text-xs font-bold uppercase text-gray-500">Position<select value={newPosition} onChange={(event) => setNewPosition(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-2 text-sm dark:border-gray-700 dark:bg-gray-900">{activePositions.map((item) => <option key={item}>{item}</option>)}</select></label><label className="text-xs font-bold uppercase text-gray-500">Salary<input type="number" min="500000" step="50000" value={salary} onChange={(event) => setSalary(Number(event.target.value))} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-2 text-sm dark:border-gray-700 dark:bg-gray-900" /></label><label className="text-xs font-bold uppercase text-gray-500">Term<input type="number" min="1" max="5" value={term} onChange={(event) => setTerm(Number(event.target.value))} className="mt-1 h-11 w-full rounded-xl border border-gray-300 bg-white px-2 text-sm dark:border-gray-700 dark:bg-gray-900" /></label></div>}
             {mode === "buyout" && selected && <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">The player is removed for all remaining recorded seasons. The Lab applies the league’s 30% / 40% / 50% penalty according to remaining term.</p>}
-            {mode === "callup" && !prospectRows.length && <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">No eligible prospect-rights records were found for this team as of {year}.</p>}
+            {mode === "callup" && !prospectRows.length && !rightsNotice && <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">No eligible prospect-rights records were found for this team as of {year}.</p>}
             <button type="button" disabled={!selected || (mode === "trade" && (!tradeSourceTeamId || !destinationTeamId || tradeSourceTeamId === destinationTeamId))} onClick={applyAction} className="w-full rounded-xl bg-brand-500 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Apply Mock Move</button></div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-wider text-cyan-600">Current standings order · Lab impact for {year}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">League Impact</h2></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-900"><tr><th className="px-3 py-3">Rank</th><th className="px-3 py-3 text-left">Team</th><th className="px-3 py-3">Points</th><th className="px-3 py-3">Payroll</th><th className="px-3 py-3">Space</th><th className="px-3 py-3">Roster</th><th className="px-3 py-3">Status</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{standingsTeams.map(({ team, rank, points }) => { const item = summary(team.id, year); return <tr key={team.id} className={team.id === focusTeamId ? "bg-brand-50/60 dark:bg-brand-500/10" : ""}><td className="px-3 py-3 text-center font-black text-gray-500">#{rank}</td><td className="px-3 py-3"><button type="button" onClick={() => setFocusTeamId(team.id)} className="flex min-w-48 items-center gap-2 text-left font-bold text-gray-900 hover:text-brand-500 dark:text-white">{team.logo && <img src={team.logo} alt="" className="h-8 w-8 object-contain" />}{team.team_name}</button></td><td className="px-3 py-3 text-center font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(points)}</td><td className="px-3 py-3 text-center font-semibold">{money.format(item.payroll)}</td><td className={`px-3 py-3 text-center font-bold ${item.space < 0 ? "text-error-600" : "text-success-600"}`}>{item.space < 0 ? `−${money.format(Math.abs(item.space))}` : money.format(item.space)}</td><td className="px-3 py-3 text-center">{item.active}/{rosterLimit}</td><td className="px-3 py-3 text-center"><span className={`rounded-full px-2 py-1 text-[10px] font-black ${item.compliant ? "bg-success-100 text-success-700 dark:bg-success-500/15 dark:text-success-300" : "bg-warning-100 text-warning-700 dark:bg-warning-500/15 dark:text-warning-300"}`}>{item.compliant ? "PASS" : "CHECK"}</span></td></tr>; })}</tbody></table></div></section>
+        <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-wider text-cyan-600">Current standings order · Lab impact for {year}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">League Impact</h2></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-900"><tr><th className="px-3 py-3">Rank</th><th className="px-3 py-3 text-left">Team</th><th className="px-3 py-3">Points</th><th className="px-3 py-3">Payroll</th><th className="px-3 py-3">Space</th><th className="px-3 py-3">Roster</th><th className="px-3 py-3">Status</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{standingsTeams.map(({ team, rank, points }) => { const item = summary(team.id, year); return <tr key={team.id} className={team.id === focusTeamId ? "bg-brand-50/60 dark:bg-brand-500/10" : ""}><td className="px-3 py-3 text-center font-black text-gray-500">{statsReady ? `#${rank}` : "—"}</td><td className="px-3 py-3"><button type="button" onClick={() => setFocusTeamId(team.id)} className="flex min-w-48 items-center gap-2 text-left font-bold text-gray-900 hover:text-brand-500 dark:text-white">{team.logo && <img src={team.logo} alt="" className="h-8 w-8 object-contain" />}{team.team_name}</button></td><td className="px-3 py-3 text-center font-black text-brand-600 dark:text-brand-300">{statsReady ? formatFantasyPoints(points) : "—"}</td><td className="px-3 py-3 text-center font-semibold">{money.format(item.payroll)}</td><td className={`px-3 py-3 text-center font-bold ${item.space < 0 ? "text-error-600" : "text-success-600"}`}>{item.space < 0 ? `−${money.format(Math.abs(item.space))}` : money.format(item.space)}</td><td className="px-3 py-3 text-center">{item.active}/{rosterLimit}</td><td className="px-3 py-3 text-center"><span className={`rounded-full px-2 py-1 text-[10px] font-black ${item.compliant ? "bg-success-100 text-success-700 dark:bg-success-500/15 dark:text-success-300" : "bg-warning-100 text-warning-700 dark:bg-warning-500/15 dark:text-warning-300"}`}>{item.compliant ? "PASS" : "CHECK"}</span></td></tr>; })}</tbody></table></div></section>
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-wider text-violet-500">Five-year view</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{selectedTeam?.team_name || "Team"} Projection</h2></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-900"><tr><th className="px-3 py-3">Season</th><th className="px-3 py-3">Payroll</th><th className="px-3 py-3">Cap Space</th><th className="px-3 py-3">Active</th><th className="px-3 py-3">C</th><th className="px-3 py-3">LW</th><th className="px-3 py-3">RW</th><th className="px-3 py-3">D</th><th className="px-3 py-3">G</th><th className="px-3 py-3">Compliance</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{years.filter((item) => item >= year).map((seasonYear) => { const item = focusTeamId ? summary(focusTeamId, seasonYear) : null; return item && <tr key={seasonYear}><td className="px-3 py-3 text-center font-black">{seasonYear}</td><td className="px-3 py-3 text-center">{money.format(item.payroll)}</td><td className={`px-3 py-3 text-center font-bold ${item.space < 0 ? "text-error-600" : "text-success-600"}`}>{money.format(item.space)}</td><td className="px-3 py-3 text-center">{item.active}/{rosterLimit}</td>{activePositions.map((code) => <td key={code} className={`px-3 py-3 text-center ${item.counts[code] < minimums[code] ? "font-bold text-warning-600" : ""}`}>{item.counts[code]}</td>)}<td className="px-3 py-3 text-center font-black">{item.compliant ? "✓" : "!"}</td></tr>; })}</tbody></table></div></section>

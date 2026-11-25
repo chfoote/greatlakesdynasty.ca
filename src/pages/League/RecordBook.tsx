@@ -7,7 +7,7 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
 import { fetchFantasyTeamByAbbreviation, type FantasyTeam } from "../../lib/fantasyTeams";
-import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, syncDailyRecordSnapshot, type ContractRecord, type FranchiseStatLine, type RecordBookEntry, type RecordHistoryEvent, type ScoringLeader } from "../../lib/recordBook";
+import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, readRecordBookData, syncDailyRecordSnapshot, type ContractRecord, type FranchiseStatLine, type RecordBookEntry, type RecordHistoryEvent, type ScoringLeader } from "../../lib/recordBook";
 import { getNhlStatsDate } from "../../lib/nhl";
 import PositionBadge from "../../components/hockey/PositionBadge";
 
@@ -153,10 +153,14 @@ export default function RecordBook() {
     return () => { active = false; };
   }, [abbreviation]);
 
-  const revision = useNhlDataRevision(season ? [`skaters:${(season - 1) * 10000 + season}`, `goalies:${(season - 1) * 10000 + season}`] : []);
+  const revision = useNhlDataRevision(season ? [`league-season:${season}`, `skaters:${(season - 1) * 10000 + season}`, `goalies:${(season - 1) * 10000 + season}`] : []);
   const load = useCallback(async (background = false) => {
     const generation = ++loadGeneration.current;
-    if (!background) { setLoading(true); setError(""); setWarnings([]); }
+    const saved=readRecordBookData(team?.id||null,season,undefined,section);
+    if (!background) {
+      setError(""); setWarnings(saved?.warnings||[]); setLoading(!saved);
+      if(saved){setEntries(saved.entries);setContracts(saved.contracts);setPositionLeaders(saved.positionLeaders);setFranchisePositionLeaders(saved.franchisePositionLeaders);setFranchiseStatLines(saved.franchiseStatLines);setFranchises(saved.teams);setHistory(saved.history);}
+    }
     try {
       const result = await fetchRecordBookData(team?.id || null, season, undefined, section);
       if (generation !== loadGeneration.current) return;

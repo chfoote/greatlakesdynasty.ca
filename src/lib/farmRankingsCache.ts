@@ -54,6 +54,10 @@ export function createFarmRankingsCache(options: {
       const source = nhlFreshness(rows);
       if (saved && source && (source.updatedAt < saved.updatedAt || source.updatedAt === saved.updatedAt && JSON.stringify(displayRows(rows)) === JSON.stringify(saved.rankings))) {
         failedUntil = now() + 60_000;
+        if (source.updatedAt === saved.updatedAt && !source.message) {
+          memory = { ...saved, hockeyDate, warning: undefined };
+          return memory;
+        }
         return { ...saved, warning: source.message || 'Showing the last complete saved rankings.' };
       }
       const snapshot = { seasonYear: options.seasonYear, updatedAt: source?.updatedAt ?? now(), hockeyDate,

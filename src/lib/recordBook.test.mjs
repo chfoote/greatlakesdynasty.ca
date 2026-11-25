@@ -25,6 +25,8 @@ async function fixture(t, changes = {}) {
           return Promise.resolve({data:[],error:s.failTable===table?{message:'table unavailable'}:null}).then(resolve,reject); },
         upsert(){globalThis.__recordBookFixture.writes++; throw Error('Unexpected database write');} }; return query;
     } };`,
+    recordBookInputs: `export const clearRecordBookInputs=()=>{};export const fetchRecordBookInputs=async()=>{const s=globalThis.__recordBookFixture;return {teams:s.teams,brandingHistory:[],allSeasons:s.seasons,transactions:s.transactions}};`,
+    leagueSeasonStats: `import {fetchNhlSkaterStats,fetchNhlGoalieStats} from './nhl';export const fetchLeagueSeasonStats=async year=>{const id=(year-1)*10000+year;const [skaters,goalies]=await Promise.all([fetchNhlSkaterStats(id),fetchNhlGoalieStats(id)]);return {skaters,goalies}};`,
     fantasyTeams: `export const applyTeamBranding=t=>t;
       export async function fetchFantasyTeams(){return globalThis.__recordBookFixture.teams}
       export async function fetchTeamBrandingHistory(){return []}`,
@@ -33,7 +35,7 @@ async function fixture(t, changes = {}) {
     transactions: `export async function fetchLeagueTransactions(){return globalThis.__recordBookFixture.transactions}`,
     awards: `export async function fetchPlayerAwards(){return []}`,
     teamLeadership: `export async function fetchSeasonLeadership(){return []}`,
-    nhl: `import { markNhlSaved } from './nhlFreshness.ts';
+    nhl: `export const fetchNhlDailyStats=async()=>({skaters:[],goalies:[]});export const mergeSkaterRecords=(a,b)=>[...a,...b];export const mergeGoalieRecords=(a,b)=>[...a,...b];import { markNhlSaved } from './nhlFreshness.ts';
       export const getSkaterScore=r=>r.testScore; export const getGoalieScore=r=>r.testScore;
       export const getNhlStatsDate=()=> '2026-11-20';
       async function stats(kind,id,start,end){
@@ -44,6 +46,7 @@ async function fixture(t, changes = {}) {
         score+=s.scoreBoost||0;
         const rows=[{ playerId:kind==='skater'?8000001:8000002, positionCode:kind==='skater'?'C':'G',
           gamesPlayed:5,testScore:score,goals:2,assists:1,saves:20,goalsAgainst:2 }];
+        if(s.extraSkater&&kind==='skater')rows.push({...rows[0],playerId:8000000+s.extraSkater});
         return s.stale?markNhlSaved(rows,1795000000000):rows;
       }
       export const fetchNhlSkaterStats=id=>stats('skater',id);
@@ -52,8 +55,9 @@ async function fixture(t, changes = {}) {
       export const fetchNhlGoalieStatsForPeriod=(id,start,end)=>stats('goalie',id,start,end);`,
   };
   const built = await build({ entryPoints: ['src/lib/recordBook.ts'], bundle: true, format: 'esm', platform: 'browser', write: false,
+    define:{'import.meta.env.VITE_RECORD_BOOK_SNAPSHOTS':'"false"'},
     plugins: [{ name: 'read-only-record-fixtures', setup(plugin) {
-      plugin.onResolve({ filter: /^\.\/(supabase|fantasyTeams|fantasyPlayers|transactions|awards|teamLeadership|nhl)$/ }, args =>
+      plugin.onResolve({ filter: /^\.\/(supabase|fantasyTeams|fantasyPlayers|transactions|awards|teamLeadership|nhl|recordBookInputs|leagueSeasonStats)$/ }, args =>
         ({ path: args.path.slice(2), namespace: 'record-fixture' }));
       plugin.onLoad({ filter: /.*/, namespace: 'record-fixture' }, args => ({ contents: mock[args.path], resolveDir: process.cwd() + '/src/lib' }));
     } }],
@@ -150,4 +154,13 @@ test('every NHL record section refreshes after expiry and franchise/league cache
     else assert.ok(after.positionLeaders[0].fantasyPoints > before.get(section).positionLeaders[0].fantasyPoints);
   }
   assert.equal(state.writes, 0);
+});
+
+
+test('franchise call-ups receive only production earned after the earliest call-up date',async t=>{
+  const {state,api}=await fixture(t,{extraSkater:4});
+  state.seasons.push(player(4,2027,'PROSPECT',1));
+  state.transactions=[{player_id:4,season_year:2027,transaction_type:'signing',action:'called_up',transaction_date:'2026-11-01',trade_offer:null}];
+  const data=await api.fetchRecordBookData(null,null,undefined,'franchise');
+  assert.equal(data.franchisePositionLeaders.find(row=>row.playerId==='8000004').fantasyPoints,12);
 });

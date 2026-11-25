@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {build} from 'esbuild';
+import {resolve} from 'node:path';
+const skater={playerId:1,skaterFullName:'One',positionCode:'C',gamesPlayed:10,goals:2,assists:1,plusMinus:0,penaltyMinutes:0,ppGoals:0,ppPoints:0,shGoals:0,shPoints:0,gameWinningGoals:0,shots:0,blockedShots:0,hits:0,totalFaceoffWins:0};
+const goalie={playerId:2,goalieFullName:'Two',gamesPlayed:10,gamesStarted:10,wins:2,losses:1,otLosses:0,goalsAgainst:5,saves:50,shutouts:0,penaltyMinutes:0,goals:0,assists:0};
+let seq=0;
+async function fixture(t,{enabled=true,missing=false}={}){
+ const state={queries:[],legacy:0,seasons:0,daily:0,failDaily:false,missing,stats:{skaters:[skater],goalies:[goalie]}};
+ globalThis.__recordStats=state;t.after(()=>delete globalThis.__recordStats);
+ const mocks={supabase:`export const supabase={from(){const f=globalThis.__recordStats,filters={};f.queries.push(filters);const q={select(){return q},eq(k,v){filters[k]=v;return q},abortSignal(){return q},maybeSingle:async()=>({data:f.missing?null:{...f.stats,generated_at:new Date(Date.now()-1000).toISOString()}})};return q}};`,
+ leagueSeasonStats:`export const fetchLeagueSeasonStats=async()=>{const f=globalThis.__recordStats;f.seasons++;return f.stats};`,
+ nhl:`export {mergeSkaterRecords,mergeGoalieRecords} from ${JSON.stringify(resolve('src/lib/nhl.ts'))};export const getNhlStatsDate=()=> '2026-11-24';export const fetchNhlDailyStats=async()=>{const f=globalThis.__recordStats;f.daily++;if(f.failDaily)throw Error('429');return {skaters:[{...f.stats.skaters[0],gamesPlayed:1,goals:1}],goalies:[]}};export const fetchNhlSkaterStatsForPeriod=async()=>{const f=globalThis.__recordStats;f.legacy++;return f.stats.skaters};export const fetchNhlGoalieStatsForPeriod=async()=>{const f=globalThis.__recordStats;f.legacy++;return f.stats.goalies};`};
+ const built=await build({entryPoints:['src/lib/recordBookStats.ts'],bundle:true,format:'esm',platform:'browser',write:false,define:{'import.meta.env.VITE_RECORD_BOOK_SNAPSHOTS':JSON.stringify(String(enabled))},plugins:[{name:'record-stats-fixtures',setup(p){p.onResolve({filter:/^\.\/(supabase|nhl|leagueSeasonStats)$/},args=>({path:args.path.slice(2),namespace:'fixture'}));p.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],resolveDir:resolve('src/lib')}))}}]});
+ const api=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64')+'#'+seq++);return {state,api};
+}
+test('closed trade spans share one saved lookup and request no NHL reports',async t=>{const {state,api}=await fixture(t);const [a,b]=await Promise.all([api.fetchRecordBookStats(2027,'2026-10-01','2026-10-31'),api.fetchRecordBookStats(2027,'2026-10-01','2026-10-31')]);assert.deepEqual(a,b);assert.equal(state.queries.length,1);assert.equal(state.legacy,0);assert.equal(state.daily,0)});
+test('current franchise tail merges live totals once without mutating the completed baseline',async t=>{const {state,api}=await fixture(t);const a=await api.fetchRecordBookStats(2027,'2026-11-01','2026-11-24');const b=await api.fetchRecordBookStats(2027,'2026-11-01','2026-11-24');assert.equal(a.skaters[0].goals,3);assert.equal(b.skaters[0].gamesPlayed,11);assert.equal(state.stats.skaters[0].goals,2);assert.equal(state.queries[0].end_date,'2026-11-23');assert.equal(state.daily,1)});
+test('live failure returns the complete saved franchise tail rather than zero',async t=>{const {state,api}=await fixture(t);state.failDaily=true;const data=await api.fetchRecordBookStats(2027,'2026-11-01','2026-11-24');assert.equal(data.skaters[0].goals,2);assert.equal(state.legacy,0)});
+test('historical season totals reuse the full saved record span',async t=>{const {state,api}=await fixture(t);await api.fetchRecordBookStats(2026);assert.equal(state.queries[0].end_date,'2026-06-30');assert.equal(state.seasons,0)});
+test('current full-season totals use the existing shared season reader',async t=>{const {state,api}=await fixture(t);await api.fetchRecordBookStats(2027);assert.equal(state.seasons,1);assert.equal(state.queries.length,0)});
+test('missing trade span falls back to the original dated reports',async t=>{const {state,api}=await fixture(t,{missing:true});await api.fetchRecordBookStats(2027,'2026-10-01','2026-10-31');assert.equal(state.legacy,2)});
+test('invalid scoring inputs are never accepted as a shared range',async t=>{const {state,api}=await fixture(t);state.stats.skaters[0]={...skater,goals:null};await assert.rejects(api.fetchRecordBookStats(2027,'2026-10-01','2026-10-31'),/invalid complete dataset/);assert.equal(state.legacy,2)});
+test('rollback skips range queries and preserves the original dated loader',async t=>{const {state,api}=await fixture(t,{enabled:false});await api.fetchRecordBookStats(2027,'2026-10-01','2026-10-31');assert.equal(state.queries.length,0);assert.equal(state.legacy,2)});

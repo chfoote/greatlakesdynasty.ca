@@ -38,8 +38,8 @@ export async function refreshFarmSnapshot(options: {url:string;key:string;getRep
   const date=farmDate(now), years=farmDraftYears(year,date);
   let drafts:Draft[];
   if(previous && now-Date.parse(previous.drafts_checked_at)<7*86400_000 && Date.parse(previous.drafts_checked_at)<=now
-    && previous.drafts.length===years.length && new Set(previous.drafts.map(d=>d.year)).size===years.length
-    && previous.drafts.every(d=>years.includes(d.year)&&Array.isArray(d.picks)&&d.picks.length>0))drafts=previous.drafts;
+    && Array.isArray(previous.drafts) && previous.drafts.length===years.length && previous.drafts.every(d=>d&&years.includes(d.year)&&Array.isArray(d.picks)&&d.picks.length>0)
+    && new Set(previous.drafts.map(d=>d.year)).size===years.length)drafts=previous.drafts;
   else {
     drafts=[];
     for(const draftYear of years){

@@ -96,7 +96,7 @@ function playerLanding(playerId: number) {
   return fetchNhlPlayerLanding(playerId);
 }
 
-export async function fetchProspectRights(seasonYear: number) {
+export async function fetchProspectRights(seasonYear: number, savedDrafts: Array<{ year: number; picks: NhlDraftPick[] }> = []) {
   const draftYears = Array.from({ length: 10 }, (_, index) => seasonYear - 1 - index);
   const [prospectResult, callUpResult, fantasyTeamResult] = await Promise.all([
     supabase
@@ -121,7 +121,7 @@ export async function fetchProspectRights(seasonYear: number) {
   // Successful draft classes persist in the public client cache across navigation
   // and reloads; roster/ownership data is always read fresh from Supabase above.
   const draftResults = fantasyTeams.some((team) => farmAbbreviations(team).size)
-    ? await Promise.all(draftYears.map(async (year) => ({ year, picks: await draftPicks(year) })))
+    ? await Promise.all(draftYears.map(async (year) => ({ year, picks: savedDrafts.find(draft => draft.year === year)?.picks ?? await draftPicks(year) })))
     : [];
   draftResults.forEach(({ picks }) => picks.forEach((pick) => {
     const owner = fantasyTeams.find((team) => farmAbbreviations(team).has(pick.teamAbbrev));

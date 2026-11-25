@@ -44,11 +44,12 @@ async function setup(t, row = snapshot(), enabled = true) {
       });
     }
     assert.ok(url.pathname.startsWith("/nhl-api/complete/"), "Unexpected NHL call: " + url.pathname);
+    if (db.failSkaters && url.pathname.includes("/skater/")) throw Error("Skater report unavailable");
     const data = [url.pathname.includes("/goalie/") ? goalie : skater];
     return Response.json({ data, total: data.length });
   });
   const built = await build({
-    stdin: { contents: `export {fetchLeagueSeasonStats} from './src/lib/leagueSeasonStats';
+    stdin: { contents: `export {fetchLeagueSeasonStats,fetchLeagueSkaterStats,fetchLeagueGoalieStats} from './src/lib/leagueSeasonStats';
       export {getNhlStatuses} from './src/lib/nhlSaved';`, resolveDir: process.cwd() },
     bundle: true, write: false, format: "esm", platform: "browser",
     define: { "import.meta.env.VITE_SEASON_SNAPSHOTS": JSON.stringify(String(enabled)) },
@@ -180,4 +181,37 @@ if (process.env.NHL_SEASON_SNAPSHOT_FIXTURE) test("the actual stored NHL season 
     assert.equal(result[kind].reduce((total, player) => total + score(player), 0),
       row.source_stats[kind].reduce((total, player) => total + score(player), 0));
   }
+});
+
+
+test("Front Office position readers and Roster Lab share the current snapshot and live request", async t => {
+  const api = await setup(t);
+  const [skaters, goalies, stats] = await Promise.all([
+    api.fetchLeagueSkaterStats(2027), api.fetchLeagueGoalieStats(2027), api.fetchLeagueSeasonStats(2027),
+  ]);
+  assert.equal(api.db.queries.length, 1); assert.equal(api.requests.length, 1);
+  assert.deepEqual(skaters, stats.skaters); assert.deepEqual(goalies, stats.goalies);
+});
+
+test("historical position readers reuse one saved season without NHL reports", async t => {
+  const row = snapshot(); row.stats_through = "2026-04-30";
+  const api = await setup(t, row);
+  const [skaters, goalies] = await Promise.all([api.fetchLeagueSkaterStats(2026), api.fetchLeagueGoalieStats(2026)]);
+  assert.equal(skaters[0].goals, 5); assert.equal(goalies[0].wins, 5);
+  assert.equal(api.db.queries.length, 1); assert.equal(api.requests.length, 0);
+});
+
+test("missing historical snapshot requests only the position group the roster needs", async t => {
+  const api = await setup(t, null);
+  const result = await api.fetchLeagueGoalieStats(2026);
+  assert.equal(result[0].wins, 5); assert.equal(api.requests.length, 1);
+  assert.ok(api.requests[0].includes("/goalie/"));
+});
+
+
+test("Front Office still receives goalies when the shared fallback skater report fails", async t => {
+  const api = await setup(t, null); api.db.failSkaters = true; api.noGames();
+  const [skaters, goalies] = await Promise.allSettled([api.fetchLeagueSkaterStats(2027), api.fetchLeagueGoalieStats(2027)]);
+  assert.equal(skaters.status, "rejected"); assert.equal(goalies.status, "fulfilled");
+  assert.equal(goalies.value[0].wins, 5);
 });

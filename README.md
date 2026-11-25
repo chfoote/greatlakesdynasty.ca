@@ -301,3 +301,118 @@ historical seasons, saved-data fallback, and rapid season switching with delayed
 roster responses.
 
 Team-page production version: `a080091d-4751-479b-8c36-da4f772a4883`.
+
+
+## Shared Farm System Rankings
+
+`VITE_FARM_SNAPSHOTS=true` enables shared Farm System Rankings. Apply
+`20261124213835_create_farm_ranking_snapshots.sql` before enabling this flag.
+Signed-in members can read the saved display and public draft inputs; only the
+Worker can write. Salary, contract, manager, account, and roster records are not
+stored in the shared result or public browser ranking cache.
+
+The Worker refreshes the shared result at minutes 10, 25, 40, and 55 using the
+existing snapshot URL and server-secret bindings. It reuses the complete saved
+NHL season baseline and all ownership-history pages. Completed draft history is
+cached in the database for seven days. The initial seven-year backfill used
+complete responses from the production NHL proxy; the first normal remote
+refresh then completed with zero NHL requests. The background production job
+has subsequently refreshed the ten-team snapshot successfully.
+
+The browser checks fresh league inputs and live season production on the
+existing five-minute ranking refresh cycle. A canonical SHA-256 fingerprint
+allows an unchanged saved result to be reused. Changes to production, ownership,
+branding, or known age eligibility recalculate with the shared draft inputs,
+using the same 85/10/5 ranking formula. Draft JSON property order does not affect
+the fingerprint. Missing/invalid shared data uses the original draft loader.
+Failures preserve the last complete display. Set `VITE_FARM_SNAPSHOTS=false` and
+rebuild to roll back this reader. Team-specific Front Office aging alerts also
+reuse the relevant saved draft classes and the shared season reader.
+
+Checks: `node --test src/lib/*.test.mjs worker/*.test.mjs`,
+`node scripts/test-farm-rankings-runtime.mjs`, and
+`node scripts/test-farm-rankings-runtime.mjs --shared`. These cover ownership
+pagination, signings/transfers, live production, eligibility changes, cached
+requests, failure preservation, privacy field filtering, first render and saved
+reload, plus the shared producer's valid/invalid draft responses.
+
+Shared farm-reader production version: `6af3d55e-178d-4a0e-ab50-7c72907fcdb1`.
+
+
+## Shared data in My Front Office and Roster Lab
+
+My Front Office reuses current and historical saved NHL seasons, with the same
+live-day merge as Standings. Position-specific historical fallback requests only
+the missing skater or goalie group, and a failed group does not discard the other.
+Aging alerts use saved draft inputs for the team's relevant older draft classes;
+current ownership is always read from the league.
+
+Roster Lab loads its complete contract history, five years of buyouts and
+retentions, teams, and assignment independently of optional NHL production and
+prospect history. Contracts are paginated by ID so the Data API's row limit
+cannot silently truncate projections. Failed financial reads show a retry screen
+instead of treating missing penalties as zero. NHL production and prospect rights
+show loading/error notices independently; unknown production is not presented as
+zero before statistics load. Saved farm drafts cover seven of the ten rights
+classes; the remaining years use the existing cached NHL loader. Ownership and
+transaction overrides remain fresh.
+
+NHL refreshes and arriving prospect data only update their own displays. They do
+not reload the contract scenario or erase mock moves. User changes reset the
+scenario and ignore previous-user responses. Salary/cap formulas, move rules,
+undo/reset, and five-year projections are unchanged. Simulated moves and full
+contract data stay in component memory; this adds no simulator writes or shared
+financial snapshot.
+
+Checks: `node --test src/lib/*.test.mjs worker/*.test.mjs`,
+`node scripts/test-frontoffice-runtime.mjs`, and
+`node scripts/test-rosterlab-runtime.mjs`. Browser fixtures exercise slow/failed
+optional inputs, financial failure/retry, live refresh preserving moves, status
+changes, retained trades, multi-year buyouts, call-ups, signings, undo/reset, and
+account changes. Shared-reader tests cover deduplicated reads and partial failure.
+
+Front Office / Roster Lab production version:
+`2d4ed7b9-543a-44d9-abc5-15b5717f2c21`. Both production routes and the six affected
+page/shared JavaScript files were verified against the tested build.
+
+## Shared League Record Book inputs
+
+The five Record Book tabs share a paginated, five-minute in-memory load of
+contracts, signing history, teams and branding. These financial/ownership inputs
+are read fresh from Supabase after expiry and are never saved in the public NHL
+cache. The Contracts tab performs no NHL requests. Completed tab results appear
+immediately on return while refreshes run; current records refresh after one
+minute and completed seasons after five minutes. Cache identity includes the
+hockey day, season, franchise, date cutoff, and section.
+
+`VITE_RECORD_BOOK_SNAPSHOTS=true` enables `record_book_nhl_ranges`, containing
+only public NHL skater/goalie scoring inputs for closed trade/call-up spans.
+Apply `20261125042423_create_record_book_nhl_ranges.sql` and
+`20261125043816_create_record_book_range_players.sql` first. Authenticated
+members can read; the existing Worker service secret is required for writes.
+Ownership and contract calculations still use fresh league data. Full-season
+leaders and seasonal positional records reuse the shared season reader; the
+completed historical season can also use the Record Book full-season span.
+
+Franchise records preserve the existing trade-date and call-up attribution.
+Completed spans come from the shared table, and today's box scores merge once
+into the through-yesterday tail. The previous-day movement comparison has its
+own completed tail. Invalid/missing shared spans use the original NHL reports;
+failed refreshes preserve the last complete result with a notice. No partial
+leader totals are published as complete records.
+
+A security-invoker view provides only played-player IDs, positions and game
+counts for planning, avoiding repeated full-season stat downloads by the job.
+The Worker checks one due span at minutes 1, 11, 21, 31, 41 and 51, building full
+seasons before ownership spans and rechecking completed inputs after seven days.
+New daily tails and new transaction boundaries take priority over old spans.
+Requests are paced and bounded; failed, partial, or stale provider reports never
+overwrite saved inputs. The first backfill uses complete, paginated official NHL
+reports from the local connection because the Cloudflare source was rate limited.
+Set the frontend flag false and rebuild to roll back the new range reader.
+
+Checks: `node --test src/lib/*.test.mjs worker/*.test.mjs` and
+`node scripts/test-recordbook-runtime.mjs`. The browser check exercises all five
+tabs, historical filtering, rapid tab changes, exact trade ownership credit,
+missing snapshots, and Contracts during an NHL outage. Shared fixtures render
+all tabs with zero league-wide NHL report requests.

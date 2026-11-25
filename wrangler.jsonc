@@ -8,7 +8,7 @@
     "RANKING_SNAPSHOTS_SUPABASE_URL": "https://ptexqhshfyjfnmlwyzzv.supabase.co"
   },
   "triggers": {
-    "crons": ["30 11 * * *", "5,35 * * * *", "10,25,40,55 * * * *"]
+    "crons": ["30 11 * * *", "5,35 * * * *", "10,25,40,55 * * * *", "1,11,21,31,41,51 * * * *"]
   },
   "assets": {
     "directory": "./dist",

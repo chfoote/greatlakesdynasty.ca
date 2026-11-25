@@ -1,3 +1,4 @@
+import { fetchLeagueSkaterStats, fetchLeagueGoalieStats } from "../../lib/leagueSeasonStats";
 import { loadFrontOfficeNhl } from "../../lib/frontOfficeNhl";
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,7 +17,7 @@ import { fetchUserTeamAssignment, fetchLatestUserTeamAssignment, type TeamUserAs
 import { fetchPlayerTradeInterests, fetchTradeBlockListings, type PlayerTradeInterest, type TradeBlockListing } from "../../lib/tradeMarket";
 import { fetchTradeOffers, type TradeOffer } from "../../lib/tradeOffers";
 import { fetchLeagueTransactions, type LeagueTransaction } from "../../lib/transactions";
-import { fetchNhlGoalieStats, fetchNhlSkaterStats, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
 import type { AgingProspect } from "../../lib/farmInsights";
 import { fetchTeamLeadership, setTeamLeadershipSlot, type LeadershipSlot, type TeamLeadership } from "../../lib/teamLeadership";
 
@@ -126,15 +127,15 @@ export default function ManagerCommandCenter() {
   const [leadershipError, setLeadershipError] = useState("");
   const [error, setError] = useState("");
 
-  const revision = useNhlDataRevision([`skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`, `skaters:${nhlSeasonId(season - 1)}`, `goalies:${nhlSeasonId(season - 1)}`]);
+  const revision = useNhlDataRevision([`league-season:${season}`, `league-season:${season - 1}`, `live-season:${season}`, `skaters:${nhlSeasonId(season)}`, `goalies:${nhlSeasonId(season)}`, `skaters:${nhlSeasonId(season - 1)}`, `goalies:${nhlSeasonId(season - 1)}`]);
   useEffect(() => {
     if (!user || !assignment?.fantasy_team_id) return;
     let active = true;
     setStatsError("");
     void loadFrontOfficeNhl({
       isActive: () => active,
-      currentSkaters: () => fetchNhlSkaterStats(nhlSeasonId(season)),
-      currentGoalies: () => fetchNhlGoalieStats(nhlSeasonId(season)),
+      currentSkaters: () => fetchLeagueSkaterStats(season),
+      currentGoalies: () => fetchLeagueGoalieStats(season),
       needsPreviousSkaters: rows => {
         const ids = new Set(rows.map(row => String(row.playerId)));
         return leagueRoster.some(row => row.player?.player_api_id && position(row) !== "G"
@@ -144,8 +145,8 @@ export default function ManagerCommandCenter() {
         const ids = new Set(rows.map(row => String(row.playerId)));
         return leagueRoster.some(row => row.player?.player_api_id && position(row) === "G" && !ids.has(row.player.player_api_id));
       },
-      previousSkaters: () => fetchNhlSkaterStats(nhlSeasonId(season - 1)),
-      previousGoalies: () => fetchNhlGoalieStats(nhlSeasonId(season - 1)),
+      previousSkaters: () => fetchLeagueSkaterStats(season - 1),
+      previousGoalies: () => fetchLeagueGoalieStats(season - 1),
       onSkaters: rows => {
         if (active) {
           setSkaters(new Map(rows.map(row => [String(row.playerId), row])));

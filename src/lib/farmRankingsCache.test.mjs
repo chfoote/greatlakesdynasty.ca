@@ -68,3 +68,12 @@ test('ownership changes publish even when NHL production has the same fresh time
   f.options.load=async()=>markNhlFetched([{...structuredClone(row),farmScore:96,eligible:3}],timestamp);
   const updated=await cache.load();assert.equal(updated.rankings[0].farmScore,96);assert.equal(updated.rankings[0].eligible,3);
 });
+
+test('unchanged fresh source data does not produce a false delay warning',async()=>{
+  const {markNhlFetched}=await import('./nhlFreshness.ts');
+  const f=setup();const cache=createFarmRankingsCache(f.options);await cache.load();
+  const timestamp=f.now();f.advance(300001);
+  f.options.load=async()=>markNhlFetched([structuredClone(row)],timestamp);
+  assert.equal((await cache.load()).warning,undefined);
+  assert.equal(cache.read().warning,undefined);
+});

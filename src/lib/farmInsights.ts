@@ -21,7 +21,7 @@ const age = (birthDate: string) => { const birth = new Date(`${birthDate}T00:00:
 const earliestDraftYear = () => { const now = new Date(); return now.getFullYear() - ((now.getMonth() > 8 || (now.getMonth() === 8 && now.getDate() >= 15)) ? 6 : 7); };
 
 export function fetchFarmInsights(teamId?: number, options: { rankingsOnly?: boolean } = {}) {
-  const sharedEnabled = Boolean(options.rankingsOnly && import.meta.env?.VITE_FARM_SNAPSHOTS === "true");
+  const sharedEnabled = Boolean((options.rankingsOnly || teamId !== undefined) && import.meta.env?.VITE_FARM_SNAPSHOTS === "true");
   const baseKey = teamId === undefined ? (options.rankingsOnly ? "rankings" : "league") : `${options.rankingsOnly ? "rankings" : "aging"}:${teamId}`;
   const key = `${baseKey}:${nhlStatsDate()}`;
   const cached = insightRequests.get(key);
@@ -33,12 +33,12 @@ export function fetchFarmInsights(teamId?: number, options: { rankingsOnly?: boo
   const sharedRequest = sharedEnabled ? import("./farmSharedSnapshot").then(module=>module.fetchFarmSharedSnapshot()) : Promise.resolve(null);
   const request = Promise.all([
     fetchFantasyTeams(), fetchTeamBrandingHistory(), sharedEnabled ? import("./farmSharedSnapshot").then(module=>module.fetchFarmOwnershipRows()) : fetchPlayerSeasons(),
-    sharedRequest.then(snapshot=>snapshot?.drafts ?? Promise.all(draftYears.map(async (year) => ({ year, picks: await fetchNhlDraftPicks(year) })))),
+    sharedRequest.then(snapshot=>Promise.all(draftYears.map(async (year) => ({ year, picks: snapshot?.drafts.find(draft => draft.year === year)?.picks ?? await fetchNhlDraftPicks(year) })))),
     sharedEnabled ? import("./leagueSeasonStats").then(module=>module.fetchLeagueSeasonStats(CURRENT_LEAGUE_SEASON)) : fetchNhlLiveSeasonStats(CURRENT_LEAGUE_SEASON),
   ]).then(async ([teams, branding, seasons, drafts, stats]) => {
     const displayTeams = teams.filter(team => teamId === undefined || team.id === teamId).map((team) => applyTeamBranding(team, branding, CURRENT_LEAGUE_SEASON));
     const shared = await sharedRequest;
-    if (shared) {
+    if (shared && options.rankingsOnly) {
       try {
         if (shared.signature === await farmSignature(displayTeams, seasons, drafts, stats)) {
           return {rankings:inheritNhlFreshness(shared.rankings,[stats]),agingByTeam:new Map<number,AgingProspect[]>()};

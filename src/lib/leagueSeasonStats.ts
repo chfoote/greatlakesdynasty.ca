@@ -109,3 +109,29 @@ export function fetchLeagueSeasonStats(season: number): Promise<SeasonStats> {
       && [...stats.skaters, ...stats.goalies].every(row => row && Number.isSafeInteger(row.playerId)));
   }, current ? 30_000 : dayMs, { scope: current ? today : undefined, staleRetryMs: 5000 });
 }
+
+// Front Office can publish one position group even if the other NHL report
+// fails. Historical fallback only requests the group that the roster needs.
+export async function fetchLeagueSkaterStats(season: number): Promise<NhlSkaterRecord[]> {
+  if (season === CURRENT_LEAGUE_SEASON) {
+    try { return (await fetchLeagueSeasonStats(season)).skaters; }
+    catch { return fetchNhlSkaterStats((season - 1) * 10000 + season); }
+  }
+  if (import.meta.env.VITE_SEASON_SNAPSHOTS === "true" && playedAndCurrentSeasons.includes(season)) {
+    const saved = await savedSeason(season, getNhlStatsDate());
+    if (saved) return saved.skaters;
+  }
+  return fetchNhlSkaterStats((season - 1) * 10000 + season);
+}
+
+export async function fetchLeagueGoalieStats(season: number): Promise<NhlGoalieRecord[]> {
+  if (season === CURRENT_LEAGUE_SEASON) {
+    try { return (await fetchLeagueSeasonStats(season)).goalies; }
+    catch { return fetchNhlGoalieStats((season - 1) * 10000 + season); }
+  }
+  if (import.meta.env.VITE_SEASON_SNAPSHOTS === "true" && playedAndCurrentSeasons.includes(season)) {
+    const saved = await savedSeason(season, getNhlStatsDate());
+    if (saved) return saved.goalies;
+  }
+  return fetchNhlGoalieStats((season - 1) * 10000 + season);
+}

@@ -98,3 +98,10 @@ test('known age eligibility changes invalidate saved rankings without new draft 
   assert.equal(f.state.computations,1);assert.equal(f.state.draftCalls,0);
   assert.ok(result.rankings.every(r=>!r.topProspects.some(p=>p.name==='Prospect One')));
 });
+
+
+test('Front Office aging reuses shared drafts without returning saved league rankings', async t=>{
+  const f=await fixture(t); const result=await f.api.fetchFarmInsights(1);
+  assert.equal(f.state.draftCalls,0); assert.equal(result.rankings.length,0);
+  assert.deepEqual([...result.agingByTeam.keys()],[1]);
+});
