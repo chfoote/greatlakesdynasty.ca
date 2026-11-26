@@ -17,7 +17,8 @@ import {
 } from "../../lib/teamUserAssignments";
 import { closeAuction, compareAuctionBids, deleteAuction, fetchAuctions, nominateAuction, setAuctionPaused, undoAuctionAward, type Auction } from "../../lib/auctions";
 import { createFantasyPlayer, createPlayerSeason, fetchFantasyPlayers, fetchPlayerSeasonsBySeason, type FantasyPlayer, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
-import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchNhlPlayerLanding, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import { fetchProspectRights, getProspectRight, removeAgedOutProspectRights, type ProspectRight } from "../../lib/prospectRights";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
 
@@ -53,10 +54,6 @@ type NomineeOption = NhlNominee & {
   fantasyTeam: FantasyTeam | null;
   teamCategory: string;
 };
-
-function nhlSeasonId(year: number) {
-  return (year - 1) * 10000 + year;
-}
 
 function playerName(player: FantasyPlayer) {
   return player.full_name || [player.first_name, player.last_name].filter(Boolean).join(" ") || "Unknown Player";
@@ -139,23 +136,19 @@ export default function AuctionAdmin() {
       const auctionRows = await fetchAuctions(selectedSeason);
       setAuctions(auctionRows);
 
-      const [profileRows, teamRows, assignmentRows, seasonRows, previousSeasonRows, playerRows, skaterRows, goalieRows, rights] = await Promise.all([
+      const [profileRows, teamRows, assignmentRows, seasonRows, previousSeasonRows, playerRows, currentStats, previousStats, rights] = await Promise.all([
         fetchProfiles(),
         fetchFantasyTeams(),
         fetchTeamUserAssignments(selectedSeason),
         fetchPlayerSeasonsBySeason(selectedSeason),
         fetchPlayerSeasonsBySeason(selectedSeason - 1),
         fetchFantasyPlayers(),
-        Promise.all([
-          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
-          fetchNhlSkaterStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlSkaterRecord[]),
-        ]).then(([current, previous]) => current.length ? current : previous),
-        Promise.all([
-          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
-          fetchNhlGoalieStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlGoalieRecord[]),
-        ]).then(([current, previous]) => current.length ? current : previous),
+        fetchLeagueSeasonStats(selectedSeason).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
+        fetchLeagueSeasonStats(selectedSeason - 1).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
         fetchProspectRights(selectedSeason).catch(() => new Map<string, ProspectRight>()),
       ]);
+      const skaterRows = currentStats.skaters.length ? currentStats.skaters : previousStats.skaters;
+      const goalieRows = currentStats.goalies.length ? currentStats.goalies : previousStats.goalies;
       const nominees = [
         ...skaterRows.map((record) => ({
           playerApiId: String(record.playerId),

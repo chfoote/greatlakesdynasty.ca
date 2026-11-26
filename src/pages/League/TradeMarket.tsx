@@ -17,7 +17,8 @@ import {
   type PlayerTradeInterest,
   type TradeBlockListing,
 } from "../../lib/tradeMarket";
-import { fetchNhlGoalieStats, fetchNhlSkaterStats, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 
 const seasons = Array.from({ length: 10 }, (_, index) => 2026 + index);
 const tradeablePositions = new Set(["C", "LW", "RW", "D", "G", "RFA", "PROSPECT", "AP"]);
@@ -28,8 +29,6 @@ const rosterSections = [
   { code: "G", label: "Goalies" }, { code: "RFA", label: "RFA Rights" },
   { code: "PROSPECT", label: "Prospects" }, { code: "AP", label: "Acquired Prospects" },
 ];
-function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
-
 function playerName(season: PlayerSeasonWithRelations | null) {
   const player = season?.player;
   return player?.full_name || [player?.first_name, player?.last_name].filter(Boolean).join(" ") || "Unknown Player";
@@ -84,10 +83,8 @@ export default function TradeMarket() {
           fetchTradeBlockListings(season),
           fetchPlayerTradeInterests(season),
           Promise.all([
-            fetchNhlSkaterStats(nhlSeasonId(season)).catch(() => [] as NhlSkaterRecord[]),
-            fetchNhlGoalieStats(nhlSeasonId(season)).catch(() => [] as NhlGoalieRecord[]),
-            fetchNhlSkaterStats(nhlSeasonId(season - 1)).catch(() => [] as NhlSkaterRecord[]),
-            fetchNhlGoalieStats(nhlSeasonId(season - 1)).catch(() => [] as NhlGoalieRecord[]),
+            fetchLeagueSeasonStats(season).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
+            fetchLeagueSeasonStats(season - 1).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
           ]),
         ]);
         if (!active) return;
@@ -102,11 +99,11 @@ export default function TradeMarket() {
         if (interestsResult.status === "fulfilled") setInterests(interestsResult.value);
         else setInterests([]);
         if (statsResult.status === "fulfilled") {
-          const [currentSkaters, currentGoalies, previousSkaters, previousGoalies] = statsResult.value;
-          const nextSkaters = new Map(previousSkaters.map((row) => [String(row.playerId), row]));
-          const nextGoalies = new Map(previousGoalies.map((row) => [String(row.playerId), row]));
-          currentSkaters.forEach((row) => nextSkaters.set(String(row.playerId), row));
-          currentGoalies.forEach((row) => nextGoalies.set(String(row.playerId), row));
+          const [current, previous] = statsResult.value;
+          const nextSkaters = new Map(previous.skaters.map((row) => [String(row.playerId), row]));
+          const nextGoalies = new Map(previous.goalies.map((row) => [String(row.playerId), row]));
+          current.skaters.forEach((row) => nextSkaters.set(String(row.playerId), row));
+          current.goalies.forEach((row) => nextGoalies.set(String(row.playerId), row));
           setSkaters(nextSkaters); setGoalies(nextGoalies);
         } else { setSkaters(new Map()); setGoalies(new Map()); }
 

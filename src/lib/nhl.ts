@@ -1,11 +1,12 @@
 import type { LiveSnapshot } from "../../shared/nhl-live";
 import { playerMetadata } from "./nhlPlayerMetadata";
-import { inheritNhlFreshness } from "./nhlFreshness";
+import { inheritNhlFreshness, markNhlSaved } from "./nhlFreshness";
 import { savedNhl, validPlayerRows, NhlBaselineAvailable } from "./nhlSaved";
 import { nhlStatsDate } from "../../shared/nhl-live";
 import { fetchNhlLiveSnapshot } from "./nhlLive";
 import { nhlFetch } from "./nhlRequest";
 import { fetchCompleteNhlReport } from "./nhlReports";
+import { NhlRateLimitError } from "../../shared/nhl-policy";
 import { CURRENT_LEAGUE_SEASON } from "./leagueSeasons";
 export const NHL_SEASON_ID = 20252026;
 export const FANTASY_SEASON_YEAR = 2026;
@@ -17,6 +18,7 @@ const skaterPeriodCache = new Map<string, { expiresAt: number; request: Promise<
 const goaliePeriodCache = new Map<string, { expiresAt: number; request: Promise<NhlGoalieRecord[]> }>();
 const playerBiosCache = new Map<string, { expiresAt: number; request: Promise<NhlPlayerBio[]> }>();
 const playerSeasonStatsCache = new Map<string, { expiresAt: number; request: Promise<{ skater: NhlSkaterRecord | null; goalie: NhlGoalieRecord | null }> }>();
+const playerPeriodStatsCache = new Map<string, { expiresAt: number; request: Promise<{ skater: NhlSkaterRecord | null; goalie: NhlGoalieRecord | null }> }>();
 
 type NhlSkaterSummary = {
   playerId: number;
@@ -58,6 +60,7 @@ export type NhlSkaterRecord = NhlSkaterSummary & {
   blockedShots: number;
   hits: number;
   totalFaceoffWins: number;
+  faceoffWinsAvailable?: boolean;
   birthDate?: string;
 };
 
@@ -372,6 +375,14 @@ function periodReportUrl(position: "skater" | "goalie", report: string, seasonId
   return `/nhl-api/complete/${position}/${report}?${params}`;
 }
 
+function playerPeriodReportUrl(position: "skater" | "goalie", report: string, seasonId: number, playerId: number, startDate: string, endDate: string) {
+  const params = new URLSearchParams({
+    limit: "-1",
+    cayenneExp: `seasonId=${seasonId} and gameTypeId=2 and playerId=${playerId} and gameDate>="${startDate}" and gameDate<="${endDate}"`,
+  });
+  return `/nhl-api/${position}/${report}?${params}`;
+}
+
 async function fetchReport<T>(url: string, label: string): Promise<T[]> {
   return fetchCompleteNhlReport<T>(url, label);
 }
@@ -393,7 +404,8 @@ export async function fetchNhlPlayerBiographies(seasonId: number, playerIds?: st
     onUpdate?.();
     return;
   }
-  const ids = [...new Set(playerIds)].filter(id => /^[1-9]\d{0,9}$/.test(id)).filter(id => !playerMetadata.read(id)?.birthCountry);
+  const ids = [...new Set(playerIds)].filter(id => /^[1-9]\d{0,9}$/.test(id))
+    .filter(id => !playerMetadata.read(id)?.birthCountry || !playerMetadata.read(id)?.birthDate);
   // A roster needs a small biography response, not eight league-wide pages.
   // Keep URL size bounded, preserve the stats client's pacing/deduplication,
   // and leave photos independent of this optional request.
@@ -419,18 +431,24 @@ async function loadNhlSkaterStats(
   const request = Promise.all([
       fetchReport<NhlSkaterSummary>(reportUrl("skater", "summary", seasonId), "skater summary"),
       fetchReport<NhlSkaterRealtime>(reportUrl("skater", "realtime", seasonId), "skater realtime stats"),
-      fetchReport<NhlSkaterFaceoffs>(reportUrl("skater", "faceoffwins", seasonId), "skater faceoff stats"),
+      fetchReport<NhlSkaterFaceoffs>(reportUrl("skater", "faceoffwins", seasonId), "skater faceoff stats")
+        .catch((error: unknown) => {
+          if (error instanceof NhlRateLimitError) return null;
+          throw error;
+        }),
     ])
     .then(([summary, realtime, faceoffs]) => {
       const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
-      const faceoffsByPlayer = new Map(faceoffs.map((row) => [row.playerId, row]));
-      return inheritNhlFreshness(summary.map((row) => ({
+      const faceoffsByPlayer = new Map((faceoffs ?? []).map((row) => [row.playerId, row]));
+      const rows = inheritNhlFreshness(summary.map((row) => ({
         ...row,
         blockedShots: realtimeByPlayer.get(row.playerId)?.blockedShots ?? 0,
         hits: realtimeByPlayer.get(row.playerId)?.hits ?? 0,
         totalFaceoffWins: faceoffsByPlayer.get(row.playerId)?.totalFaceoffWins ?? 0,
+        faceoffWinsAvailable: faceoffs !== null,
         birthDate: playerMetadata.read(String(row.playerId))?.birthDate,
-      })), [summary, realtime, faceoffs]);
+      })), faceoffs ? [summary, realtime, faceoffs] : [summary, realtime]);
+      return faceoffs ? rows : markNhlSaved(rows, Date.now(), "NHL faceoff-wins report is rate limited (429). Faceoff-wins records are temporarily unavailable.");
     })
     .catch((error) => {
       skaterStatsCache.delete(seasonId);
@@ -460,6 +478,30 @@ export function fetchNhlPlayerSeasonStats(playerId: number, seasonId: number) {
     throw error;
   });
   playerSeasonStatsCache.set(key, { expiresAt: Date.now() + statsCacheTtlMs, request });
+  return request;
+}
+
+export function fetchNhlPlayerStatsForPeriod(playerId: number, seasonId: number, startDate: string, endDate: string) {
+  const key = `${playerId}:${seasonId}:${startDate}:${endDate}`;
+  const cached = playerPeriodStatsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.request;
+  const request = Promise.all([
+    fetchReport<NhlSkaterSummary>(playerPeriodReportUrl("skater", "summary", seasonId, playerId, startDate, endDate), "player period skater summary"),
+    fetchReport<NhlSkaterRealtime>(playerPeriodReportUrl("skater", "realtime", seasonId, playerId, startDate, endDate), "player period realtime stats"),
+    fetchReport<NhlSkaterFaceoffs>(playerPeriodReportUrl("skater", "faceoffwins", seasonId, playerId, startDate, endDate), "player period faceoff stats"),
+    fetchReport<NhlGoalieRecord>(playerPeriodReportUrl("goalie", "summary", seasonId, playerId, startDate, endDate), "player period goalie stats"),
+  ]).then(([summary, realtime, faceoffs, goalies]) => {
+    const skater = summary[0];
+    return {
+      skater: skater ? { ...skater, blockedShots: realtime[0]?.blockedShots ?? 0, hits: realtime[0]?.hits ?? 0, totalFaceoffWins: faceoffs[0]?.totalFaceoffWins ?? 0 } : null,
+      goalie: goalies[0] ?? null,
+    };
+  }).catch((error) => {
+    playerPeriodStatsCache.delete(key);
+    throw error;
+  });
+  const expiresAt = endDate < getNhlStatsDate() ? Date.now() + 86400_000 : Date.now() + statsCacheTtlMs;
+  playerPeriodStatsCache.set(key, { expiresAt, request });
   return request;
 }
 
@@ -493,19 +535,25 @@ async function loadNhlSkaterStatsForPeriod(seasonId: number, startDate: string, 
   const request = Promise.all([
       fetchReport<NhlSkaterSummary>(periodReportUrl("skater", "summary", seasonId, startDate, endDate), "weekly skater summary"),
       fetchReport<NhlSkaterRealtime>(periodReportUrl("skater", "realtime", seasonId, startDate, endDate), "weekly skater realtime stats"),
-      fetchReport<NhlSkaterFaceoffs>(periodReportUrl("skater", "faceoffwins", seasonId, startDate, endDate), "weekly skater faceoff stats"),
+      fetchReport<NhlSkaterFaceoffs>(periodReportUrl("skater", "faceoffwins", seasonId, startDate, endDate), "weekly skater faceoff stats")
+        .catch((error: unknown) => {
+          if (error instanceof NhlRateLimitError) return null;
+          throw error;
+        }),
     ])
     .then(([summary, realtime, faceoffs]) => {
       const realtimeByPlayer = new Map(realtime.map((row) => [row.playerId, row]));
-      const faceoffsByPlayer = new Map(faceoffs.map((row) => [row.playerId, row]));
-      return inheritNhlFreshness(summary.map((row) => ({
+      const faceoffsByPlayer = new Map((faceoffs ?? []).map((row) => [row.playerId, row]));
+      const rows = inheritNhlFreshness(summary.map((row) => ({
         ...row,
         teamAbbrevs: row.teamAbbrevs || "",
         blockedShots: realtimeByPlayer.get(row.playerId)?.blockedShots ?? 0,
         hits: realtimeByPlayer.get(row.playerId)?.hits ?? 0,
         totalFaceoffWins: faceoffsByPlayer.get(row.playerId)?.totalFaceoffWins ?? 0,
+        faceoffWinsAvailable: faceoffs !== null,
         birthDate: playerMetadata.read(String(row.playerId))?.birthDate,
-      })), [summary, realtime, faceoffs]);
+      })), faceoffs ? [summary, realtime, faceoffs] : [summary, realtime]);
+      return faceoffs ? rows : markNhlSaved(rows, Date.now(), "NHL faceoff-wins report is rate limited (429). Faceoff-wins records are temporarily unavailable.");
     })
     .catch((error) => {
       skaterPeriodCache.delete(key);

@@ -4,13 +4,10 @@ import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import PositionBadge from "../../components/hockey/PositionBadge";
 import { applyTeamBranding, fetchFantasyTeamByAbbreviation, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
-import { fetchPlayerSeasons, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import { fetchPlayerSeasonsByApiIds, fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import {
   fetchNhlDraftPicks,
-  fetchNhlGoalieStats,
-  fetchNhlLiveSeasonStats,
-  fetchNhlPlayerLanding,
-  fetchNhlSkaterStats,
+  fetchNhlPlayerBiographies,
   formatFantasyPoints,
   formatNhlStat,
   getGoalieScore,
@@ -21,6 +18,8 @@ import {
   type NhlSkaterRecord,
 } from "../../lib/nhl";
 import { CURRENT_LEAGUE_SEASON } from "../../lib/leagueSeasons";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
+import { playerMetadata } from "../../lib/nhlPlayerMetadata";
 import TeamIdentityCard from "./TeamIdentityCard";
 
 function earliestPotentiallyEligibleDraftYear() {
@@ -307,6 +306,7 @@ export default function FarmSystems() {
   const [prospects, setProspects] = useState<FarmProspect[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [enrichmentWarning, setEnrichmentWarning] = useState("");
   const lastDraftYear = CURRENT_LEAGUE_SEASON - 1;
   const firstRelevantDraftYear = earliestPotentiallyEligibleDraftYear();
   const draftYears = useMemo(() => Array.from({ length: lastDraftYear - firstRelevantDraftYear + 1 }, (_, index) => lastDraftYear - index), [firstRelevantDraftYear, lastDraftYear]);
@@ -315,6 +315,7 @@ export default function FarmSystems() {
     let active = true;
     setLoading(true);
     setError("");
+    setEnrichmentWarning("");
     fetchFantasyTeamByAbbreviation(abbreviation)
       .then(async (teamRow) => {
         if (!teamRow) throw new Error("Team not found.");
@@ -322,12 +323,11 @@ export default function FarmSystems() {
         const displayTeam = applyTeamBranding(teamRow, branding, CURRENT_LEAGUE_SEASON);
         if (active) setTeam(displayTeam);
 
-        const [draftResults, currentStats, previousSkaters, previousGoalies, fantasySeasons, fantasyTeams, allBranding] = await Promise.all([
+        const [draftResults, currentStats, previousStats, fantasySeasons, fantasyTeams, allBranding] = await Promise.all([
           Promise.all(draftYears.map(async (year) => ({ year, picks: await fetchNhlDraftPicks(year) }))),
-          fetchNhlLiveSeasonStats(CURRENT_LEAGUE_SEASON).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
-          fetchNhlSkaterStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
-          fetchNhlGoalieStats(nhlSeasonId(CURRENT_LEAGUE_SEASON - 1)).catch(() => []),
-          fetchPlayerSeasons().catch(() => [] as PlayerSeasonWithRelations[]),
+          fetchLeagueSeasonStats(CURRENT_LEAGUE_SEASON).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
+          fetchLeagueSeasonStats(CURRENT_LEAGUE_SEASON - 1).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
+          fetchPlayerSeasonsByTeamAndSeason(displayTeam.id, CURRENT_LEAGUE_SEASON).catch(() => [] as PlayerSeasonWithRelations[]),
           fetchFantasyTeams().catch(() => [] as FantasyTeam[]),
           fetchTeamBrandingHistory().catch(() => []),
         ]);
@@ -337,8 +337,8 @@ export default function FarmSystems() {
         const goalieCurrent = new Map(currentGoalies.map((record) => [normalize(record.goalieFullName), record]));
         const skaterCurrentById = new Map(currentSkaters.map((record) => [String(record.playerId), record]));
         const goalieCurrentById = new Map(currentGoalies.map((record) => [String(record.playerId), record]));
-        const skaterPrevious = new Map(previousSkaters.map((record) => [normalize(record.skaterFullName), record]));
-        const goaliePrevious = new Map(previousGoalies.map((record) => [normalize(record.goalieFullName), record]));
+        const skaterPrevious = new Map(previousStats.skaters.map((record) => [normalize(record.skaterFullName), record]));
+        const goaliePrevious = new Map(previousStats.goalies.map((record) => [normalize(record.goalieFullName), record]));
         const farmNames = [displayTeam.eastern_farm_system, displayTeam.western_farm_system].filter((name): name is string => Boolean(name));
         const rows = draftResults.flatMap(({ year, picks }) => picks
           .filter((pick) => farmNames.some((farmName) => pickBelongsToTeam(pick, farmName, year)))
@@ -370,46 +370,73 @@ export default function FarmSystems() {
               statsSeason: goalie || skater ? CURRENT_LEAGUE_SEASON : undefined, goalie, skater,
             } satisfies FarmProspect;
           });
-        const resolvedRows = await Promise.all([...rows, ...acquiredRows].map(async (row) => {
-          if (row.playerId) return row;
-          try {
-            const searchResults = await searchNhlPlayers(pickName(row.pick));
-            const exactMatch = searchResults.find((result) =>
-              normalize(result.name) === normalize(pickName(row.pick))
-              && (!row.pick.positionCode || !result.positionCode || normalizePosition(result.positionCode) === normalizePosition(row.pick.positionCode)),
-            );
-            const playerId = exactMatch ? Number(exactMatch.playerId) : undefined;
-            return { ...row, playerId: Number.isFinite(playerId) ? playerId : undefined };
-          } catch {
-            return row;
-          }
-        }));
-        const landingEntries = await Promise.all(resolvedRows.map(async (row) => {
-          if (!row.playerId) return [row.playerId, undefined] as const;
-          try { return [row.playerId, await fetchNhlPlayerLanding(row.playerId)] as const; }
-          catch { return [row.playerId, undefined] as const; }
-        }));
-        const landingByPlayer = new Map(landingEntries);
-        const fantasySeasonsByPlayer = fantasySeasons.reduce<Map<string, PlayerSeasonWithRelations[]>>((map, season) => {
+        const allRows: FarmProspect[] = [...rows, ...acquiredRows];
+        const seasonsByPlayer = (seasons: PlayerSeasonWithRelations[]) => seasons.reduce<Map<string, PlayerSeasonWithRelations[]>>((map, season) => {
           const apiId = season.player?.player_api_id;
           if (apiId) map.set(apiId, [...(map.get(apiId) || []), season]);
           return map;
         }, new Map());
-        if (active) setProspects(resolvedRows.map((row) => {
+        let fantasySeasonsByPlayer = seasonsByPlayer(fantasySeasons);
+        const toProspects = (sourceRows: typeof allRows) => sourceRows.map((row) => {
           const recordedSeasons = row.playerId ? fantasySeasonsByPlayer.get(String(row.playerId)) || [] : [];
           const latestSeason = [...recordedSeasons].sort((a, b) => b.season_year - a.season_year)[0];
           const rightsTeam = latestSeason?.fantasy_team_id ? fantasyTeams.find((candidate) => candidate.id === latestSeason.fantasy_team_id) : undefined;
+          const metadata = row.playerId ? playerMetadata.read(row.playerId) : undefined;
           return {
             ...row,
-            birthDate: row.playerId ? landingByPlayer.get(row.playerId)?.birthDate : undefined,
-            headshot: row.playerId ? landingByPlayer.get(row.playerId)?.headshot : undefined,
+            birthDate: row.playerId ? metadata?.birthDate || row.skater?.birthDate || row.goalie?.birthDate : undefined,
+            headshot: row.playerId ? `https://assets.nhle.com/mugs/nhl/latest/${row.playerId}.png` : undefined,
             previouslySigned: recordedSeasons.some((season) => Boolean(season.fantasy_team_id) && !["PROSPECT", "AP"].includes((season.position || "").toUpperCase())),
             currentRights: rightsTeam ? {
               team: applyTeamBranding(rightsTeam, allBranding, latestSeason.season_year),
               seasonYear: latestSeason.season_year,
             } : undefined,
           };
-        }));
+        });
+        if (active) setProspects(toProspects(allRows));
+
+        void (async () => {
+          const resolvedRows = [...allRows];
+          const unresolved = resolvedRows.flatMap((row, index) => row.playerId ? [] : [{ row, index }]);
+          let searchFailures = 0;
+          for (let start = 0; start < unresolved.length; start += 20) {
+            const batch = unresolved.slice(start, start + 20);
+            await Promise.all(batch.map(async ({ row, index }) => {
+              try {
+                const searchResults = await searchNhlPlayers(pickName(row.pick));
+                const exactMatch = searchResults.find((result) =>
+                  normalize(result.name) === normalize(pickName(row.pick))
+                  && (!row.pick.positionCode || !result.positionCode || normalizePosition(result.positionCode) === normalizePosition(row.pick.positionCode)),
+                );
+                const playerId = exactMatch ? Number(exactMatch.playerId) : undefined;
+                if (Number.isSafeInteger(playerId) && playerId! > 0) resolvedRows[index] = { ...row, playerId };
+              } catch {
+                searchFailures += 1;
+              }
+            }));
+            if (active) setProspects(toProspects(resolvedRows));
+          }
+          if (active && searchFailures) setEnrichmentWarning("Some prospect NHL profiles could not be matched. The draft list and available stats are still shown.");
+          const ids = [...new Set(resolvedRows.flatMap((row) => {
+            if (!row.playerId || row.birthDate || playerMetadata.read(row.playerId)?.birthDate) return [];
+            return [row.playerId];
+          }))];
+          try {
+            const historyRows = await fetchPlayerSeasonsByApiIds(resolvedRows.map((row) => row.playerId).filter((id): id is number => Boolean(id)).map(String));
+            fantasySeasonsByPlayer = seasonsByPlayer([...fantasySeasons, ...historyRows]);
+          } catch {
+            if (active) setEnrichmentWarning("Prospect rights history could not be refreshed. The draft list and available stats are still shown.");
+          }
+          if (active) setProspects(toProspects(resolvedRows));
+          await fetchNhlPlayerBiographies(nhlSeasonId(CURRENT_LEAGUE_SEASON), ids.map(String), () => {
+            if (active) setProspects(toProspects(resolvedRows));
+          });
+          if (active) setProspects(toProspects(resolvedRows));
+        })().catch((reason: unknown) => {
+          if (active) setEnrichmentWarning(reason instanceof Error
+            ? `Optional prospect details could not be refreshed: ${reason.message}`
+            : "Some prospect details could not be refreshed.");
+        });
       })
       .catch((err: unknown) => { if (active) setError(err instanceof Error ? err.message : "Unable to load farm systems."); })
       .finally(() => { if (active) setLoading(false); });
@@ -427,6 +454,7 @@ export default function FarmSystems() {
         <TeamIdentityCard team={team} season={CURRENT_LEAGUE_SEASON} managerName={team.manager_name} />
         <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p><div className="flex items-center gap-4"><Link to="/farm-system-rankings" className="text-sm font-semibold text-indigo-600 hover:underline dark:text-indigo-300">View Farm System Rankings</Link><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div></div>
       </div>}
+      {enrichmentWarning && <p role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">{enrichmentWarning}</p>}
       {team && <ProspectPlan team={team} prospects={prospects} loading={loading} />}
       <ProspectSpotlight team={team} prospects={prospects} loading={loading} />
       <DraftBoard team={team} draftYears={draftYears} easternProspects={easternProspects} westernProspects={westernProspects} loading={loading} />

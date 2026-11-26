@@ -32,9 +32,10 @@ const pages = ["Standings", "SkaterStats", "GoalieStats", "HockeyTeamDetail"].ma
 const mocks = {
   PageMeta: "export default function PageMeta(){return null}",
   fantasyTeams: `export const applyTeamBranding=t=>t;export const fetchFantasyTeams=async()=>[${JSON.stringify(team)}];export const fetchTeamBrandingHistory=async()=>[];export const fetchFantasyTeamByAbbreviation=async()=>(${JSON.stringify(team)});export const fetchTeamManagerTenures=async()=>[];export const fetchTeamFinishes=async()=>[];export const getManagerForSeason=()=>null;`,
-  fantasyPlayers: `export const fetchPlayerSeasons=async()=>${JSON.stringify(roster)};export const fetchPlayerSeasonsByTeam=async()=>${JSON.stringify(roster)};export const fetchPlayerSeasonsByTeamAndSeason=(id,season)=>new Promise(resolve=>setTimeout(()=>resolve(${JSON.stringify(roster)}.map(row=>({...row,season_year:season,term_end_year:season===2026?2066:2029}))),season===2026?350:10));export const fetchPlayerSeasonsBySeason=async season=>${JSON.stringify(roster)}.map(row=>({...row,season_year:season}));`,
+  fantasyPlayers: `export const fetchPlayerSeasons=async()=>${JSON.stringify(roster)};export const fetchPlayerSeasonsByPlayers=async()=>${JSON.stringify(roster)};export const fetchPlayerSeasonsByTeam=async()=>${JSON.stringify(roster)};export const fetchPlayerSeasonsByTeamAndSeason=(id,season)=>new Promise(resolve=>setTimeout(()=>resolve(${JSON.stringify(roster)}.map(row=>({...row,season_year:season,term_end_year:season===2026?2066:2029}))),season===2026?350:10));export const fetchPlayerSeasonsBySeason=async season=>${JSON.stringify(roster)}.map(row=>({...row,season_year:season}));`,
   buyouts: "export const fetchBuyoutPenalties=async()=>[];",
   retentions: "export const fetchRetentionAdjustments=async()=>[];",
+  capAdjustments: "export const fetchTeamCapAdjustmentTotals=async()=>[];",
   awards: "export const fetchAwards=async()=>[];export const fetchPlayerAwards=async()=>[];export const mapAwardsByPlayer=()=>new Map();",
   prospectRights: "export const fetchProspectRights=async()=>new Map();export const getProspectRight=()=>undefined;export const removeAgedOutProspectRights=async rights=>rights;",
   tradeMarket: "export const fetchTradeBlockListings=async()=>[];",

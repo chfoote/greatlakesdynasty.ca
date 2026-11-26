@@ -5,7 +5,8 @@ import PageMeta from "../../components/common/PageMeta";
 import PositionBadge from "../../components/hockey/PositionBadge";
 import { fetchAwards, fetchPlayerAwards, type Award, type PlayerAward } from "../../lib/awards";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
-import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchNhlPlayerLanding, formatFantasyPoints, getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import {
   applyTeamBranding,
   fetchAllTeamFinishes,
@@ -29,10 +30,6 @@ function readHeadshotCache(): Record<string, CachedHeadshot> {
   } catch {
     return {};
   }
-}
-
-function nhlSeasonId(year: number) {
-  return (year - 1) * 10000 + year;
 }
 
 function playerName(assignment: PlayerAward) {
@@ -107,11 +104,8 @@ export default function Awards() {
           }
         });
       void Promise.all(years.map(async (year) => {
-          const [skaters, goalies] = await Promise.all([
-            fetchNhlSkaterStats(nhlSeasonId(year)).catch(() => [] as NhlSkaterRecord[]),
-            fetchNhlGoalieStats(nhlSeasonId(year)).catch(() => [] as NhlGoalieRecord[]),
-          ]);
-          return { year, skaters, goalies };
+          const stats = await fetchLeagueSeasonStats(year).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] }));
+          return { year, ...stats };
         })).then((statResults) => {
       if (!active) return;
       const scoreRows: [string, PlayerScore][] = [];

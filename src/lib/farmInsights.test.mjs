@@ -5,7 +5,7 @@ let sequence=0;
 async function fixture(t, changes = {}) {
   const date=new Date();
   const earliest=date.getFullYear()-((date.getMonth()>8 || (date.getMonth()===8 && date.getDate()>=15))?6:7);
-  const state={drafts:[],landings:[],earliest,birthDate:`${date.getFullYear()-24}-01-01`,...changes};
+  const state={drafts:[],landings:[],biographies:[],metadata:{},earliest,birthDate:`${date.getFullYear()-24}-01-01`,...changes};
   globalThis.__farmFixture=state;
   t.after(()=>{delete globalThis.__farmFixture;});
   const sources={
@@ -14,17 +14,19 @@ async function fixture(t, changes = {}) {
     fantasyTeams:`export const applyTeamBranding=t=>t; export async function fetchTeamBrandingHistory(){return []}
       export async function fetchFantasyTeams(){return [{id:1,team_name:'Team 1',eastern_farm_system:'TOR'},{id:2,team_name:'Team 2',eastern_farm_system:'BOS'}]}`,
     fantasyPlayers:`export async function fetchPlayerSeasons(){return []}`,
-    nhl:`export const getGoalieScore=()=>0; export const getSkaterScore=()=>0; export async function searchNhlPlayers(){return []}
+    nhlPlayerMetadata:`export const playerMetadata={read(id){return globalThis.__farmFixture.metadata[String(id)]},remember(rows){for(const row of rows)globalThis.__farmFixture.metadata[String(row.playerId)]=row}}`,
+    nhl:`import {playerMetadata} from './nhlPlayerMetadata';export const getGoalieScore=()=>0; export const getSkaterScore=()=>0; export async function searchNhlPlayers(){return []}
       export async function fetchNhlDraftPicks(year){const s=globalThis.__farmFixture;s.drafts.push(year);return year===s.earliest?
         [{firstName:{default:'Player'},lastName:{default:'One'},positionCode:'C',teamAbbrev:'TOR',overallPick:1},
          {firstName:{default:'Player'},lastName:{default:'Two'},positionCode:'C',teamAbbrev:'BOS',overallPick:2}]:[];}
-      export async function fetchNhlLiveSeasonStats(){const s=globalThis.__farmFixture;return {skaters:[{playerId:1,skaterFullName:'Player One',birthDate:s.birthDate},
-        {playerId:2,skaterFullName:'Player Two',birthDate:s.birthDate}],goalies:[]};}
+      export async function fetchNhlPlayerBiographies(season,ids){const s=globalThis.__farmFixture;s.biographies.push(ids);if(s.bioFailure)throw Error('Biography report unavailable');playerMetadata.remember(ids.map(playerId=>({playerId:Number(playerId),birthDate:s.birthDate})))}
+      export async function fetchNhlLiveSeasonStats(){return {skaters:[{playerId:1,skaterFullName:'Player One'},
+        {playerId:2,skaterFullName:'Player Two'}],goalies:[]};}
       export async function fetchNhlPlayerLanding(id){const s=globalThis.__farmFixture;s.landings.push(id);if(s.deferLandings)return new Promise(()=>{});return {birthDate:s.birthDate,headshot:'fixture.png'}}`,
   };
   const built=await build({entryPoints:['src/lib/farmInsights.ts'],bundle:true,format:'esm',platform:'browser',write:false,
     plugins:[{name:'farm-read-only-fixtures',setup(plugin){
-      plugin.onResolve({filter:/^\.\/(fantasyTeams|fantasyPlayers|nhl|leagueSeasonStats|farmSharedSnapshot)$/},args=>({path:args.path.slice(2),namespace:'farm-fixture'}));
+      plugin.onResolve({filter:/^\.\/(fantasyTeams|fantasyPlayers|nhl|nhlPlayerMetadata|leagueSeasonStats|farmSharedSnapshot)$/},args=>({path:args.path.slice(2),namespace:'farm-fixture'}));
       plugin.onLoad({filter:/.*/,namespace:'farm-fixture'},args=>({contents:sources[args.path]}));
     }}]});
   const api=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64')+`#farm-${sequence++}`);
@@ -36,6 +38,7 @@ test('Front Office requests only its own aging candidates and the two relevant d
   const result=await api.fetchFarmInsights(1);
   assert.deepEqual([...result.agingByTeam.keys()],[1]);
   assert.equal(result.agingByTeam.get(1)[0].name,'Player One');
+  assert.deepEqual(state.biographies,[['1']]);
   assert.deepEqual(state.drafts.sort(),[state.earliest,state.earliest+1]);
   assert.deepEqual(state.landings,[]);
   assert.equal(result.rankings.length,0);
@@ -67,4 +70,12 @@ test('rankings-only results preserve the original ranking scores and ordering',a
   const full=await api.fetchFarmInsights();
   const values=result=>result.rankings.map(row=>[row.team.id,row.rank,row.farmScore,row.production,row.draftQuality,row.eligible]);
   assert.deepEqual(values(simple),values(full));
+});
+
+test('a failed optional biography batch preserves farm rankings and exposes a warning',async t=>{
+  const {api}=await fixture(t,{bioFailure:true});
+  const result=await api.fetchFarmInsights(1);
+  assert.equal(result.rankings.length,0);
+  assert.deepEqual(result.agingByTeam.get(1),[]);
+  assert.match(result.warnings[0],/Biography report unavailable/);
 });

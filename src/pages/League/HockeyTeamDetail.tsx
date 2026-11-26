@@ -2,7 +2,6 @@ import NhlHeadshot from "../../components/hockey/NhlHeadshot";
 import { playerMetadata } from "../../lib/nhlPlayerMetadata";
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
-import { isNhlRateLimit } from "../../../shared/nhl-policy";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -19,15 +18,13 @@ import {
   fetchTeamBrandingHistory,
   getManagerForSeason,
 } from "../../lib/fantasyTeams";
-import { fetchPlayerSeasons, fetchPlayerSeasonsByTeam, fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
+import { fetchPlayerSeasonsByPlayers, fetchPlayerSeasonsByTeam, fetchPlayerSeasonsByTeamAndSeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import {
-  fetchNhlGoalieStats,
   fetchNhlDailyStats,
   getNhlStatsDate,
   fetchNhlLivePlayerIds,
   fetchNhlPlayerBiographies,
   fetchNhlPlayerLanding,
-  fetchNhlSkaterStats,
   formatFantasyPoints,
   formatNhlStat,
   getGoalieScore,
@@ -610,6 +607,7 @@ export default function HockeyTeamDetail() {
   const [awardDefinitions, setAwardDefinitions] = useState<Award[]>([]);
   const [teamPlayerSeasons, setTeamPlayerSeasons] = useState<PlayerSeasonWithRelations[]>([]);
   const [contractHistory, setContractHistory] = useState<PlayerSeasonWithRelations[]>([]);
+  const [contractHistoryWarning, setContractHistoryWarning] = useState("");
   const [leadership, setLeadership] = useState<TeamLeadership[]>([]);
 
   function handleSeasonChange(year: number) {
@@ -655,24 +653,29 @@ export default function HockeyTeamDetail() {
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setContractHistoryWarning("");
     fetchFantasyTeamByAbbreviation(abbreviation)
       .then(async (row) => {
         if (!active) return;
         setTeam(row);
         if (row) {
-          const [tenures, finishes, branding, historicalRosters, allContractRows] = await Promise.all([
+          const [tenures, finishes, branding, historicalRosters] = await Promise.all([
             fetchTeamManagerTenures(row.id),
             fetchTeamFinishes(row.id),
             fetchTeamBrandingHistory(row.id),
             fetchPlayerSeasonsByTeam(row.id),
-            fetchPlayerSeasons(),
           ]);
           if (!active) return;
           setManagerTenures(tenures);
           setTeamFinishes(finishes);
           setBrandingHistory(branding);
           setTeamPlayerSeasons(historicalRosters);
-          setContractHistory(allContractRows);
+          setContractHistory(historicalRosters);
+          void fetchPlayerSeasonsByPlayers(historicalRosters.map((season) => season.player_id))
+            .then((rows) => { if (active) setContractHistory(rows); })
+            .catch(() => {
+              if (active) setContractHistoryWarning("Cross-team contract history is temporarily unavailable; this team's recorded contract history remains visible.");
+            });
         } else {
           setManagerTenures([]);
           setTeamFinishes([]);
@@ -709,11 +712,7 @@ export default function HockeyTeamDetail() {
       .catch(() => { if (active) setTradeBlockIds(new Set()); });
 
     const generation = ++seasonStatsGeneration.current;
-    const statsRequest = fetchLeagueSeasonStats(selectedSeason).catch((reason: unknown) => {
-      if (selectedSeason !== CURRENT_LEAGUE_SEASON || isNhlRateLimit(reason)) throw reason;
-      return Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
-        .then(([skaters, goalies]) => ({ skaters, goalies }));
-    });
+    const statsRequest = fetchLeagueSeasonStats(selectedSeason);
     statsRequest
       .then((stats) => {
         if (!active || generation !== seasonStatsGeneration.current) return;
@@ -937,6 +936,7 @@ export default function HockeyTeamDetail() {
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsView !== "season" && dailyStatsError && <p role="status" className="mt-3 text-sm text-gray-500 dark:text-gray-400">{dailyStatsError}</p>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
+          {contractHistoryWarning && <p role="status" className="mt-3 text-sm text-gray-500 dark:text-gray-400">{contractHistoryWarning}</p>}
           {viewMode === "multi" ? <MultiYearView teamId={team.id} contractHistory={contractHistory} years={multiYearSeasons} rosters={multiYearRosters} adjustments={multiYearAdjustments} skaters={skaters} goalies={goalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : viewMode === "lineup" ? <LineupPreview roster={roster} contractHistory={contractHistory} seasonYear={selectedSeason} skaters={skaters} goalies={goalies} headshots={lineupHeadshots} nhlTeams={nhlTeamsByPlayer} birthCountries={birthCountriesByPlayer} leadershipByPlayer={leadershipByPlayer} livePlayerIds={livePlayerIds} team={displayTeam || team} /> : <div className="mt-5 space-y-4">
             {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={displayedGoalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={displayedSkaters} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} />)}
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Non-Rostered Players</h3><div className="space-y-4">{nonRosterSections.map((section) => <CompactTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} skaters={displayedSkaters} goalies={displayedGoalies} nhlTeams={nhlTeamsByPlayer} note={section.cap ? "Counts toward cap only" : "Excluded from cap and roster"} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} renderInterest={renderInterest} />)}</div></div>

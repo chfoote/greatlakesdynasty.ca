@@ -62,6 +62,7 @@ type RankingTrade = Pick<LeagueTransaction, "transaction_date" | "created_at"> &
   trade_offer: {
     trade_offer_players: Array<{
       from_team_id: number;
+      to_team_id: number;
       player_season: Pick<PlayerSeasonWithRelations, "player_id"> | null;
     }>;
   } | null;
@@ -77,7 +78,7 @@ export async function fetchRankingTrades(seasonYear: number): Promise<RankingTra
         transaction_date,
         created_at,
         trade_offer:trade_offers!league_transactions_trade_offer_id_fkey(
-          trade_offer_players(from_team_id, player_season:player_seasons(player_id))
+          trade_offer_players(from_team_id, to_team_id, player_season:player_seasons(player_id))
         )
       `)
       .eq("season_year", seasonYear)

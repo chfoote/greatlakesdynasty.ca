@@ -57,6 +57,30 @@ test("later-page 429 rejects incomplete data without retrying when recovery is d
   assert.equal(calls, 2);
 });
 
+test("faceoff-only 429 keeps complete skater summary and marks faceoff records unavailable", async (t) => {
+  const built = await build({ entryPoints: ["src/lib/nhl.ts"], bundle: true, format: "esm", platform: "browser", write: false });
+  const stats = await import("data:text/javascript;base64," + Buffer.from(built.outputFiles[0].text).toString("base64") + "#faceoff-429");
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (requestPath) => {
+    const url = new URL(requestPath, "https://test.example");
+    calls.push(url.pathname);
+    if (url.pathname.endsWith("/faceoffwins")) {
+      return Response.json({}, { status: 429, headers: { "Retry-After": "60" } });
+    }
+    if (url.pathname.includes("/goalie/")) return Response.json({ data: [], total: 0 });
+    if (url.pathname.endsWith("/realtime")) return Response.json({ data: [{ playerId: 8000001, blockedShots: 3, hits: 2 }], total: 1 });
+    return Response.json({ data: [{ playerId: 8000001, skaterFullName: "Test Skater", positionCode: "C", teamAbbrevs: "TOR",
+      gamesPlayed: 10, goals: 4, assists: 6, plusMinus: 1, penaltyMinutes: 2, ppGoals: 1, ppPoints: 2,
+      shGoals: 0, shPoints: 0, gameWinningGoals: 1, shots: 20 }], total: 1 });
+  });
+  const rows = await stats.fetchNhlSkaterStats(20252026);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].goals, 4);
+  assert.equal(rows[0].blockedShots, 3);
+  assert.equal(rows[0].faceoffWinsAvailable, false);
+  assert.ok(calls.some(path => path.endsWith("/faceoffwins")));
+});
+
 test("a short 429 cooldown resumes exactly the blocked page without restarting loaded pages", async () => {
   const offsets = [];
   const waits = [];

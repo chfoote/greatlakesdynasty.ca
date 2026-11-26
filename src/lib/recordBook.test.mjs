@@ -20,7 +20,7 @@ async function fixture(t, changes = {}) {
   t.after(() => { delete globalThis.__recordBookFixture; });
   const mock = {
     supabase: `export const supabase = { from(table) {
-      const query = { select(){return this}, eq(){return this}, neq(){return this}, order(){return this}, limit(){return this},
+      const query = { select(){return this}, eq(){return this}, neq(){return this}, gte(){return this}, lte(){return this}, order(){return this}, limit(){return this},
         then(resolve,reject){ const s=globalThis.__recordBookFixture; s.queries.push(table);
           return Promise.resolve({data:[],error:s.failTable===table?{message:'table unavailable'}:null}).then(resolve,reject); },
         upsert(){globalThis.__recordBookFixture.writes++; throw Error('Unexpected database write');} }; return query;
@@ -32,7 +32,8 @@ async function fixture(t, changes = {}) {
       export async function fetchTeamBrandingHistory(){return []}`,
     fantasyPlayers: `export async function fetchPlayerSeasons(){return globalThis.__recordBookFixture.seasons}
       export async function fetchPlayerSeasonsBySeason(year){return globalThis.__recordBookFixture.seasons.filter(r=>r.season_year===year)}`,
-    transactions: `export async function fetchLeagueTransactions(){return globalThis.__recordBookFixture.transactions}`,
+    transactions: `export async function fetchLeagueTransactions(){return globalThis.__recordBookFixture.transactions}
+      export async function fetchRankingTrades(year){return globalThis.__recordBookFixture.transactions.filter(tx=>tx.season_year===year)}`,
     awards: `export async function fetchPlayerAwards(){return []}`,
     teamLeadership: `export async function fetchSeasonLeadership(){return []}`,
     nhl: `export const fetchNhlDailyStats=async()=>({skaters:[],goalies:[]});export const mergeSkaterRecords=(a,b)=>[...a,...b];export const mergeGoalieRecords=(a,b)=>[...a,...b];import { markNhlSaved } from './nhlFreshness.ts';
@@ -52,7 +53,13 @@ async function fixture(t, changes = {}) {
       export const fetchNhlSkaterStats=id=>stats('skater',id);
       export const fetchNhlGoalieStats=id=>stats('goalie',id);
       export const fetchNhlSkaterStatsForPeriod=(id,start,end)=>stats('skater',id,start,end);
-      export const fetchNhlGoalieStatsForPeriod=(id,start,end)=>stats('goalie',id,start,end);`,
+      export const fetchNhlGoalieStatsForPeriod=(id,start,end)=>stats('goalie',id,start,end);
+      export async function fetchNhlPlayerStatsForPeriod(playerId,id,start,end){
+        const s=globalThis.__recordBookFixture;s.calls.push({kind:'player',playerId,id,start,end});
+        if(s.failNhl)throw Error('NHL 429');
+        const testScore=id===20252026?10:start==='2026-07-01'?8:12;
+        return {skater:{playerId,positionCode:'D',gamesPlayed:5,testScore,goals:2,assists:1},goalie:null};
+      }`,
   };
   const built = await build({ entryPoints: ['src/lib/recordBook.ts'], bundle: true, format: 'esm', platform: 'browser', write: false,
     define:{'import.meta.env.VITE_RECORD_BOOK_SNAPSHOTS':'"false"'},
@@ -106,6 +113,16 @@ test('franchise records retain trade-date ownership credit and never request fut
   assert.equal(playerLines.find(row => row.team.id === 2).skater.fantasyPoints, 12);
   assert.ok(state.calls.filter(call => call.start).every(call => call.end <= '2026-11-20'));
   assert.equal(data.positionLeaders.find(row => row.playerId === '8000001').fantasyPoints, 30);
+});
+
+test('player franchise history loads only that player and preserves trade-date scoring ownership', async t => {
+  const { state, api } = await fixture(t);
+  const seasons = state.seasons.filter(row => row.player_id === 1);
+  const rows = await api.fetchPlayerFranchisePositionLeaders('8000001', seasons);
+  assert.equal(rows.find(row => row.team.id === 1).fantasyPoints, 18);
+  assert.equal(rows.find(row => row.team.id === 2).fantasyPoints, 12);
+  assert.ok(state.calls.every(call => call.kind === 'player'));
+  assert.ok(state.calls.every(call => call.playerId === 8000001));
 });
 
 test('simultaneous same-tab loads deduplicate and query identity includes season and section', async t => {

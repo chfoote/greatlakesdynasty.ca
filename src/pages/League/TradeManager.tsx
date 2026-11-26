@@ -10,14 +10,8 @@ import {
   fetchPlayerSeasonsByTeamAndSeason,
   type PlayerSeasonWithRelations,
 } from "../../lib/fantasyPlayers";
-import {
-  fetchNhlGoalieStats,
-  fetchNhlSkaterStats,
-  getGoalieScore,
-  getSkaterScore,
-  type NhlGoalieRecord,
-  type NhlSkaterRecord,
-} from "../../lib/nhl";
+import { getGoalieScore, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import {
   fetchLatestUserTeamAssignment,
   fetchUserTeamAssignment,
@@ -45,10 +39,6 @@ const positionOrder = ["C", "LW", "RW", "D", "G"];
 const activeRosterPositions = new Set(["C", "LW", "RW", "D", "G"]);
 const tradeablePositions = new Set([...activeRosterPositions, "RFA", "PROSPECT", "AP"]);
 const dismissableTradeStatuses = new Set(["admin_declined", "completed", "countered"]);
-
-function nhlSeasonId(year: number) {
-  return (year - 1) * 10000 + year;
-}
 
 function salaryCapForSeason(year: number) {
   return year <= 2026 ? 45_000_000 : 50_000_000;
@@ -901,18 +891,16 @@ export default function TradeManager() {
       setLoadingNhlStats(true);
 
       try {
-        const [currentSkaters, currentGoalies, previousSkaters, previousGoalies] = await Promise.all([
-          fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlSkaterRecord[]),
-          fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => [] as NhlGoalieRecord[]),
-          fetchNhlSkaterStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlSkaterRecord[]),
-          fetchNhlGoalieStats(nhlSeasonId(selectedSeason - 1)).catch(() => [] as NhlGoalieRecord[]),
+        const [current, previous] = await Promise.all([
+          fetchLeagueSeasonStats(selectedSeason).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
+          fetchLeagueSeasonStats(selectedSeason - 1).catch(() => ({ skaters: [] as NhlSkaterRecord[], goalies: [] as NhlGoalieRecord[] })),
         ]);
 
         if (active) {
-          const skaters = new Map(previousSkaters.map((record) => [String(record.playerId), record]));
-          const goalies = new Map(previousGoalies.map((record) => [String(record.playerId), record]));
-          currentSkaters.forEach((record) => skaters.set(String(record.playerId), record));
-          currentGoalies.forEach((record) => goalies.set(String(record.playerId), record));
+          const skaters = new Map(previous.skaters.map((record) => [String(record.playerId), record]));
+          const goalies = new Map(previous.goalies.map((record) => [String(record.playerId), record]));
+          current.skaters.forEach((record) => skaters.set(String(record.playerId), record));
+          current.goalies.forEach((record) => goalies.set(String(record.playerId), record));
           setNhlPlayerStats({
             skaters,
             goalies,

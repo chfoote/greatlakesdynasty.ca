@@ -12,7 +12,7 @@ import { TradeTransactionDetails } from "./Transactions";
 import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import PlayerInterestButton from "./PlayerInterestButton";
 import { fetchPlayerLeadership } from "../../lib/teamLeadership";
-import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, type FranchiseStatLine, type ScoringLeader } from "../../lib/recordBook";
+import { LEAGUE_RECORD_LIMIT, fetchPlayerFranchisePositionLeaders, fetchRecordBookData, type FranchiseStatLine, type ScoringLeader } from "../../lib/recordBook";
 import { buildCareerEarnings, type CareerEarnings } from "../../lib/careerEarnings";
 import { salaryCapForSeason } from "../../lib/cap";
 import PositionBadge from "../../components/hockey/PositionBadge";
@@ -31,6 +31,35 @@ function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/70"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p><div className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">{value || "—"}</div></div>;
 }
 
+function ContractStatusCard({ season }: { season: PlayerSeasonWithRelations | null }) {
+  const salary = season?.salary;
+  const expiry = season && !["BUYOUT", "RETENTION"].includes((season.position || "").toUpperCase()) ? season.term_end_year : null;
+  const recordedRfa = (season?.position || "").toUpperCase() === "RFA";
+  const seasonsRemaining = expiry && expiry >= CURRENT_LEAGUE_SEASON ? expiry - CURRENT_LEAGUE_SEASON + 1 : null;
+  return <InfoCard label="GLDHL contract status" value={season ? <div className="space-y-1">
+    <p>{recordedRfa ? "RFA rights recorded" : seasonsRemaining ? `${seasonsRemaining} season${seasonsRemaining === 1 ? "" : "s"} remaining` : expiry ? `Recorded term ended ${expiry}` : "Expiry not recorded"}</p>
+    {salary != null && <p className="text-xs text-gray-500 dark:text-gray-400">{money.format(salary)} · {(salary / salaryCapForSeason(CURRENT_LEAGUE_SEASON) * 100).toFixed(1)}% of league cap</p>}
+    {recordedRfa && expiry && <p className="text-xs text-gray-500 dark:text-gray-400">Rights status from current season record</p>}
+  </div> : "No current-season contract record"} />;
+}
+
+function SalaryCapTimeline({ years }: { years: CareerEarnings["years"] }) {
+  if (!years.length) return null;
+  return <section className="border-t border-gray-100 px-5 py-5 dark:border-gray-800">
+    <div><h3 className="text-sm font-black text-gray-900 dark:text-white">Salary by season</h3><p className="mt-1 text-xs text-gray-500">Each bar shows annual GLDHL salary as a share of that season’s league cap.</p></div>
+    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      {years.map((year) => {
+        const capShare = year.salary / salaryCapForSeason(year.year) * 100;
+        return <article key={year.year} aria-label={`${year.year}: ${money.format(year.salary)}, ${capShare.toFixed(1)} percent of cap`} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/70">
+          <div className="flex items-baseline justify-between gap-2"><p className="text-xs font-black text-gray-700 dark:text-gray-200">{year.year}</p><p className="text-[10px] font-bold tabular-nums text-gray-500">{capShare.toFixed(1)}% cap</p></div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"><div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400" style={{ width: `${Math.min(capShare, 100)}%` }} /></div>
+          <p className="mt-2 text-sm font-black tabular-nums text-gray-900 dark:text-white">{money.format(year.salary)}</p>
+        </article>;
+      })}
+    </div>
+  </section>;
+}
+
 function PlayerFinancials({ earnings, currentSeason }: { earnings: CareerEarnings | null; currentSeason: PlayerSeasonWithRelations | null }) {
   const salary = earnings?.years.find((year) => year.year === CURRENT_LEAGUE_SEASON)?.salary ?? null;
   const expiry = currentSeason && !["BUYOUT", "RETENTION"].includes((currentSeason.position || "").toUpperCase()) ? currentSeason.term_end_year : null;
@@ -43,7 +72,8 @@ function PlayerFinancials({ earnings, currentSeason }: { earnings: CareerEarning
       <InfoCard label="Remaining contract value" value={expiry && remainingValue ? <><span>{money.format(remainingValue)}</span><span className="mt-1 block text-[10px] text-gray-500">Includes {CURRENT_LEAGUE_SEASON} salary through {expiry}</span></> : "No remaining value recorded"} />
       <InfoCard label="Current cap hit" value={salary == null ? "—" : `${money.format(salary)} · ${(salary / salaryCapForSeason(CURRENT_LEAGUE_SEASON) * 100).toFixed(1)}% of cap`} />
     </div>
-    <div className="border-t border-gray-100 dark:border-gray-800"><div className="px-5 py-3"><h3 className="text-sm font-black text-gray-900 dark:text-white">Annual contract history</h3></div>{earnings?.years.length ? <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 dark:bg-gray-900"><tr><th className="px-4 py-3 text-center">Season</th><th className="px-4 py-3 text-center">Franchise</th><th className="px-4 py-3 text-center">Annual salary</th><th className="px-4 py-3 text-center">Status</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{earnings.years.map((year) => <tr key={year.year} className="text-center text-gray-700 dark:text-gray-300"><td className="px-4 py-3 font-bold">{year.year}</td><td className="px-4 py-3">{year.teamName}</td><td className="px-4 py-3 font-black tabular-nums">{money.format(year.salary)}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${year.year > CURRENT_LEAGUE_SEASON ? "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"}`}>{year.year > CURRENT_LEAGUE_SEASON ? "Future commitment" : "Recorded season"}</span></td></tr>)}</tbody></table></div> : <p className="px-5 pb-5 text-sm text-gray-500">No contract seasons have been recorded for this player.</p>}</div>
+    {earnings?.years.length ? <SalaryCapTimeline years={earnings.years} /> : null}
+    <div className="border-t border-gray-100 dark:border-gray-800"><div className="px-5 py-3"><h3 className="text-sm font-black text-gray-900 dark:text-white">Annual contract history</h3></div>{earnings?.years.length ? <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 dark:bg-gray-900"><tr><th className="px-4 py-3 text-center">Season</th><th className="px-4 py-3 text-center">Franchise</th><th className="px-4 py-3 text-center">Annual salary</th><th className="px-4 py-3 text-center">Cap share</th><th className="px-4 py-3 text-center">Status</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{earnings.years.map((year) => <tr key={year.year} className="text-center text-gray-700 dark:text-gray-300"><td className="px-4 py-3 font-bold">{year.year}</td><td className="px-4 py-3">{year.teamName}</td><td className="px-4 py-3 font-black tabular-nums">{money.format(year.salary)}</td><td className="px-4 py-3 tabular-nums">{(year.salary / salaryCapForSeason(year.year) * 100).toFixed(1)}%</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${year.year > CURRENT_LEAGUE_SEASON ? "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"}`}>{year.year > CURRENT_LEAGUE_SEASON ? "Future commitment" : "Recorded season"}</span></td></tr>)}</tbody></table></div> : <p className="px-5 pb-5 text-sm text-gray-500">No contract seasons have been recorded for this player.</p>}</div>
   </section>;
 }
 
@@ -65,6 +95,23 @@ function GoalieStats({ record, season }: { record: NhlGoalieRecord; season: numb
 }
 
 type HistoricalStats = { season: number; skater: NhlSkaterRecord | null; goalie: NhlGoalieRecord | null };
+
+function PlayerMilestoneWatch({ rows }: { rows: HistoricalStats[] }) {
+  const tracked = rows.filter((row) => row.skater || row.goalie);
+  if (!tracked.length) return null;
+  const total = tracked.reduce((sum, row) => sum + (row.goalie ? getGoalieScore(row.goalie) : row.skater ? getSkaterScore(row.skater) : 0), 0);
+  const milestones = [100, 250, 500, 1000, 1500, 2000, 3000, 5000];
+  const next = milestones.find((milestone) => milestone > total) ?? (Math.floor(total / 1000) + 1) * 1000;
+  const previous = [...milestones].reverse().find((milestone) => milestone <= total) ?? 0;
+  const progress = Math.max(0, Math.min(100, (total - previous) / (next - previous) * 100));
+  return <section className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-gray-900">
+    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">GLDHL Milestone Watch</p>
+    <h2 className="mt-2 text-lg font-black text-gray-900 dark:text-white">Next fantasy-points mark</h2>
+    <div className="mt-3 flex items-baseline justify-between gap-2"><p className="text-2xl font-black tabular-nums text-amber-700 dark:text-amber-300">{formatFantasyPoints(next)} <span className="text-xs uppercase">FPTS</span></p><p className="text-xs font-bold text-gray-600 dark:text-gray-300">{formatFantasyPoints(Math.max(0, next - total))} to go</p></div>
+    <div className="mt-3 h-2 overflow-hidden rounded-full bg-amber-100 dark:bg-amber-950"><div className="h-full rounded-full bg-amber-500" style={{ width: `${progress}%` }} /></div>
+    <p className="mt-3 text-[10px] leading-4 text-gray-500 dark:text-gray-400">Progress uses fantasy points from the NHL seasons shown in this profile’s GLDHL history.</p>
+  </section>;
+}
 
 function SeasonHistory({ rows, seasons, awards, leadership }: { rows: HistoricalStats[]; seasons: PlayerSeasonWithRelations[]; awards: PlayerAward[]; leadership: Map<number, "C" | "A"> }) {
   if (!rows.length) return null;
@@ -119,15 +166,22 @@ function PlayerTrophyCase({ awards }: { awards: PlayerAward[] }) {
 }
 
 function FranchiseScoringHistory({ rows }: { rows: ScoringLeader[] }) {
-  const ordered = [...rows].sort((a, b) => b.fantasyPoints - a.fantasyPoints);
+  const ordered = [...rows].sort((a, b) => Math.min(...a.seasons, Number.POSITIVE_INFINITY) - Math.min(...b.seasons, Number.POSITIVE_INFINITY) || a.playerName.localeCompare(b.playerName));
   const total = ordered.reduce((sum, row) => sum + row.fantasyPoints, 0);
   return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-    <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">GLDHL Ownership History</p><h2 className="text-lg font-black text-gray-900 dark:text-white">Points by Franchise</h2><p className="mt-1 text-xs text-gray-500">Fantasy production is credited to the franchise that owned the player when it was earned.</p></div>{ordered.length > 0 && <p className="text-sm font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(total)} career FPTS</p>}</div>
-    {ordered.length ? <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">{ordered.map((row) => {
+    <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 dark:border-gray-800 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">GLDHL Ownership History</p><h2 className="text-lg font-black text-gray-900 dark:text-white">Franchise career timeline</h2><p className="mt-1 text-xs text-gray-500">Fantasy production is credited to the franchise that owned the player when it was earned.</p></div>{ordered.length > 0 && <p className="text-sm font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(total)} career FPTS</p>}</div>
+    {ordered.length ? <ol className="space-y-3 p-4">{ordered.map((row) => {
       const current = row.team && row.currentTeam && row.team.id === row.currentTeam.id && row.team.team_name === row.currentTeam.team_name;
-      const firstSeason = row.seasons[0]; const lastSeason = row.seasons[row.seasons.length - 1];
-      return <article key={row.key} className="relative overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/70"><div className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: row.team?.primary_color || "#465fff" }} /><div className="flex items-center gap-3">{row.team?.logo && <Link to={`/teams/${row.team.id}`} className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white p-1 ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700"><img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /></Link>}<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Link to={row.team ? `/teams/${row.team.id}` : "#"} className="truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{row.team?.team_name || "Unknown Franchise"}</Link>{current && <span className="rounded-full bg-success-100 px-2 py-0.5 text-[9px] font-black uppercase text-success-700 dark:bg-success-500/15 dark:text-success-300">Current</span>}</div><p className="mt-1 text-xs text-gray-500">{firstSeason === lastSeason ? firstSeason : `${firstSeason}–${lastSeason}`} · {row.gamesPlayed} GP</p></div></div><p className="mt-4 text-2xl font-black text-brand-600 dark:text-brand-300">{formatFantasyPoints(row.fantasyPoints)} <span className="text-[10px] font-black uppercase text-gray-400">FPTS</span></p></article>;
-    })}</div> : <p className="p-5 text-sm text-gray-500">No franchise-attributed scoring has been recorded yet.</p>}
+      const seasons = [...row.seasons].sort((a, b) => a - b);
+      const firstSeason = seasons[0]; const lastSeason = seasons[seasons.length - 1];
+      return <li key={row.key} className="relative rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/70">
+        <div className="absolute inset-y-0 left-0 w-1 rounded-l-xl" style={{ backgroundColor: row.team?.primary_color || "#465fff" }} />
+        <div className="flex flex-wrap items-center justify-between gap-3 pl-2">
+          <div className="flex min-w-0 items-center gap-3">{row.team?.logo && <Link to={`/teams/${row.team.id}`} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white p-1 ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700"><img src={row.team.logo} alt={`${row.team.team_name} logo`} className="h-full w-full object-contain" /></Link>}<div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Link to={row.team ? `/teams/${row.team.id}` : "#"} className="truncate font-black text-gray-900 hover:text-brand-500 dark:text-white">{row.team?.team_name || "Unknown Franchise"}</Link>{current && <span className="rounded-full bg-success-100 px-2 py-0.5 text-[9px] font-black uppercase text-success-700 dark:bg-success-500/15 dark:text-success-300">Current</span>}</div><p className="mt-1 text-xs text-gray-500">{firstSeason == null ? "Season not recorded" : firstSeason === lastSeason ? `Season ${firstSeason}` : `Seasons ${firstSeason}–${lastSeason}`} · {row.gamesPlayed} GP</p></div></div>
+          <p className="shrink-0 text-xl font-black tabular-nums text-brand-600 dark:text-brand-300">{formatFantasyPoints(row.fantasyPoints)} <span className="text-[10px] font-black uppercase text-gray-400">FPTS</span></p>
+        </div>
+      </li>;
+    })}</ol> : <p className="p-5 text-sm text-gray-500">No franchise-attributed scoring has been recorded yet.</p>}
   </section>;
 }
 
@@ -163,6 +217,7 @@ function recordMetricValue(lines: FranchiseStatLine[], metric: RecordMetric) {
 function buildPlayerRecordPlacements(lines: FranchiseStatLine[], playerId: string) {
   const placements: PlayerRecordPlacement[] = [];
   playerRecordMetrics.forEach((metric) => {
+    if (metric.field === "faceoffWins" && lines.some((line) => line.skater?.faceoffWinsAvailable === false)) return;
     const leagueGroups = new Map<string, FranchiseStatLine[]>();
     lines.forEach((line) => leagueGroups.set(line.playerId, [...(leagueGroups.get(line.playerId) || []), line]));
     const leagueValues = [...leagueGroups.entries()].map(([id, rows]) => ({ id, value: recordMetricValue(rows, metric) })).filter((row): row is { id: string; value: number } => row.value != null);
@@ -183,15 +238,15 @@ function buildPlayerRecordPlacements(lines: FranchiseStatLine[], playerId: strin
   return placements.sort((a, b) => a.scope.localeCompare(b.scope) || a.rank - b.rank || a.label.localeCompare(b.label));
 }
 
-function PlayerRecords({ records }: { records: PlayerRecordPlacement[] }) {
+function PlayerRecords({ records, warnings }: { records: PlayerRecordPlacement[]; warnings: string[] }) {
   const league = records.filter((record) => record.scope === "league");
   const franchise = records.filter((record) => record.scope === "franchise");
   const formatValue = (record: PlayerRecordPlacement) => record.format === "percentage" ? record.value.toFixed(3).replace(/^0/, "") : record.value.toLocaleString("en-CA", { maximumFractionDigits: record.format === "decimal" ? 2 : 0 });
   const section = (title: string, subtitle: string, rows: PlayerRecordPlacement[], tone: "rose" | "violet") => <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className={`text-[10px] font-black uppercase tracking-[0.18em] ${tone === "rose" ? "text-rose-600 dark:text-rose-300" : "text-violet-600 dark:text-violet-300"}`}>{subtitle}</p><h2 className="text-lg font-black text-gray-900 dark:text-white">{title}</h2></div>{rows.length ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">{rows.map((record) => <article key={record.key} className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${tone === "rose" ? "border-rose-200 bg-rose-50/70 dark:border-rose-900/60 dark:bg-rose-500/10" : "border-violet-200 bg-violet-50/70 dark:border-violet-900/60 dark:bg-violet-500/10"}`}><div className="min-w-0"><p className="truncate text-sm font-black text-gray-900 dark:text-white">{record.label}</p>{record.team && <p className="mt-1 flex items-center gap-1.5 text-[10px] font-bold text-gray-500">{record.team.logo && <img src={record.team.logo} alt="" className="h-4 w-4 object-contain" />}{record.team.team_name}</p>}</div><div className="shrink-0 text-right"><span className={`inline-flex rounded-lg px-2 py-1 text-xs font-black text-white ${tone === "rose" ? "bg-gradient-to-r from-red-600 to-rose-500" : "bg-gradient-to-r from-violet-600 to-indigo-500"}`}>#{record.rank}</span><p className="mt-1 text-xs font-black text-gray-600 dark:text-gray-300">{formatValue(record)}</p></div></article>)}</div> : <p className="p-5 text-sm text-gray-500">No current {tone === "rose" ? "top-five league" : "top-ten franchise"} placements.</p>}</section>;
-  return <div className="space-y-5"><section className="grid gap-3 sm:grid-cols-2"><div className="rounded-2xl bg-gradient-to-br from-rose-600 to-orange-500 p-5 text-white shadow-sm"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-rose-100">League Record Book</p><p className="mt-2 text-4xl font-black">{league.length}</p><p className="mt-1 text-sm font-bold text-rose-100">Top-ten league placements</p></div><div className="rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 p-5 text-white shadow-sm"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">Franchise Record Books</p><p className="mt-2 text-4xl font-black">{franchise.length}</p><p className="mt-1 text-sm font-bold text-violet-100">Top-ten franchise placements</p></div></section>{section("League Records", "All-Time GLDHL · Top 10", league, "rose")}{section("Franchise Records", "Credited by ownership · Top 10", franchise, "violet")}<p className="px-1 text-xs text-gray-400">Counts include every all-time Record Book category except fantasy points per game. League and franchise books track ten places.</p></div>;
+  return <div className="space-y-5">{warnings.length > 0 && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"><p className="font-bold">Some record categories may be temporarily unavailable.</p><ul className="mt-1 list-inside list-disc text-xs">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></div>}<section className="grid gap-3 sm:grid-cols-2"><div className="rounded-2xl bg-gradient-to-br from-rose-600 to-orange-500 p-5 text-white shadow-sm"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-rose-100">League Record Book</p><p className="mt-2 text-4xl font-black">{league.length}</p><p className="mt-1 text-sm font-bold text-rose-100">Top-ten league placements</p></div><div className="rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 p-5 text-white shadow-sm"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">Franchise Record Books</p><p className="mt-2 text-4xl font-black">{franchise.length}</p><p className="mt-1 text-sm font-bold text-violet-100">Top-ten franchise placements</p></div></section>{section("League Records", "All-Time GLDHL · Top 10", league, "rose")}{section("Franchise Records", "Credited by ownership · Top 10", franchise, "violet")}<p className="px-1 text-xs text-gray-400">Counts include every all-time Record Book category except fantasy points per game. League and franchise books track ten places.</p></div>;
 }
 
-function PlayerResume({ records, awards, franchises, seasons, leadership }: { records: PlayerRecordPlacement[]; awards: PlayerAward[]; franchises: ScoringLeader[]; seasons: PlayerSeasonWithRelations[]; leadership: Map<number, "C" | "A"> }) {
+export function PlayerResume({ records, awards, franchises, seasons, leadership }: { records: PlayerRecordPlacement[]; awards: PlayerAward[]; franchises: ScoringLeader[]; seasons: PlayerSeasonWithRelations[]; leadership: Map<number, "C" | "A"> }) {
   const leagueRecords = records.filter((record) => record.scope === "league" && record.rank === 1);
   const franchiseRecords = records.filter((record) => record.scope === "franchise" && record.rank === 1);
   const seasonalAwards = awards.filter((award) => !award.is_monthly);
@@ -240,8 +295,11 @@ export default function PlayerProfile() {
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [franchiseScoring, setFranchiseScoring] = useState<ScoringLeader[]>([]);
   const [playerRecords, setPlayerRecords] = useState<PlayerRecordPlacement[]>([]);
-  const [profileTab, setProfileTab] = useState<"resume" | "history" | "trophies" | "records" | "franchises" | "transactions" | "financials">("history");
+  const [recordWarnings, setRecordWarnings] = useState<string[]>([]);
+  const [profileTab, setProfileTab] = useState<"history" | "trophies" | "records" | "franchises" | "transactions" | "financials">("history");
   const [tabLoading, setTabLoading] = useState(false);
+  const [tabError, setTabError] = useState("");
+  const [tabRetry, setTabRetry] = useState(0);
   const [financialEarnings, setFinancialEarnings] = useState<CareerEarnings | null>(null);
   const [financialError, setFinancialError] = useState("");
   const [financialLoading, setFinancialLoading] = useState(false);
@@ -300,11 +358,28 @@ export default function PlayerProfile() {
   }, [profileTab, fantasyPlayer]);
 
   useEffect(() => {
-    if (profileTab !== "franchises" && profileTab !== "records" && profileTab !== "resume") return;
+    if (profileTab !== "franchises" || !fantasyPlayer) return;
     let active = true; setTabLoading(true);
-    fetchRecordBookData().then((data) => { if (active) { setFranchiseScoring(data.franchisePositionLeaders.filter((row) => row.playerId === playerApiId)); setPlayerRecords(buildPlayerRecordPlacements(data.franchiseStatLines, playerApiId)); } }).catch(() => { if (active) { setFranchiseScoring([]); setPlayerRecords([]); } }).finally(() => { if (active) setTabLoading(false); });
+    setTabError("");
+    fetchPlayerFranchisePositionLeaders(playerApiId, seasons).then((rows) => { if (active) setFranchiseScoring(rows); }).catch((reason: unknown) => {
+      if (active) setTabError(reason instanceof Error ? reason.message : "Unable to load franchise scoring history.");
+    }).finally(() => { if (active) setTabLoading(false); });
     return () => { active = false; };
-  }, [profileTab, playerApiId]);
+  }, [profileTab, playerApiId, fantasyPlayer, seasons, tabRetry]);
+
+  useEffect(() => {
+    if (profileTab !== "records") return;
+    let active = true; setTabLoading(true); setTabError("");
+    fetchRecordBookData(null, null, undefined, "franchise").then((data) => {
+      if (active) {
+        setPlayerRecords(buildPlayerRecordPlacements(data.franchiseStatLines, playerApiId));
+        setRecordWarnings(data.warnings);
+      }
+    }).catch((reason: unknown) => {
+      if (active) setTabError(reason instanceof Error ? reason.message : "Unable to load player record placements.");
+    }).finally(() => { if (active) setTabLoading(false); });
+    return () => { active = false; };
+  }, [profileTab, playerApiId, tabRetry]);
 
   useEffect(() => {
     if (profileTab !== "financials" || !fantasyPlayer) return;
@@ -323,6 +398,9 @@ export default function PlayerProfile() {
 
   const currentSeason = useMemo(() => seasons.find((season) => season.season_year === CURRENT_LEAGUE_SEASON) || seasons[0] || null, [seasons]);
   const currentFinancialSeason = useMemo(() => seasons.find((season) => season.season_year === CURRENT_LEAGUE_SEASON) || null, [seasons]);
+  const careerSeasonRows = useMemo(() => [...historicalStats, { season: statsSeason, skater, goalie }]
+    .filter((row, index, rows) => rows.findIndex((candidate) => candidate.season === row.season) === index)
+    .sort((a, b) => a.season - b.season), [historicalStats, statsSeason, skater, goalie]);
   const name = playerName(fantasyPlayer, landing);
   const position = displayPosition(currentSeason?.position === "RFA" || currentSeason?.position === "PROSPECT" ? landing?.position : currentSeason?.position || landing?.position);
   const draft = landing?.draftDetails;
@@ -338,34 +416,33 @@ export default function PlayerProfile() {
             <div className="grid gap-3 sm:grid-cols-2 lg:w-[430px]"><InfoCard label="Current GLDHL Team" value={currentSeason?.fantasy_team ? <span className="flex flex-wrap items-center gap-2"><Link to={`/teams/${currentSeason.fantasy_team.id}`} className="flex items-center gap-2 text-brand-500 hover:underline">{currentSeason.fantasy_team.logo && <img src={currentSeason.fantasy_team.logo} alt="" className="h-7 w-7 rounded object-contain" />}{currentSeason.fantasy_team.team_name}</Link><LeadershipSeasonBadge role={leadershipByPlayerSeason.get(currentSeason.id)} /></span> : "Not Owned"} /><InfoCard label="Current Contract" value={currentSeason ? `${currentSeason.salary == null ? "No salary" : money.format(currentSeason.salary)} · ${currentSeason.term_end_year || currentSeason.position || "No term"}` : "—"} /><InfoCard label="Birthday" value={landing.birthDate ? `${formatDate(landing.birthDate)} (${ageOn(landing.birthDate)})` : "—"} /><InfoCard label="Shoots / Catches" value={landing.shootsCatches || "—"} /></div></div></div>
         </section>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><InfoCard label="NHL Team" value={<span className="flex items-center gap-2">{landing.teamLogo && <img src={landing.teamLogo} alt="" className="h-7 w-7 object-contain" />}{landing.fullTeamName?.default || landing.currentTeamAbbrev || "—"}</span>} /><InfoCard label="Position / Number" value={<span className="flex items-center gap-2"><PositionBadge position={position} />{landing.sweaterNumber != null ? `#${landing.sweaterNumber}` : ""}</span>} /><InfoCard label="Birthplace" value={<span className="flex flex-wrap items-center gap-2"><CountryFlagBadge countryCode={landing.birthCountry} showName /><span>{[landing.birthCity?.default, landing.birthStateProvince?.default].filter(Boolean).join(", ") || "—"}</span></span>} /><InfoCard label="Draft" value={draft ? `${draft.year || "—"} ${draft.teamAbbrev || ""} · Round ${draft.round || "—"} · Pick ${draft.pickInRound || "—"}${draft.overallPick ? ` (${draft.overallPick} overall)` : ""}` : "Undrafted"} /></section>
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><InfoCard label="NHL Team" value={<span className="flex items-center gap-2">{landing.teamLogo && <img src={landing.teamLogo} alt="" className="h-7 w-7 object-contain" />}{landing.fullTeamName?.default || landing.currentTeamAbbrev || "—"}</span>} /><InfoCard label="Position / Number" value={<span className="flex items-center gap-2"><PositionBadge position={position} />{landing.sweaterNumber != null ? `#${landing.sweaterNumber}` : ""}</span>} /><InfoCard label="Birthplace" value={<span className="flex flex-wrap items-center gap-2"><CountryFlagBadge countryCode={landing.birthCountry} showName /><span>{[landing.birthCity?.default, landing.birthStateProvince?.default].filter(Boolean).join(", ") || "—"}</span></span>} /><InfoCard label="Draft" value={draft ? `${draft.year || "—"} ${draft.teamAbbrev || ""} · Round ${draft.round || "—"} · Pick ${draft.pickInRound || "—"}${draft.overallPick ? ` (${draft.overallPick} overall)` : ""}` : "Undrafted"} /><ContractStatusCard season={currentFinancialSeason} /></section>
 
         {skater ? <SkaterStats record={skater} season={statsSeason} /> : goalie ? <GoalieStats record={goalie} season={statsSeason} /> : <div className="rounded-xl border border-dashed border-gray-300 p-6 text-sm text-gray-500">No current-season NHL stats were returned.</div>}
 
         <nav aria-label="Player profile sections" className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4">
           <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 lg:flex-wrap lg:overflow-visible">
             {([
-              ["resume", "Career Résumé", playerRecords.filter((record) => record.rank === 1).length + awards.length],
               ["history", "League History & Stats", historicalStats.length],
-              ["trophies", "Trophy Case", awards.length],
-              ["records", "Records", playerRecords.length],
               ["franchises", "Points by Franchise", franchiseScoring.length],
+              ["records", "Records", playerRecords.length],
               ["financials", "Financials", financialEarnings?.years.length || 0],
               ["transactions", "Transactions", transactions.length],
+              ["trophies", "Trophy Case", awards.length],
             ] as const).map(([key, label, count]) => <button key={key} type="button" onClick={() => setProfileTab(key)} aria-pressed={profileTab === key} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold transition ${profileTab === key ? "bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"}`}>{label}<span className={`ml-2 rounded-full px-1.5 py-0.5 text-[9px] ${profileTab === key ? "bg-white/20 dark:bg-gray-900/10" : "bg-white dark:bg-gray-900"}`}>{count}</span></button>)}
           </div>
         </nav>
 
         {profileTab === "history" && historyLoading && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading previous league seasons…</div>}
-        {profileTab === "history" && !historyLoading && <SeasonHistory rows={historicalStats} seasons={seasons} awards={awards} leadership={leadershipByPlayerSeason} />}
+        {profileTab === "history" && !historyLoading && <div className="space-y-5"><PlayerMilestoneWatch rows={careerSeasonRows} /><SeasonHistory rows={historicalStats} seasons={seasons} awards={awards} leadership={leadershipByPlayerSeason} /></div>}
         {profileTab === "trophies" && <PlayerTrophyCase awards={awards} />}
         {profileTab === "financials" && financialLoading && <div role="status" className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading contract history…</div>}
         {profileTab === "financials" && financialError && <div role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700"><p>{financialError}</p><button type="button" onClick={() => setFinancialRetry((attempt) => attempt + 1)} className="mt-2 rounded-lg border border-error-300 px-3 py-1.5 text-xs font-bold hover:bg-error-100">Retry</button></div>}
         {profileTab === "financials" && !financialLoading && !financialError && <PlayerFinancials earnings={financialEarnings} currentSeason={currentFinancialSeason} />}
-        {tabLoading && (profileTab === "resume" || profileTab === "records" || profileTab === "franchises" || profileTab === "transactions") && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading {profileTab === "resume" ? "career résumé" : profileTab === "records" ? "record-book placements" : profileTab === "franchises" ? "franchise scoring" : "transactions"}…</div>}
-        {!tabLoading && profileTab === "resume" && <PlayerResume records={playerRecords} awards={awards} franchises={franchiseScoring} seasons={seasons} leadership={leadershipByPlayerSeason} />}
-        {!tabLoading && profileTab === "records" && <PlayerRecords records={playerRecords} />}
-        {!tabLoading && profileTab === "franchises" && <FranchiseScoringHistory rows={franchiseScoring} />}
+        {tabLoading && (profileTab === "records" || profileTab === "franchises" || profileTab === "transactions") && <div role="status" className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading {profileTab === "records" ? "record-book placements" : profileTab === "franchises" ? "franchise scoring" : "transactions"}…</div>}
+        {!tabLoading && tabError && (profileTab === "records" || profileTab === "franchises") && <div role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700"><p>{tabError}</p><button type="button" onClick={() => setTabRetry((attempt) => attempt + 1)} className="mt-2 rounded-lg border border-error-300 px-3 py-1.5 text-xs font-bold hover:bg-error-100">Retry</button></div>}
+        {!tabLoading && !tabError && profileTab === "records" && <PlayerRecords records={playerRecords} warnings={recordWarnings} />}
+        {!tabLoading && !tabError && profileTab === "franchises" && <FranchiseScoringHistory rows={franchiseScoring} />}
         {!tabLoading && profileTab === "transactions" && <section className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"><h2 className="text-lg font-semibold text-gray-800 dark:text-white/90">Transaction History</h2><div className="mt-4 space-y-4">{transactions.length ? transactions.map((transaction) => <PlayerTransactionCard key={transaction.id} transaction={transaction} fallbackPosition={position} />) : <p className="text-sm text-gray-500">No transactions have been posted for this player.</p>}</div></section>}
       </>}
     </div>

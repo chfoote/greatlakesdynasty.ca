@@ -23,9 +23,11 @@ async function fixture(t,{enabled=true,missing=false}={}){
     fantasyTeams:`export const applyTeamBranding=t=>t;export const fetchFantasyTeams=async()=>globalThis.__sharedFarmFixture.teams;export const fetchTeamBrandingHistory=async()=>[];`,
     fantasyPlayers:`export const fetchPlayerSeasons=async()=>globalThis.__sharedFarmFixture.seasons;`,
     leagueSeasonStats:`export {fetchNhlLiveSeasonStats as fetchLeagueSeasonStats} from './nhl';`,
+    nhlPlayerMetadata:`export const playerMetadata={read(){return undefined},remember(){}};`,
     nhl:`import {markNhlFetched} from ${JSON.stringify(resolve('src/lib/nhlFreshness.ts'))};
       export {getSkaterScore,getGoalieScore} from ${JSON.stringify(resolve('shared/nhl-scoring.ts'))};
       export const fetchNhlLiveSeasonStats=async()=>markNhlFetched(globalThis.__sharedFarmFixture.stats,Date.now());
+      export const fetchNhlPlayerBiographies=async()=>{};
       export const fetchNhlDraftPicks=async year=>{const f=globalThis.__sharedFarmFixture;f.draftCalls++;return f.drafts.find(d=>d.year===year).picks;};
       export const fetchNhlPlayerLanding=async()=>{throw Error('Unexpected profile load')};export const searchNhlPlayers=async()=>[];`,
     supabase:`export const supabase={from(table){const state=globalThis.__sharedFarmFixture;let start=0,end=999;state.queries.push(table);

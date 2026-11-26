@@ -8,8 +8,9 @@ import { applyTeamBranding, fetchFantasyTeams, type FantasyTeam } from "./fantas
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "./fantasyPlayers";
 import { fetchLeagueTransactions } from "./transactions";
 import { fetchPlayerAwards } from "./awards";
-import { fetchNhlGoalieStatsForPeriod, fetchNhlSkaterStatsForPeriod, getGoalieScore, getNhlStatsDate, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "./nhl";
+import { fetchNhlGoalieStatsForPeriod, fetchNhlPlayerStatsForPeriod, fetchNhlSkaterStatsForPeriod, getGoalieScore, getNhlStatsDate, getSkaterScore, type NhlGoalieRecord, type NhlSkaterRecord } from "./nhl";
 import { fetchSeasonLeadership } from "./teamLeadership";
+import { fetchRankingTrades } from "./transactions";
 
 export const LEAGUE_RECORD_LIMIT = 10;
 
@@ -74,7 +75,7 @@ export type FranchiseStatLine = {
   skater: {
     gamesPlayed: number; goals: number; assists: number; points: number; plusMinus: number; penaltyMinutes: number; shots: number;
     ppGoals: number; ppAssists: number; shGoals: number; shAssists: number; gameWinningGoals: number;
-    blockedShots: number; hits: number; faceoffWins: number; fantasyPoints: number; pointsPerGame: number;
+    blockedShots: number; hits: number; faceoffWins: number; faceoffWinsAvailable: boolean; fantasyPoints: number; pointsPerGame: number;
   } | null;
   goalie: {
     gamesPlayed: number; gamesStarted: number; wins: number; losses: number; otLosses: number; goalsAgainst: number;
@@ -98,6 +99,114 @@ export type RecordHistoryEvent = {
   holder_type: "team" | "player" | "manager"; holder_name: string; record_value: number; previous_value: number | null;
   period_start: string | null; period_end: string | null; verification_status: string; achieved_at: string;
 };
+
+const playerFranchiseCache = new Map<string, { expiresAt: number; request: Promise<ScoringLeader[]> }>();
+
+export function fetchPlayerFranchisePositionLeaders(playerApiId: string, seasons: PlayerSeasonWithRelations[]) {
+  const apiId = Number(playerApiId);
+  const playerId = seasons[0]?.player_id;
+  if (!Number.isSafeInteger(apiId) || apiId <= 0 || !playerId) return Promise.resolve([]);
+  const seasonKey = seasons.map((row) => `${row.id}:${row.season_year}:${row.fantasy_team_id ?? ""}:${row.position ?? ""}`).join(",");
+  const key = `${playerApiId}:${seasonKey}:${getNhlStatsDate()}`;
+  const saved = playerFranchiseCache.get(key);
+  if (saved && saved.expiresAt > Date.now()) return saved.request;
+
+  const request = (async () => {
+    const rosterSeasons = seasons.filter((row) => row.fantasy_team_id && row.season_year >= FIRST_LEAGUE_SEASON && row.season_year <= CURRENT_LEAGUE_SEASON);
+    const years = [...new Set(rosterSeasons.map((row) => row.season_year))].sort((a, b) => a - b);
+    if (!years.length) return [];
+    const [tradesByYear, callupResult] = await Promise.all([
+      Promise.all(years.map(async (year) => [year, await fetchRankingTrades(year)] as const)),
+      supabase.from("league_transactions").select("season_year,transaction_date")
+        .eq("player_id", playerId).eq("action", "called_up")
+        .gte("season_year", FIRST_LEAGUE_SEASON).lte("season_year", CURRENT_LEAGUE_SEASON),
+    ]);
+    if (callupResult.error) throw callupResult.error;
+    const callups = (callupResult.data ?? []) as Array<{ season_year: number; transaction_date: string }>;
+    const callupDateByYear = new Map<number, string>();
+    callups.forEach((row) => {
+      const current = callupDateByYear.get(row.season_year);
+      if (!current || row.transaction_date < current) callupDateByYear.set(row.season_year, row.transaction_date);
+    });
+
+    const franchiseRows = new Map<number, {
+      team: FantasyTeam;
+      gamesPlayed: number;
+      fantasyPoints: number;
+      position: ScoringLeader["position"];
+      seasons: Set<number>;
+    }>();
+    for (const year of years) {
+      const yearRows = rosterSeasons.filter((row) => row.season_year === year);
+      const currentOwner = yearRows.find((row) => row.fantasy_team_id)?.fantasy_team_id ?? null;
+      if (!currentOwner) continue;
+      const seasonStart = `${year - 1}-07-01`;
+      const seasonEnd = year === CURRENT_LEAGUE_SEASON ? getNhlStatsDate() : `${year}-06-30`;
+      const tradeMoves = (tradesByYear.find(([tradeYear]) => tradeYear === year)?.[1] ?? []).flatMap((transaction) =>
+        (transaction.trade_offer?.trade_offer_players ?? [])
+          .filter((move) => move.player_season?.player_id === playerId)
+          .map((move) => ({ fromTeamId: move.from_team_id, toTeamId: move.to_team_id, date: transaction.transaction_date })),
+      ).filter((move) => move.date >= seasonStart && move.date <= seasonEnd);
+      const callupDate = callupDateByYear.get(year);
+      const boundaryDates = [...new Set([
+        ...tradeMoves.map((move) => move.date),
+        ...(callupDate && callupDate >= seasonStart && callupDate <= seasonEnd ? [callupDate] : []),
+      ])].sort();
+      const previousDate = (date: string) => {
+        const value = new Date(`${date}T12:00:00Z`);
+        value.setUTCDate(value.getUTCDate() - 1);
+        return value.toISOString().slice(0, 10);
+      };
+      const starts = boundaryDates.length ? [seasonStart, ...boundaryDates] : [seasonStart];
+      const periods = starts.map((start, index) => ({
+        start,
+        end: index + 1 < starts.length ? previousDate(starts[index + 1]) : seasonEnd,
+      })).filter((period) => period.start <= period.end);
+
+      for (const period of periods) {
+        if (callupDate && period.start < callupDate) continue;
+        let ownerId: number | null = currentOwner;
+        tradeMoves.filter((move) => move.date > period.start).sort((a, b) => b.date.localeCompare(a.date)).forEach((move) => {
+          if (ownerId === move.toTeamId) ownerId = move.fromTeamId;
+        });
+        if (ownerId == null) continue;
+        const stats = await fetchNhlPlayerStatsForPeriod(apiId, nhlSeasonId(year), period.start, period.end);
+        const goalie = stats.goalie;
+        const skater = stats.skater;
+        const gamesPlayed = goalie?.gamesPlayed || skater?.gamesPlayed || 0;
+        if (!gamesPlayed) continue;
+        const position = (goalie ? "G" : skater?.positionCode === "L" ? "LW" : skater?.positionCode === "R" ? "RW" : skater?.positionCode || yearRows.find((row) => row.position && activePositions.has(row.position.toUpperCase()))?.position || "C").toUpperCase() as ScoringLeader["position"];
+        if (!activePositions.has(position)) continue;
+        const team = seasons.find((row) => row.fantasy_team_id === ownerId)?.fantasy_team;
+        if (!team) continue;
+        const current = franchiseRows.get(ownerId) || { team, gamesPlayed: 0, fantasyPoints: 0, position, seasons: new Set<number>() };
+        current.gamesPlayed += gamesPlayed;
+        current.fantasyPoints += goalie ? getGoalieScore(goalie) : getSkaterScore(skater!);
+        current.seasons.add(year);
+        franchiseRows.set(ownerId, current);
+      }
+    }
+
+    const currentSeason = rosterSeasons[0];
+    return [...franchiseRows.entries()].map(([teamId, row]) => ({
+      key: `${playerApiId}:${teamId}`,
+      playerId: playerApiId,
+      playerName: playerName(seasons[0]),
+      position: row.position,
+      gamesPlayed: row.gamesPlayed,
+      fantasyPoints: row.fantasyPoints,
+      seasons: [...row.seasons].sort((a, b) => a - b),
+      team: row.team,
+      currentTeam: currentSeason?.fantasy_team || null,
+    })).sort((a, b) => b.fantasyPoints - a.fantasyPoints || a.playerName.localeCompare(b.playerName));
+  })().catch((error) => {
+    playerFranchiseCache.delete(key);
+    throw error;
+  });
+  playerFranchiseCache.set(key, { expiresAt: Date.now() + 300_000, request });
+  while (playerFranchiseCache.size > 100) playerFranchiseCache.delete(playerFranchiseCache.keys().next().value!);
+  return request;
+}
 
 const number = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 2 });
 const activePositions = new Set(["C", "LW", "RW", "D", "G"]);
@@ -371,6 +480,7 @@ async function buildRecordBookData(teamId?: number | null, seasonYear?: number |
         ppAssists: sumSkater(skaters, "ppPoints") - sumSkater(skaters, "ppGoals"), shGoals: sumSkater(skaters, "shGoals"),
         shAssists: sumSkater(skaters, "shPoints") - sumSkater(skaters, "shGoals"), gameWinningGoals: sumSkater(skaters, "gameWinningGoals"),
         blockedShots: sumSkater(skaters, "blockedShots"), hits: sumSkater(skaters, "hits"), faceoffWins: sumSkater(skaters, "totalFaceoffWins"),
+        faceoffWinsAvailable: skaters.every((row) => row.faceoffWinsAvailable !== false),
         fantasyPoints, pointsPerGame: gamesPlayed ? fantasyPoints / gamesPlayed : 0,
       } : null,
       goalie: goalies.length ? {

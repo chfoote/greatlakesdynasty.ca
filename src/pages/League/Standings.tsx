@@ -1,6 +1,5 @@
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import { startNhlPolling } from "../../lib/nhlPolling";
-import { isNhlRateLimit } from "../../../shared/nhl-policy";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
@@ -12,10 +11,8 @@ import {
   type PlayerSeasonWithRelations,
 } from "../../lib/fantasyPlayers";
 import {
-  fetchNhlGoalieStats,
   fetchNhlDailyStats,
   getNhlStatsDate,
-  fetchNhlSkaterStats,
   getGoalieScore,
   getSkaterScore,
   type NhlGoalieRecord,
@@ -202,11 +199,7 @@ export default function Standings() {
     setError("");
     const generation = ++seasonStatsGeneration.current;
 
-    const statsRequest = fetchLeagueSeasonStats(selectedSeason).catch((reason: unknown) => {
-      if (selectedSeason !== CURRENT_LEAGUE_SEASON || isNhlRateLimit(reason)) throw reason;
-      return Promise.all([fetchNhlSkaterStats(nhlSeasonId(selectedSeason)), fetchNhlGoalieStats(nhlSeasonId(selectedSeason))])
-        .then(([skaters, goalies]) => ({ skaters, goalies }));
-    });
+    const statsRequest = fetchLeagueSeasonStats(selectedSeason);
 
     const metadataRequest = Promise.all([
       fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason),

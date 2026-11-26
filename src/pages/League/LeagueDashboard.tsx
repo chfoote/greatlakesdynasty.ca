@@ -5,7 +5,9 @@ import PageMeta from "../../components/common/PageMeta";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchPlayerSeasonsBySeasons, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON, dashboardSeasons } from "../../lib/leagueSeasons";
-import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats } from "../../lib/nhl";
+import { fetchNhlPlayerBiographies } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
+import { playerMetadata } from "../../lib/nhlPlayerMetadata";
 import { ACTIVE_ROSTER_POSITIONS, CAP_POSITIONS, calculateTeamCap, EMPTY_CAP_ADJUSTMENTS, ROSTER_LIMIT, salaryCapForSeason } from "../../lib/cap";
 import { fetchTeamCapAdjustmentTotals, type TeamCapAdjustmentTotal } from "../../lib/capAdjustments";
 
@@ -19,10 +21,6 @@ const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD
 
 function position(season: PlayerSeasonWithRelations) {
   return (season.position || "").toUpperCase();
-}
-
-function nhlSeasonId(year: number) {
-  return (year - 1) * 10000 + year;
 }
 
 function ageOnDate(birthDate: string, asOf: Date) {
@@ -91,16 +89,24 @@ export default function LeagueDashboard() {
     let active = true;
     setAgesLoading(true);
     const eligibleIds = [...new Set(seasons.filter((season) => ageRosterPositions.has(position(season))).map((season) => season.player?.player_api_id).filter((id): id is string => Boolean(id)))];
-    Promise.all([
-      fetchNhlSkaterStats(nhlSeasonId(selectedSeason)).catch(() => []),
-      fetchNhlGoalieStats(nhlSeasonId(selectedSeason)).catch(() => []),
-    ]).then(async ([skaters, goalies]) => {
+    fetchLeagueSeasonStats(selectedSeason).catch(() => ({ skaters: [], goalies: [] })).then(async ({ skaters, goalies }) => {
       const dates = new Map<string, string>();
       [...skaters, ...goalies].forEach((player) => { if (player.birthDate) dates.set(String(player.playerId), player.birthDate); });
-      await Promise.all(eligibleIds.filter((id) => !dates.has(id)).map(async (id) => {
-        try { const landing = await fetchNhlPlayerLanding(Number(id)); if (landing.birthDate) dates.set(id, landing.birthDate); } catch { /* Keep the other teams available if one NHL profile fails. */ }
-      }));
-      if (active) setBirthDatesByPlayer(dates);
+      if (active) setBirthDatesByPlayer(new Map(dates));
+      const missing = eligibleIds.filter((id) => !dates.has(id));
+      try {
+        await fetchNhlPlayerBiographies((selectedSeason - 1) * 10000 + selectedSeason, missing, () => {
+          missing.forEach((id) => {
+            const birthDate = playerMetadata.read(id)?.birthDate;
+            if (birthDate) dates.set(id, birthDate);
+          });
+          if (active) setBirthDatesByPlayer(new Map(dates));
+        });
+      } catch {
+        if (active) setBirthDatesByPlayer(new Map(dates));
+      } finally {
+        if (active) setBirthDatesByPlayer(new Map(dates));
+      }
     }).finally(() => { if (active) setAgesLoading(false); });
     return () => { active = false; };
   }, [seasons, selectedSeason]);

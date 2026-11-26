@@ -178,6 +178,26 @@ export async function fetchPlayerSeasonsByPlayer(playerId: number) {
   return (data ?? []) as PlayerSeasonWithRelations[];
 }
 
+export async function fetchPlayerSeasonsByPlayers(playerIds: number[]) {
+  const ids = [...new Set(playerIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from("player_seasons")
+    .select("*, player:players(*), fantasy_team:fantasy_teams(*)")
+    .in("player_id", ids)
+    .order("season_year", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as PlayerSeasonWithRelations[];
+}
+
+export async function fetchPlayerSeasonsByApiIds(playerApiIds: string[]) {
+  const ids = [...new Set(playerApiIds.filter((id) => /^[1-9]\d{0,9}$/.test(id)))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from("players").select("id").in("player_api_id", ids);
+  if (error) throw error;
+  return fetchPlayerSeasonsByPlayers((data ?? []).map((row) => row.id));
+}
+
 export async function createPlayerSeason(season: PlayerSeasonInput) {
   const { data, error } = await supabase
     .from("player_seasons")

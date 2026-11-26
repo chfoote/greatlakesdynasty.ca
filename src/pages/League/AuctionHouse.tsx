@@ -26,9 +26,7 @@ import {
   type TeamUserAssignmentWithTeam,
 } from "../../lib/teamUserAssignments";
 import {
-  fetchNhlGoalieStats,
   fetchNhlPlayerLanding,
-  fetchNhlSkaterStats,
   formatFantasyPoints,
   formatNhlStat,
   getGoalieScore,
@@ -37,6 +35,7 @@ import {
   type NhlPlayerLanding,
   type NhlSkaterRecord,
 } from "../../lib/nhl";
+import { fetchLeagueSeasonStats } from "../../lib/leagueSeasonStats";
 import {
   applyTeamBranding,
   fetchFantasyTeams,
@@ -264,9 +263,6 @@ function remaining(end: string, now: number) {
     : h
       ? `${h}h ${m}m`
       : `${m}:${String(s).padStart(2, "0")}`;
-}
-function nhlSeasonId(year: number) {
-  return (year - 1) * 10000 + year;
 }
 function height(value?: number) {
   return value ? `${Math.floor(value / 12)}' ${value % 12}"` : "—";
@@ -546,7 +542,7 @@ export default function AuctionHouse() {
             .filter(Number.isFinite),
         ),
       );
-      const [landingResults, skaterRows, goalieRows] = await Promise.all([
+      const [landingResults, stats] = await Promise.all([
         Promise.all(
           apiIds.map(async (id) => {
             try {
@@ -556,8 +552,7 @@ export default function AuctionHouse() {
             }
           }),
         ),
-        fetchNhlSkaterStats(nhlSeasonId(season - 1)).catch(() => []),
-        fetchNhlGoalieStats(nhlSeasonId(season - 1)).catch(() => []),
+        fetchLeagueSeasonStats(season - 1).catch(() => ({ skaters: [], goalies: [] })),
       ]);
       const landingRows = landingResults.filter(
         (row): row is readonly [number, NhlPlayerLanding] => row !== null,
@@ -569,10 +564,10 @@ export default function AuctionHouse() {
       setRetentionAdjustments(adjustmentRows);
       setLandings(Object.fromEntries(landingRows));
       setSkaters(
-        Object.fromEntries(skaterRows.map((row) => [row.playerId, row])),
+        Object.fromEntries(stats.skaters.map((row) => [row.playerId, row])),
       );
       setGoalies(
-        Object.fromEntries(goalieRows.map((row) => [row.playerId, row])),
+        Object.fromEntries(stats.goalies.map((row) => [row.playerId, row])),
       );
     } catch (e) {
       setError(message(e));
