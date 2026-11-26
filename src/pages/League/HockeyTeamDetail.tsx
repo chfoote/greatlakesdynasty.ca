@@ -452,6 +452,8 @@ function EmptyRow({ columns }: { columns: number }) {
 }
 
 function MultiYearView({
+  teamId,
+  contractHistory,
   years,
   rosters,
   adjustments,
@@ -461,6 +463,8 @@ function MultiYearView({
   leadershipByPlayer,
   nhlTeams,
 }: {
+  teamId: number;
+  contractHistory: PlayerSeasonWithRelations[];
   years: number[];
   rosters: Record<number, PlayerSeasonWithRelations[]>;
   adjustments: Record<number, CapAdjustments>;
@@ -477,15 +481,31 @@ function MultiYearView({
   });
 
   const players = useMemo(() => {
-    const grouped = new Map<string, { representative: PlayerSeasonWithRelations; seasons: Map<number, PlayerSeasonWithRelations> }>();
+    const grouped = new Map<string, { representative: PlayerSeasonWithRelations; seasons: Map<number, PlayerSeasonWithRelations>; rfaYears: Set<number> }>();
+    const keyFor = (row: PlayerSeasonWithRelations) => String(row.player?.id || row.player_id || row.player?.player_api_id || row.id);
     years.forEach((year) => (rosters[year] || []).forEach((row) => {
-      const key = String(row.player?.id || row.player_id || row.player?.player_api_id || row.id);
+      const key = keyFor(row);
       const existing = grouped.get(key);
-      if (existing) existing.seasons.set(year, row);
-      else grouped.set(key, { representative: row, seasons: new Map([[year, row]]) });
+      if (existing) {
+        existing.seasons.set(year, row);
+        if (!activePositions.has(position(existing.representative)) && activePositions.has(position(row))) existing.representative = row;
+      } else grouped.set(key, { representative: row, seasons: new Map([[year, row]]), rfaYears: new Set() });
     }));
+    contractHistory
+      .filter((row) => row.fantasy_team_id === teamId
+        && row.term_end_year === row.season_year
+        && activePositions.has(position(row))
+        && years.includes(row.season_year + 1))
+      .forEach((row) => {
+        const key = keyFor(row);
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.rfaYears.add(row.season_year + 1);
+          if (!activePositions.has(position(existing.representative))) existing.representative = row;
+        } else grouped.set(key, { representative: row, seasons: new Map(), rfaYears: new Set([row.season_year + 1]) });
+      });
     return [...grouped.values()];
-  }, [rosters, years]);
+  }, [rosters, years, contractHistory, teamId]);
 
   const scoreForPlayer = ({ representative }: (typeof players)[number]) => {
     const apiId = playerApiId(representative);
@@ -505,7 +525,7 @@ function MultiYearView({
           {years.map((year) => <th key={year} className="px-3 py-3">{year}</th>)}
           <th className="px-3 py-3">Score</th><th className="px-3 py-3">PPG</th>
         </tr></thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{sectionPlayers.length === 0 ? <EmptyRow columns={years.length + 5} /> : sectionPlayers.map(({ representative, seasons }) => {
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{sectionPlayers.length === 0 ? <EmptyRow columns={years.length + 5} /> : sectionPlayers.map(({ representative, seasons, rfaYears }) => {
           const apiId = playerApiId(representative);
           const goalie = goalies.get(apiId);
           const skater = skaters.get(apiId);
@@ -519,7 +539,8 @@ function MultiYearView({
             <td className="px-3 py-3"><PositionBadge position={apiPosition} /></td>
             {years.map((year) => {
               const row = seasons.get(year);
-              return <td key={year} className="whitespace-nowrap px-3 py-3 font-medium text-gray-800 dark:text-white/90">{row?.salary == null ? "—" : money.format(row.salary)}{row && <LeadershipBadge role={leadershipByPlayer.get(row.id)} />}</td>;
+              const rfaAlert = rfaYears.has(year);
+              return <td key={year} className="whitespace-nowrap px-3 py-3 font-medium text-gray-800 dark:text-white/90">{rfaAlert ? <span title="Contract expired the previous season; RFA alert" className="inline-flex rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-violet-800 dark:bg-violet-500/20 dark:text-violet-200">RFA</span> : <>{row?.salary == null ? "—" : money.format(row.salary)}{row && <LeadershipBadge role={leadershipByPlayer.get(row.id)} />}</>}</td>;
             })}
             <td className="px-3 py-3 font-semibold text-gray-800 dark:text-white/90">{skater || goalie ? formatFantasyPoints(score) : "—"}</td>
             <td className="px-3 py-3">{gamesPlayed ? formatFantasyPoints(score / gamesPlayed) : "—"}</td>
@@ -530,6 +551,7 @@ function MultiYearView({
   };
 
   return <div className="mt-5 space-y-5">
+    <p className="text-xs text-gray-500">RFA tags mark active-player contracts that expire in the prior season; they’re alerts, not confirmed future contracts.</p>
     {activeSections.map((section) => renderPlayerTable(section.code, section.label))}
 
     <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Year-by-Year Payroll</h3><div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
@@ -915,7 +937,7 @@ export default function HockeyTeamDetail() {
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsView !== "season" && dailyStatsError && <p role="status" className="mt-3 text-sm text-gray-500 dark:text-gray-400">{dailyStatsError}</p>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
-          {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} adjustments={multiYearAdjustments} skaters={skaters} goalies={goalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : viewMode === "lineup" ? <LineupPreview roster={roster} contractHistory={contractHistory} seasonYear={selectedSeason} skaters={skaters} goalies={goalies} headshots={lineupHeadshots} nhlTeams={nhlTeamsByPlayer} birthCountries={birthCountriesByPlayer} leadershipByPlayer={leadershipByPlayer} livePlayerIds={livePlayerIds} team={displayTeam || team} /> : <div className="mt-5 space-y-4">
+          {viewMode === "multi" ? <MultiYearView teamId={team.id} contractHistory={contractHistory} years={multiYearSeasons} rosters={multiYearRosters} adjustments={multiYearAdjustments} skaters={skaters} goalies={goalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : viewMode === "lineup" ? <LineupPreview roster={roster} contractHistory={contractHistory} seasonYear={selectedSeason} skaters={skaters} goalies={goalies} headshots={lineupHeadshots} nhlTeams={nhlTeamsByPlayer} birthCountries={birthCountriesByPlayer} leadershipByPlayer={leadershipByPlayer} livePlayerIds={livePlayerIds} team={displayTeam || team} /> : <div className="mt-5 space-y-4">
             {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={displayedGoalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={displayedSkaters} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} />)}
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Non-Rostered Players</h3><div className="space-y-4">{nonRosterSections.map((section) => <CompactTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} skaters={displayedSkaters} goalies={displayedGoalies} nhlTeams={nhlTeamsByPlayer} note={section.cap ? "Counts toward cap only" : "Excluded from cap and roster"} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} renderInterest={renderInterest} />)}</div></div>
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Buyout Penalties</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Dead cap charges</span><span className="text-xs text-gray-500">Counts toward cap · no roster spot</span></div>{buyoutPenalties.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{buyoutPenalties.map((penalty) => <tr key={penalty.id}><td className="px-3 py-3 font-semibold">{penalty.player?.full_name || "Player buyout"}</td><td className="px-3 py-3 text-center">{penalty.season_year}</td><td className="px-3 py-3 text-right font-black text-error-600">{money.format(penalty.amount)}</td></tr>)}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">{buyoutPenaltyTotal ? `${money.format(buyoutPenaltyTotal)} is included in the public cap total. Sign in to view player-level details.` : "No buyout penalties this season."}</p>}</div></div>

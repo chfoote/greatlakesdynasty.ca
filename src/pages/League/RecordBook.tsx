@@ -2,22 +2,23 @@ import RecordBookTabs, {recordBookTabs, type RecordBookTab} from "../../componen
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import NhlHeadshot from "../../components/hockey/NhlHeadshot";
 import type { RecordBookSection } from "../../lib/recordBook";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams, useLocation } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
 import { fetchFantasyTeamByAbbreviation, type FantasyTeam } from "../../lib/fantasyTeams";
-import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, readRecordBookData, syncDailyRecordSnapshot, type ContractRecord, type FranchiseStatLine, type RecordBookEntry, type RecordHistoryEvent, type ScoringLeader } from "../../lib/recordBook";
+import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, readRecordBookData, syncDailyRecordSnapshot, type ContractRecord, type ContractValueRecord, type FranchiseStatLine, type RecordBookEntry, type RecordHistoryEvent, type ScoringLeader } from "../../lib/recordBook";
 import { getNhlStatsDate } from "../../lib/nhl";
 import PositionBadge from "../../components/hockey/PositionBadge";
+import { salaryCapForSeason } from "../../lib/cap";
 
 import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 const seasons = playedAndCurrentSeasons;
 type Category = Exclude<RecordBookTab,"Career Earnings">;
 const sections: Record<Category, RecordBookSection> = {
   "FPT Leaders":"leaders", "FPT Franchise Leaders":"franchise", "Franchise Records":"franchise",
-  "League Records":"franchise", "Best/Worst":"season", "Contracts":"contracts",
+  "League Records":"franchise", "Best/Worst":"season", "Contracts":"contracts", "Value Analysis":"value-analysis",
 };
 
 const playerPositionSections = [
@@ -37,6 +38,8 @@ const contractPositionSections = [
 ] as const;
 
 const contractMoney = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
+const contractCapPercentage = new Intl.NumberFormat("en-CA", { style: "percent", maximumFractionDigits: 1 });
+const valueNumber = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 1 });
 
 const skaterRecordMetrics = [
   ["GP", "gamesPlayed"], ["G", "goals"], ["A", "assists"], ["P", "points"], ["+/-", "plusMinus"], ["PIM", "penaltyMinutes"], ["S", "shots"],
@@ -90,6 +93,125 @@ function ContractRecordCard({ contract, rank, position }: { contract?: ContractR
   </article>;
 }
 
+type ContractSort = "total" | "aav" | "end";
+
+function ContractExplorer({ contracts, teams }: { contracts: ContractRecord[]; teams: FantasyTeam[] }) {
+  const [search, setSearch] = useState("");
+  const [positionFilter, setPositionFilter] = useState("all");
+  const [teamFilter, setTeamFilter] = useState("all");
+  const [expiryFilter, setExpiryFilter] = useState("all");
+  const [termFilter, setTermFilter] = useState("all");
+  const [minimumSalary, setMinimumSalary] = useState("");
+  const [maximumSalary, setMaximumSalary] = useState("");
+  const [sort, setSort] = useState<ContractSort>("total");
+  const currentCap = salaryCapForSeason(CURRENT_LEAGUE_SEASON);
+  const rows = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return contracts.filter((contract) => {
+      const currentTeam = contract.currentTeam || contract.signingTeam;
+      return (positionFilter === "all" || contract.position === positionFilter)
+        && (teamFilter === "all" || currentTeam?.id === Number(teamFilter))
+        && (expiryFilter === "all" || contract.endSeason === Number(expiryFilter))
+        && (termFilter === "all" || contract.years === Number(termFilter))
+        && (!minimumSalary || contract.aav >= Number(minimumSalary))
+        && (!maximumSalary || contract.aav <= Number(maximumSalary))
+        && (!query || [contract.playerName, contract.position, currentTeam?.team_name, currentTeam?.abbreviation, contract.signingTeam?.team_name, contract.signingTeam?.abbreviation]
+          .some((value) => value?.toLocaleLowerCase().includes(query)));
+    }).sort((a, b) => {
+      if (sort === "aav") return b.aav - a.aav || b.totalValue - a.totalValue || a.playerName.localeCompare(b.playerName);
+      if (sort === "end") return b.endSeason - a.endSeason || b.totalValue - a.totalValue || a.playerName.localeCompare(b.playerName);
+      return b.totalValue - a.totalValue || b.aav - a.aav || a.playerName.localeCompare(b.playerName);
+    });
+  }, [contracts, expiryFilter, maximumSalary, minimumSalary, positionFilter, search, sort, teamFilter, termFilter]);
+  const visibleTeams = useMemo(() => teams.filter((team) => contracts.some((contract) => (contract.currentTeam || contract.signingTeam)?.id === team.id)).sort((a, b) => a.team_name.localeCompare(b.team_name)), [contracts, teams]);
+  const expiryYears = useMemo(() => [...new Set(contracts.map((contract) => contract.endSeason))].sort((a, b) => a - b), [contracts]);
+  const terms = useMemo(() => [...new Set(contracts.map((contract) => contract.years))].sort((a, b) => a - b), [contracts]);
+  const clearFilters = () => {
+    setSearch("");
+    setPositionFilter("all");
+    setTeamFilter("all");
+    setExpiryFilter("all");
+    setTermFilter("all");
+    setMinimumSalary("");
+    setMaximumSalary("");
+  };
+
+  return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]">
+    <div className="border-b border-gray-200 p-4 dark:border-gray-800 sm:p-5">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">League Contract Database</p>
+      <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-xl font-black text-gray-900 dark:text-white">All Contracts</h2><p className="text-xs text-gray-500">Filter every recorded contract by franchise, position, salary, expiry, or term. Cap percentage uses the {CURRENT_LEAGUE_SEASON} GLDHL cap of {contractMoney.format(currentCap)}.</p></div><p className="text-xs font-bold text-gray-500">{rows.length} of {contracts.length} contracts</p></div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1.4fr)_minmax(11rem,1fr)_8rem_12rem_9rem_9rem_11rem]">
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Search<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Player or team" className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Position<select value={positionFilter} onChange={(event) => setPositionFilter(event.target.value)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="all">All positions</option>{contractPositionSections.map((section) => <option key={section.code} value={section.code}>{section.code}</option>)}</select></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Franchise<select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="all">All franchises</option>{visibleTeams.map((team) => <option key={team.id} value={team.id}>{team.team_name}</option>)}</select></label>
+        <fieldset className="min-w-0"><legend className="text-[10px] font-black uppercase tracking-wider text-gray-500">Salary range</legend><div className="mt-1 grid h-11 grid-cols-2 gap-2"><label className="sr-only" htmlFor="contract-min-salary">Minimum salary</label><input id="contract-min-salary" type="number" min="0" step="100000" value={minimumSalary} onChange={(event) => setMinimumSalary(event.target.value)} placeholder="Min $" aria-label="Minimum salary" className="min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-sm font-semibold text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /><label className="sr-only" htmlFor="contract-max-salary">Maximum salary</label><input id="contract-max-salary" type="number" min="0" step="100000" value={maximumSalary} onChange={(event) => setMaximumSalary(event.target.value)} placeholder="Max $" aria-label="Maximum salary" className="min-w-0 rounded-lg border border-gray-300 bg-white px-2 text-sm font-semibold text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></div></fieldset>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Expiry year<select value={expiryFilter} onChange={(event) => setExpiryFilter(event.target.value)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="all">Any year</option>{expiryYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Term<select value={termFilter} onChange={(event) => setTermFilter(event.target.value)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="all">Any term</option>{terms.map((years) => <option key={years} value={years}>{years} {years === 1 ? "year" : "years"}</option>)}</select></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Sort By<select value={sort} onChange={(event) => setSort(event.target.value as ContractSort)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="total">Total value</option><option value="aav">Annual salary</option><option value="end">Contract end</option></select></label>
+      </div>
+      <button type="button" onClick={clearFilters} className="mt-3 text-xs font-bold text-brand-600 hover:text-brand-700 dark:text-brand-300">Clear filters</button>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="min-w-[1120px] w-full text-sm">
+        <thead className="bg-gray-50 dark:bg-white/[0.03]"><tr className="text-center text-[10px] font-black uppercase tracking-wider text-gray-500"><th className="px-3 py-3">#</th><th className="sticky left-0 z-10 bg-gray-50 px-3 py-3 dark:bg-gray-900">Player</th><th className="px-3 py-3">Pos</th><th className="px-3 py-3">Current Team</th><th className="px-3 py-3">Signed By</th><th className="px-3 py-3">Signed</th><th className="px-3 py-3">Ends</th><th className="px-3 py-3">Term</th><th className="px-3 py-3">Annual Salary</th><th className="px-3 py-3">Cap Hit</th><th className="px-3 py-3">Total Value</th></tr></thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.length ? rows.map((contract, index) => { const currentTeam = contract.currentTeam || contract.signingTeam; return <tr key={contract.key} className="text-center text-gray-600 hover:bg-emerald-50/50 dark:text-gray-300 dark:hover:bg-emerald-500/[0.05]"><td className="px-3 py-3 text-xs font-black text-gray-400">{index + 1}</td><th scope="row" className="sticky left-0 z-10 bg-white px-3 py-3 text-center dark:bg-gray-950"><Link to={`/player-profile?playerId=${contract.playerId}`} className="font-black text-gray-900 hover:text-brand-500 dark:text-white">{contract.playerName}</Link></th><td className="px-3 py-3"><PositionBadge position={contract.position} /></td><td className="px-3 py-3 font-bold">{currentTeam?.abbreviation || "—"}</td><td className="px-3 py-3">{contract.signingTeam?.abbreviation || "—"}</td><td className="px-3 py-3 tabular-nums">{contract.startSeason}</td><td className="px-3 py-3 font-bold tabular-nums">{contract.endSeason}</td><td className="px-3 py-3 tabular-nums">{contract.years} {contract.years === 1 ? "yr" : "yrs"}</td><td className="px-3 py-3 font-bold tabular-nums">{contractMoney.format(contract.aav)}</td><td className="px-3 py-3 font-bold tabular-nums text-brand-600 dark:text-brand-300">{contractCapPercentage.format(contract.aav / currentCap)}</td><td className="px-3 py-3 font-black tabular-nums text-emerald-700 dark:text-emerald-300">{contractMoney.format(contract.totalValue)}</td></tr>; }) : <tr><td colSpan={11} className="px-5 py-12 text-center text-sm font-semibold text-gray-500">No contracts match these filters.</td></tr>}</tbody>
+      </table>
+    </div>
+  </section>;
+}
+
+type ValueSort = "fppg" | "fantasy-points" | "salary" | "fpts-per-million" | "fppg-per-million";
+function ContractValueExplorer({ records, season }: { records: ContractValueRecord[]; season: number }) {
+  const [search, setSearch] = useState("");
+  const [positionFilter, setPositionFilter] = useState("all");
+  const [minimumGames, setMinimumGames] = useState(20);
+  const [mode, setMode] = useState<"production" | "bargains">("production");
+  const [sort, setSort] = useState<ValueSort>("fppg");
+  const salaryCap = salaryCapForSeason(season);
+  const query = search.trim().toLocaleLowerCase();
+  const eligible = records.filter((row) => row.gamesPlayed >= minimumGames
+    && (!query || [row.playerName, row.team?.team_name, row.team?.abbreviation].some((value) => value?.toLocaleLowerCase().includes(query))));
+  const rows = eligible.filter((row) => positionFilter === "all" || row.position === positionFilter).sort((a, b) => {
+    const metric = (row: ContractValueRecord) => {
+      const salaryMillions = row.salary / 1_000_000;
+      if (sort === "fppg-per-million") return (row.fantasyPoints / row.gamesPlayed) / salaryMillions;
+      if (sort === "fantasy-points") return row.fantasyPoints;
+      if (sort === "salary") return row.salary;
+      if (sort === "fpts-per-million") return row.fantasyPoints / salaryMillions;
+      return row.fantasyPoints / row.gamesPlayed;
+    };
+    return metric(b) - metric(a) || b.fantasyPoints - a.fantasyPoints || a.playerName.localeCompare(b.playerName);
+  }).map((row, index) => ({...row, rank:index+1}));
+  const leaders = contractPositionSections.map((section) => ({
+    ...section,
+    player: eligible.filter((row) => row.position === section.code)
+      .sort((a, b) => {
+        const score=(row:ContractValueRecord)=>mode==="production"?row.fantasyPoints/row.gamesPlayed:row.fantasyPoints/(row.salary/1_000_000);
+        return score(b)-score(a)||b.fantasyPoints-a.fantasyPoints||a.playerName.localeCompare(b.playerName);
+      })[0],
+  }));
+  const clearFilters = () => { setSearch(""); setPositionFilter("all"); setMinimumGames(20); setMode("production"); setSort("fppg"); };
+  const setAnalysisMode=(nextMode:"production"|"bargains")=>{setMode(nextMode);setSort(nextMode==="production"?"fppg":"fpts-per-million")};
+
+  return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="border-b border-gray-200 p-4 dark:border-gray-800 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">Player performance · {season}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{mode==="production"?"Production":"Bargain Efficiency"}</h2><p className="mt-1 max-w-3xl text-xs text-gray-500">{mode==="production"?"Ranked by fantasy points per game. Salary and cap hit are shown for context, not used to rank production.":"Ranked by fantasy points per $1M of salary. This highlights inexpensive production and is not an overall player-value ranking."} Leaders are compared within position.</p></div><p className="text-xs font-bold text-gray-500">{rows.length} of {records.length} players</p></div>
+      <div className="mt-4 inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900"><button type="button" aria-pressed={mode==="production"} onClick={()=>setAnalysisMode("production")} className={`rounded-md px-3 py-2 text-xs font-bold ${mode==="production"?"bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white":"text-gray-500"}`}>Production</button><button type="button" aria-pressed={mode==="bargains"} onClick={()=>setAnalysisMode("bargains")} className={`rounded-md px-3 py-2 text-xs font-bold ${mode==="bargains"?"bg-white text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white":"text-gray-500"}`}>Bargain Efficiency</button></div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,1fr)_12rem_12rem_14rem]">
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Search<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Player or franchise" className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Position<select value={positionFilter} onChange={(event) => setPositionFilter(event.target.value)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="all">All positions</option>{contractPositionSections.map((section) => <option key={section.code} value={section.code}>{section.code}</option>)}</select></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Minimum games<select value={minimumGames} onChange={(event) => setMinimumGames(Number(event.target.value))} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value={10}>10 games</option><option value={20}>20 games</option><option value={40}>40 games</option><option value={60}>60 games</option></select></label>
+        <label className="text-[10px] font-black uppercase tracking-wider text-gray-500">Sort By<select value={sort} onChange={(event) => setSort(event.target.value as ValueSort)} className="mt-1 block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white">{mode==="production"?<><option value="fppg">FPPG</option><option value="fantasy-points">Fantasy points</option></>:<><option value="fpts-per-million">Fantasy points / $1M</option><option value="fppg-per-million">FPPG / $1M</option></>}<option value="salary">Annual salary</option></select></label>
+      </div>
+      <button type="button" onClick={clearFilters} className="mt-3 text-xs font-bold text-brand-600 hover:text-brand-700 dark:text-brand-300">Clear filters</button>
+    </div>
+    <div className="grid gap-3 border-b border-gray-100 bg-gray-50/70 p-4 dark:border-gray-800 dark:bg-gray-900/40 sm:grid-cols-2 xl:grid-cols-5">
+      {leaders.map((section) => <article key={section.code} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900"><div className="flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-wider text-gray-500">{mode==="production"?"Top Production":"Best Bargain"} · {section.title}</span><PositionBadge position={section.code}/></div>{section.player?<><Link to={`/player-profile?playerId=${section.player.playerId}`} className="mt-2 block truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{section.player.playerName}</Link><p className="mt-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">{mode==="production"?`${valueNumber.format(section.player.fantasyPoints/section.player.gamesPlayed)} FPPG`:`${valueNumber.format(section.player.fantasyPoints/(section.player.salary/1_000_000))} FPTS / $1M`}</p><p className="text-[10px] text-gray-500">{section.player.gamesPlayed} GP · {contractMoney.format(section.player.salary)}</p></>:<p className="mt-2 text-xs text-gray-400">No player meets the games filter.</p>}</article>)}
+    </div>
+    <div className="overflow-x-auto"><table className="min-w-[1100px] w-full text-sm"><thead className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 dark:bg-gray-900"><tr><th className="px-3 py-3 text-center">#</th><th className="sticky left-0 z-10 bg-gray-50 px-3 py-3 text-center dark:bg-gray-900">Player</th><th className="px-3 py-3 text-center">Pos</th><th className="px-3 py-3 text-center">Franchise</th><th className="px-3 py-3 text-center">GP</th><th className="px-3 py-3 text-center">Annual salary</th><th className="px-3 py-3 text-center">Cap hit</th><th className="px-3 py-3 text-center">Fantasy points</th><th className="px-3 py-3 text-center">FPPG</th><th className="px-3 py-3 text-center">FPTS / $1M</th><th className="px-3 py-3 text-center">FPPG / $1M</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.map((row)=>{const salaryMillions=row.salary/1_000_000;const fppg=row.fantasyPoints/row.gamesPlayed;return <tr key={row.key} className="text-gray-600 hover:bg-emerald-50/50 dark:text-gray-300 dark:hover:bg-emerald-500/[0.05]"><td className="px-3 py-3 text-center text-xs font-black text-gray-400">{row.rank}</td><th scope="row" className="sticky left-0 z-10 bg-white px-3 py-3 text-center dark:bg-gray-950"><Link to={`/player-profile?playerId=${encodeURIComponent(row.playerId)}`} className="font-black text-gray-900 hover:text-brand-500 dark:text-white">{row.playerName}</Link></th><td className="px-3 py-3 text-center"><PositionBadge position={row.position}/></td><td className="px-3 py-3 text-center font-bold">{row.team?.abbreviation||"—"}</td><td className="px-3 py-3 text-center tabular-nums">{row.gamesPlayed}</td><td className="whitespace-nowrap px-3 py-3 text-center font-bold tabular-nums">{contractMoney.format(row.salary)}</td><td className="px-3 py-3 text-center font-bold tabular-nums text-brand-600 dark:text-brand-300">{contractCapPercentage.format(row.salary/salaryCap)}</td><td className="px-3 py-3 text-center font-black tabular-nums text-gray-900 dark:text-white">{valueNumber.format(row.fantasyPoints)}</td><td className="px-3 py-3 text-center tabular-nums">{valueNumber.format(fppg)}</td><td className="px-3 py-3 text-center font-black tabular-nums text-emerald-700 dark:text-emerald-300">{valueNumber.format(row.fantasyPoints/salaryMillions)}</td><td className="px-3 py-3 text-center font-bold tabular-nums">{valueNumber.format(fppg/salaryMillions)}</td></tr>})}</tbody></table>{!rows.length&&<p className="p-6 text-center text-sm text-gray-500">{records.length?"No players match these filters.":"No rostered players with paid salaries and recorded fantasy statistics were found for this season."}</p>}</div>
+  </section>;
+}
+
 function LeaderCard({ leader, rank, position, franchiseView }: { leader?: ScoringLeader; rank: number; position: string; franchiseView?: boolean }) {
   if (!leader) return <article className="flex min-h-72 w-[82vw] max-w-[320px] shrink-0 snap-start flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-5 text-center dark:border-gray-700 dark:bg-white/[0.02] sm:w-auto sm:max-w-none"><span className="text-3xl font-black text-gray-300 dark:text-gray-700">#{rank}</span><p className="mt-3 text-sm font-bold text-gray-400">Leader spot available</p></article>;
   const firstSeason = leader.seasons[0];
@@ -121,14 +243,19 @@ export default function RecordBook() {
   const { abbreviation } = useParams();
   const { isAdmin } = useAuth();
   const [team, setTeam] = useState<FantasyTeam | null>(null);
-  const [season, setSeason] = useState<number | null>(null);
   const [params,setParams]=useSearchParams();
-  const moneyBook=location.pathname==="/contracts"||params.get("view")==="contracts";
-  const selectedTab=recordBookTabs.find(tab=>tab.view===params.get("view")&&tab.label!=="Career Earnings"&&(moneyBook?tab.label==="Contracts":tab.label!=="Contracts"));
+  const [season, setSeason] = useState<number | null>(() => params.get("view")==="value-analysis" ? CURRENT_LEAGUE_SEASON : null);
+  const moneyBook=location.pathname==="/contracts"||params.get("view")==="contracts"||params.get("view")==="value-analysis";
+  const selectedTab=recordBookTabs.find(tab=>tab.view===params.get("view")&&tab.label!=="Career Earnings"&&(moneyBook?(tab.label==="Contracts"||tab.label==="Value Analysis"):tab.label!=="Contracts"&&tab.label!=="Value Analysis"));
   const category=(selectedTab?.label||(moneyBook?"Contracts":"FPT Leaders")) as Category;
-  const setCategory=(label:Category)=>setParams(previous=>{const next=new URLSearchParams(previous);next.set("view",recordBookTabs.find(tab=>tab.label===label)!.view);return next;});
+  const setCategory=(label:Category)=>{
+    if(label==="Value Analysis")setSeason(CURRENT_LEAGUE_SEASON);
+    else if(category==="Value Analysis")setSeason(null);
+    setParams(previous=>{const next=new URLSearchParams(previous);next.set("view",recordBookTabs.find(tab=>tab.label===label)!.view);return next;});
+  };
   const [entries, setEntries] = useState<RecordBookEntry[]>([]);
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
+  const [valueAnalysis, setValueAnalysis] = useState<ContractValueRecord[]>([]);
   const [positionLeaders, setPositionLeaders] = useState<ScoringLeader[]>([]);
   const [franchisePositionLeaders, setFranchisePositionLeaders] = useState<ScoringLeader[]>([]);
   const [franchiseStatLines, setFranchiseStatLines] = useState<FranchiseStatLine[]>([]);
@@ -165,12 +292,12 @@ export default function RecordBook() {
     const saved=readRecordBookData(scopeTeamId,season,undefined,section);
     if (!background) {
       setError(""); setWarnings(saved?.warnings||[]); setLoading(!saved);
-      if(saved){setEntries(saved.entries);setContracts(saved.contracts);setPositionLeaders(saved.positionLeaders);setFranchisePositionLeaders(saved.franchisePositionLeaders);setFranchiseStatLines(saved.franchiseStatLines);setFranchises(saved.teams);setHistory(saved.history);}
+      if(saved){setEntries(saved.entries);setContracts(saved.contracts);setValueAnalysis(saved.valueAnalysis);setPositionLeaders(saved.positionLeaders);setFranchisePositionLeaders(saved.franchisePositionLeaders);setFranchiseStatLines(saved.franchiseStatLines);setFranchises(saved.teams);setHistory(saved.history);}
     }
     try {
       const result = await fetchRecordBookData(scopeTeamId, season, undefined, section);
       if (generation !== loadGeneration.current) return;
-      setEntries(result.entries); setContracts(result.contracts); setPositionLeaders(result.positionLeaders);
+      setEntries(result.entries); setContracts(result.contracts); setValueAnalysis(result.valueAnalysis); setPositionLeaders(result.positionLeaders);
       setFranchisePositionLeaders(result.franchisePositionLeaders); setFranchiseStatLines(result.franchiseStatLines);
       setFranchises(result.teams); setHistory(result.history); setWarnings(result.warnings);
     } catch (reason) {
@@ -229,7 +356,7 @@ export default function RecordBook() {
     <PageMeta title={`${title} | GLDHL`} description="Great Lakes Dynasty Hockey League records and milestones" />
     <PageBreadcrumb pageTitle={title} />
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4 lg:flex-row lg:items-end lg:justify-between"><RecordBookTabs active={category} onSelect={setCategory} /><label className="text-xs font-bold uppercase text-gray-500">Season<select value={season ?? "all"} onChange={(event) => setSeason(event.target.value === "all" ? null : Number(event.target.value))} className="mt-1 block h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white sm:w-auto sm:min-w-32"><option value="all">All Time</option>{seasons.map((year) => <option key={year}>{year}</option>)}</select></label></div>
+      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4 lg:flex-row lg:items-end lg:justify-between"><RecordBookTabs active={category} onSelect={setCategory} /><label className="text-xs font-bold uppercase text-gray-500">Season<select value={season ?? "all"} onChange={(event) => setSeason(event.target.value === "all" ? null : Number(event.target.value))} className="mt-1 block h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white sm:w-auto sm:min-w-32">{category!=="Value Analysis"&&<option value="all">All Time</option>}{seasons.map((year) => <option key={year}>{year}</option>)}</select></label></div>
 
       {category === "FPT Franchise Leaders" && <section className="rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-500/30 dark:bg-brand-500/10"><label className="block text-xs font-black uppercase tracking-[0.16em] text-brand-700 dark:text-brand-300">Select Franchise<select value={selectedFranchiseId ?? ""} disabled={Boolean(team)} onChange={(event) => setSelectedFranchiseId(Number(event.target.value))} className="mt-2 block h-11 w-full rounded-lg border border-brand-200 bg-white px-3 text-sm font-bold text-gray-800 disabled:cursor-not-allowed disabled:opacity-70 dark:border-brand-500/30 dark:bg-gray-900 dark:text-white sm:max-w-sm">{franchises.map((franchise) => <option key={franchise.id} value={franchise.id}>{franchise.team_name}</option>)}</select></label><p className="mt-2 text-xs text-brand-700 dark:text-brand-300">Only points earned for the selected franchise are included. Points stay with the franchise that owned the player when they were earned.</p></section>}
 
@@ -242,7 +369,26 @@ export default function RecordBook() {
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700">{error}</p>}
       {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-64 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div>
         : error ? null : category === "Best/Worst" ? <div className="space-y-5 sm:space-y-6">{playerPositionSections.map((section) => <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Seasonal Records` : "Best/Worst"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view records →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">{section.labels.map((label) => { const entry = playerEntries.find((candidate) => candidate.label === label); return <PlayerRecordCard key={label} entry={entry} label={label} position={section.code} />; })}</div></section>)}</div>
-        : category === "Contracts" ? <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const positionContracts = contracts.filter((contract) => contract.position === section.code); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">{season ? `${season} Contract Book` : "All-Time Contract Book"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view contracts →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const contract = positionContracts[index]; return <ContractRecordCard key={contract?.key || `${section.code}-${index}`} contract={contract} rank={index + 1} position={section.code} />; })}</div></section>; })}</div>
+        : category === "Contracts" ? <div className="space-y-5 sm:space-y-6">
+          {contractPositionSections.map((section) => {
+            const positionContracts = contracts.filter((contract) => contract.position === section.code);
+            return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]">
+              <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">{season ? `${season} Contract Book` : "All-Time Contract Book"}</p>
+                <h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}</h2>
+                <p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view contracts →</p>
+              </div>
+              <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">
+                {Array.from({ length: 5 }, (_, index) => {
+                  const contract = positionContracts[index];
+                  return <ContractRecordCard key={contract?.key || `${section.code}-${index}`} contract={contract} rank={index + 1} position={section.code} />;
+                })}
+              </div>
+            </section>;
+          })}
+          <ContractExplorer contracts={contracts} teams={franchises} />
+        </div>
+        : category === "Value Analysis" ? <ContractValueExplorer records={valueAnalysis} season={season || CURRENT_LEAGUE_SEASON} />
         : (category === "Franchise Records" || category === "League Records") ? (() => { const scoped = recordScope === "franchise" ? franchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : franchiseStatLines; const previousScoped = previousFranchiseStatLines ? (recordScope === "franchise" ? previousFranchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : previousFranchiseStatLines) : null; const scopeName = recordScope === "franchise" ? franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise" : "League Records"; const limit = recordScope === "franchise" ? 10 as const : LEAGUE_RECORD_LIMIT; return <div className="space-y-5 sm:space-y-6"><FranchiseRecordsTable title={`${scopeName} · Skaters`} lines={scoped.filter((line) => line.skater)} previousLines={previousScoped?.filter((line) => line.skater) ?? null} kind="skater" limit={limit} /><FranchiseRecordsTable title={`${scopeName} · Goalies`} lines={scoped.filter((line) => line.goalie)} previousLines={previousScoped?.filter((line) => line.goalie) ?? null} kind="goalie" limit={limit} /></div>; })()
         : <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const franchiseView = category === "FPT Franchise Leaders"; const source = franchiseView ? franchisePositionLeaders.filter((leader) => leader.team?.id === selectedFranchiseId) : positionLeaders; const positionRows = source.filter((leader) => leader.position === section.code).slice(0, 5); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Leaders` : "All-Time Leaders"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}{franchiseView ? ` · ${franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise"}` : ""}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view leaders →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const leader = positionRows[index]; return <LeaderCard key={leader?.key || `${section.code}-${index}`} leader={leader} rank={index + 1} position={section.code} franchiseView={franchiseView} />; })}</div></section>; })}</div>}
       {!loading && history.length > 0 && <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">Record Progression</p><h2 className="text-xl font-black text-gray-900 dark:text-white">When history changed</h2></div><div className="divide-y divide-gray-100 dark:divide-gray-800">{history.map((event) => <article key={event.id} className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-bold text-gray-900 dark:text-white">{event.holder_name}</p><p className="text-xs text-gray-500">{event.record_key.replace(/-/g, " ")} · {event.period_start || new Date(event.achieved_at).toLocaleDateString("en-CA")}</p></div><div className="text-left sm:text-right"><p className="font-black text-brand-600 dark:text-brand-300">{event.record_value.toLocaleString("en-CA", { maximumFractionDigits: 2 })}</p><p className="text-[10px] uppercase text-gray-400">{event.previous_value == null ? "First recorded mark" : `Previous: ${event.previous_value.toLocaleString("en-CA", { maximumFractionDigits: 2 })}`}</p></div></article>)}</div></section>}

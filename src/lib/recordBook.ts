@@ -52,6 +52,17 @@ export type ScoringLeader = {
   currentTeam: FantasyTeam | null;
 };
 
+export type ContractValueRecord = {
+  key: string;
+  playerId: string;
+  playerName: string;
+  position: "C" | "LW" | "RW" | "D" | "G";
+  gamesPlayed: number;
+  fantasyPoints: number;
+  salary: number;
+  team: FantasyTeam | null;
+};
+
 export type FranchiseStatLine = {
   key: string;
   playerId: string;
@@ -103,11 +114,11 @@ function fantasySeasonForDate(date: string) {
 
 function nhlSeasonId(year: number) { return (year - 1) * 10000 + year; }
 
-export type RecordBookSection = "all" | "leaders" | "franchise" | "season" | "contracts";
+export type RecordBookSection = "all" | "leaders" | "franchise" | "season" | "contracts" | "value-analysis";
 
 async function buildRecordBookData(teamId?: number | null, seasonYear?: number | null, asOfDate?: string, section: RecordBookSection = "all") {
-  const needsSeason = section === "all" || section === "season";
-  const needsLeaders = section === "all" || section === "leaders" || section === "franchise";
+  const needsSeason = section === "all" || section === "season" || section === "value-analysis";
+  const needsLeaders = section === "all" || section === "leaders" || section === "franchise" || section === "value-analysis";
   const needsFranchise = section === "all" || section === "franchise";
   const warnings: string[] = [];
   const emptyQuery = Promise.resolve({ data: [], error: null });
@@ -217,7 +228,7 @@ async function buildRecordBookData(teamId?: number | null, seasonYear?: number |
     const position = (goalie ? "G" : nhlPosition || storedPosition || first.position || "C") as ContractRecord["position"];
     return { key, playerId: apiId, playerName: playerName(first), position, aav: first.salary || 0, years, startSeason, endSeason: first.term_end_year || startSeason, totalValue: (first.salary || 0) * years, signingTeam: signing?.fantasy_team || (first.fantasy_team_id ? teamMap.get(first.fantasy_team_id) || null : null), currentTeam: current.fantasy_team_id ? teamMap.get(current.fantasy_team_id) || null : null };
   }).filter((contract) => (!seasonYear || contract.startSeason === seasonYear) && (!teamId || contract.signingTeam?.id === teamId));
-  const topContracts = (["C", "LW", "RW", "D", "G"] as const).flatMap((position) => contracts.filter((contract) => contract.position === position).sort((a, b) => b.totalValue - a.totalValue || b.aav - a.aav).slice(0, 5));
+  contracts.sort((a, b) => b.totalValue - a.totalValue || b.aav - a.aav || a.playerName.localeCompare(b.playerName));
 
   const leaderYears = needsLeaders ? [...new Set(allSeasons.map((row) => row.season_year))]
     .filter(year => year >= FIRST_LEAGUE_SEASON && year <= CURRENT_LEAGUE_SEASON
@@ -250,6 +261,24 @@ async function buildRecordBookData(teamId?: number | null, seasonYear?: number |
       return { row, playerId, position, skater: skater || null, goalie: goalie || null, gamesPlayed: goalie?.gamesPlayed || skater?.gamesPlayed || 0, fantasyPoints: goalie ? getGoalieScore(goalie) : skater ? getSkaterScore(skater) : 0 };
     }).filter((item) => activePositions.has(item.position) && item.gamesPlayed > 0);
   });
+  const valueRows = new Map<number, (typeof leaderRows)[number]>();
+  leaderRows.filter((item) => item.row.season_year === performanceSeason).sort((a, b) => a.row.id - b.row.id)
+    .forEach((item) => valueRows.set(item.row.player_id, item));
+  const valueAnalysis: ContractValueRecord[] = [...valueRows.values()]
+    .filter((item) => Number.isFinite(item.row.salary) && Number(item.row.salary) > 0)
+    .map((item) => {
+      const currentTeam = item.row.fantasy_team_id ? teamMap.get(item.row.fantasy_team_id) : null;
+      return {
+        key: `${item.playerId}:${performanceSeason}`,
+        playerId: item.playerId,
+        playerName: playerName(item.row),
+        position: item.position,
+        gamesPlayed: item.gamesPlayed,
+        fantasyPoints: item.fantasyPoints,
+        salary: Number(item.row.salary),
+        team: currentTeam ? applyTeamBranding(currentTeam, brandingHistory, performanceSeason) : null,
+      };
+    });
   const tradeMoves = transactions.flatMap((transaction) => transaction.transaction_type === "trade" && transaction.trade_offer
     ? transaction.trade_offer.trade_offer_players.map((move) => ({ playerId: move.player_season?.player_id, fromTeamId: move.from_team_id, toTeamId: move.to_team_id, date: transaction.transaction_date }))
     : []).filter((move): move is { playerId: number; fromTeamId: number; toTeamId: number; date: string } => move.playerId != null);
@@ -360,7 +389,7 @@ async function buildRecordBookData(teamId?: number | null, seasonYear?: number |
   const mostHonours = [...honourCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   if (mostHonours) { const winner = monthly.find((award) => award.player_id === mostHonours[0]); entries.push({ key: "most-monthly-honours", category: "Awards & Leadership", label: "Most Monthly Honours", value: mostHonours[1], formattedValue: `${mostHonours[1]} honours`, holder: winner?.player?.full_name || "Unknown player", team: winner?.fantasy_team_id ? teamMap.get(winner.fantasy_team_id) || null : null, playerId: winner?.player?.player_api_id || undefined, verification: "verified" }); }
 
-  return { entries, contracts: topContracts, positionLeaders, franchisePositionLeaders, franchiseStatLines, dailyTeams, dailyPlayers, history: (history || []) as RecordHistoryEvent[], teams, warnings: [...new Set(warnings)] };
+  return { entries, contracts, positionLeaders, franchisePositionLeaders, franchiseStatLines, valueAnalysis, dailyTeams, dailyPlayers, history: (history || []) as RecordHistoryEvent[], teams, warnings: [...new Set(warnings)] };
 }
 
 type RecordBookData = Awaited<ReturnType<typeof buildRecordBookData>>;

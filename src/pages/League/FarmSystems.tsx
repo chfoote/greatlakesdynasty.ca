@@ -154,6 +154,59 @@ function ProspectSpotlight({ team, prospects, loading }: { team: FantasyTeam | n
   return <section className="mb-5 overflow-hidden rounded-2xl border border-emerald-200 bg-white shadow-theme-xs dark:border-emerald-500/30 dark:bg-white/[0.03]"><div className="flex flex-col gap-2 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 to-cyan-50 px-5 py-4 dark:border-emerald-500/20 dark:from-emerald-500/10 dark:to-cyan-500/10 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">Farm Report · {CURRENT_LEAGUE_SEASON}</p><h2 className="mt-1 text-xl font-black text-gray-900 dark:text-white">Prospect Spotlight</h2><p className="mt-1 text-xs text-gray-500">Top NHL-performing prospects ranked by GLDHL fantasy score.</p></div><span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">Goalies and skaters · one leaderboard</span></div>{loading ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => <div key={index} className="h-48 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-800" />)}</div> : leaders.length ? <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto p-4 xl:grid xl:grid-cols-5 xl:overflow-visible">{leaders.map(({ prospect, score, gamesPlayed }, index) => { const record = prospect.goalie || prospect.skater; return <article key={prospect.key} className="relative w-[78vw] max-w-[280px] shrink-0 snap-start overflow-hidden rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900/60 xl:w-auto"><span className="absolute right-3 top-3 text-2xl font-black text-emerald-200 dark:text-emerald-500/20">#{index + 1}</span><div className="flex items-center gap-3"><Link to={prospect.playerId ? `/player-profile?playerId=${prospect.playerId}` : "#"} className="flex h-14 w-14 shrink-0 items-end justify-center overflow-hidden rounded-full bg-white ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">{prospect.headshot ? <img src={prospect.headshot} alt="" className="h-full w-full object-cover object-top" /> : <span className="text-lg font-black text-gray-300">{pickName(prospect.pick).split(" ").map((part) => part[0]).join("").slice(0, 2)}</span>}</Link><div className="min-w-0"><Link to={prospect.playerId ? `/player-profile?playerId=${prospect.playerId}` : "#"} className="block truncate text-sm font-black text-gray-900 hover:text-brand-500 dark:text-white">{pickName(prospect.pick)}</Link><div className="mt-1 flex items-center gap-1.5"><PositionBadge position={prospect.pick.positionCode} />{prospect.pick.teamLogoLight && <img src={prospect.pick.teamLogoLight} alt="" className="h-5 w-5 object-contain" />}</div></div></div><div className="mt-4 grid grid-cols-3 gap-1 rounded-lg bg-white p-2 text-center dark:bg-gray-950/60"><div><p className="text-[8px] font-black uppercase text-gray-400">GP</p><p className="mt-0.5 text-sm font-black text-gray-800 dark:text-white">{gamesPlayed}</p></div><div><p className="text-[8px] font-black uppercase text-gray-400">{prospect.goalie ? "W" : "PTS"}</p><p className="mt-0.5 text-sm font-black text-gray-800 dark:text-white">{prospect.goalie ? prospect.goalie.wins : prospect.skater ? prospect.skater.goals + prospect.skater.assists : 0}</p></div><div><p className="text-[8px] font-black uppercase text-gray-400">FPPG</p><p className="mt-0.5 text-sm font-black text-gray-800 dark:text-white">{gamesPlayed ? formatFantasyPoints(score / gamesPlayed) : "—"}</p></div></div><div className="mt-3 flex items-end justify-between"><div><p className="text-[8px] font-black uppercase tracking-wider text-gray-400">Fantasy Score</p><p className="text-xl font-black text-emerald-600 dark:text-emerald-300">{formatFantasyPoints(score)}</p></div><p className="text-[9px] font-semibold text-gray-400">{record?.teamAbbrevs || prospect.pick.teamAbbrev}</p></div></article>; })}</div> : <div className="px-5 py-10 text-center"><p className="text-sm font-bold text-gray-600 dark:text-gray-300">No prospect fantasy points yet</p><p className="mt-1 text-xs text-gray-400">This leaderboard will populate as eligible prospects produce in the NHL.</p></div>}</section>;
 }
 
+function ProspectPlan({ team, prospects, loading }: { team: FantasyTeam | null; prospects: FarmProspect[]; loading: boolean }) {
+  const owned = prospects
+    .filter((prospect) => !prospect.previouslySigned && (!prospect.currentRights || prospect.currentRights.team.id === team?.id))
+    .map((prospect) => {
+      const age = ageOnDate(prospect.birthDate);
+      const gamesPlayed = prospect.goalie?.gamesPlayed || prospect.skater?.gamesPlayed || 0;
+      const score = prospect.goalie ? getGoalieScore(prospect.goalie) : prospect.skater ? getSkaterScore(prospect.skater) : 0;
+      return { prospect, age, gamesPlayed, score };
+    })
+    .filter((entry) => entry.age === null || entry.age < 25)
+    .sort((a, b) => (b.age ?? -1) - (a.age ?? -1) || b.score - a.score);
+  const ageReviews = owned.filter(({ age }) => age === 24).length;
+  const NHLActive = owned.filter(({ prospect, gamesPlayed }) => prospect.statsSeason === CURRENT_LEAGUE_SEASON && gamesPlayed > 0).length;
+
+  return <section className="mb-5 overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-theme-xs dark:border-indigo-500/30 dark:bg-white/[0.03]">
+    <div className="border-b border-indigo-100 bg-gradient-to-r from-indigo-50 to-sky-50 px-5 py-4 dark:border-indigo-500/20 dark:from-indigo-500/10 dark:to-sky-500/10">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-300">Pipeline planning · {CURRENT_LEAGUE_SEASON}</p>
+      <h2 className="mt-1 text-xl font-black text-gray-900 dark:text-white">Prospect Plan</h2>
+      <p className="mt-1 text-xs text-gray-500">A quick review of held prospect rights, age eligibility, and NHL-ready activity. Age 25 is the existing farm-rights cutoff.</p>
+    </div>
+    {loading ? <div className="h-40 animate-pulse bg-gray-50 dark:bg-gray-900/40" /> : <>
+      <div className="grid gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:grid-cols-3">
+        <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900/60"><p className="text-[10px] font-black uppercase tracking-wider text-gray-400">Eligible rights</p><p className="mt-1 text-2xl font-black text-gray-900 dark:text-white">{owned.length}</p></div>
+        <div className="rounded-xl bg-amber-50 p-3 dark:bg-amber-500/10"><p className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">Age 24 · review soon</p><p className="mt-1 text-2xl font-black text-amber-800 dark:text-amber-200">{ageReviews}</p></div>
+        <div className="rounded-xl bg-sky-50 p-3 dark:bg-sky-500/10"><p className="text-[10px] font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">Active in NHL this season</p><p className="mt-1 text-2xl font-black text-sky-800 dark:text-sky-200">{NHLActive}</p></div>
+      </div>
+      {owned.length ? <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {owned.slice(0, 8).map(({ prospect, age, gamesPlayed }) => {
+          const active = prospect.statsSeason === CURRENT_LEAGUE_SEASON && gamesPlayed > 0;
+          const review = age === 24;
+          const name = pickName(prospect.pick);
+          const status = review ? "Review before age 25" : active ? "Consider call-up fit" : age === null ? "Verify age eligibility" : "Develop";
+          return <div key={prospect.key} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              {prospect.headshot && <img src={prospect.headshot} alt="" className="h-10 w-10 shrink-0 rounded-full bg-gray-100 object-cover object-top dark:bg-gray-800" />}
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-gray-900 dark:text-white">{prospect.playerId ? <Link to={`/player-profile?playerId=${prospect.playerId}`} className="hover:text-brand-500">{name}</Link> : name}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{prospect.pick.positionCode || "Position unknown"} · {age === null ? "Age unknown" : `Age ${age}`} · {active ? `${gamesPlayed} NHL GP` : "No NHL games this season"}</p>
+              </div>
+            </div>
+            <span className={`self-start rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide sm:self-auto ${review ? "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200" : active ? "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>{status}</span>
+          </div>;
+        })}
+        {owned.length > 8 && <p className="px-5 py-3 text-xs text-gray-500">Showing 8 of {owned.length} eligible prospects; review the full farm board below.</p>}
+      </div> : <p className="px-5 py-8 text-center text-sm text-gray-500">No eligible, unsigned prospect rights were identified for this farm system.</p>}
+      <div className="flex flex-col gap-2 border-t border-gray-100 bg-gray-50/70 px-5 py-3 text-xs text-gray-500 dark:border-gray-800 dark:bg-gray-900/40 sm:flex-row sm:items-center sm:justify-between">
+        <span>Future call-up salary is not projected here; prospect records do not define a future roster salary.</span>
+        <Link to="/roster-lab" className="shrink-0 font-semibold text-brand-600 hover:underline dark:text-brand-300">Model a call-up in Roster Lab →</Link>
+      </div>
+    </>}
+  </section>;
+}
+
 function ProspectCells({ prospect }: { prospect?: FarmProspect }) {
   if (!prospect) return <>
     <td className="px-3 py-3 text-center text-gray-300 dark:text-gray-700">—</td>
@@ -374,6 +427,7 @@ export default function FarmSystems() {
         <TeamIdentityCard team={team} season={CURRENT_LEAGUE_SEASON} managerName={team.manager_name} />
         <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-gray-500">NHL Draft classes {draftYears[draftYears.length - 1]}–{draftYears[0]}</p><div className="flex items-center gap-4"><Link to="/farm-system-rankings" className="text-sm font-semibold text-indigo-600 hover:underline dark:text-indigo-300">View Farm System Rankings</Link><Link to={`/teams/${team.id}`} className="text-sm font-semibold text-brand-500 hover:underline">Back to team</Link></div></div>
       </div>}
+      {team && <ProspectPlan team={team} prospects={prospects} loading={loading} />}
       <ProspectSpotlight team={team} prospects={prospects} loading={loading} />
       <DraftBoard team={team} draftYears={draftYears} easternProspects={easternProspects} westernProspects={westernProspects} loading={loading} />
     </>}

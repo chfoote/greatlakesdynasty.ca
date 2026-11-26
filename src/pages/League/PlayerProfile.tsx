@@ -13,6 +13,8 @@ import { usePlayerTradeInterest } from "../../hooks/usePlayerTradeInterest";
 import PlayerInterestButton from "./PlayerInterestButton";
 import { fetchPlayerLeadership } from "../../lib/teamLeadership";
 import { LEAGUE_RECORD_LIMIT, fetchRecordBookData, type FranchiseStatLine, type ScoringLeader } from "../../lib/recordBook";
+import { buildCareerEarnings, type CareerEarnings } from "../../lib/careerEarnings";
+import { salaryCapForSeason } from "../../lib/cap";
 import PositionBadge from "../../components/hockey/PositionBadge";
 import CountryFlagBadge from "../../components/hockey/CountryFlagBadge";
 import PlayerAwardBadges from "./PlayerAwardBadges";
@@ -27,6 +29,22 @@ function actionLabel(action: string) { return action.replace(/_/g, " ").replace(
 
 function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900/70"><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p><div className="mt-1 text-sm font-medium text-gray-800 dark:text-white/90">{value || "—"}</div></div>;
+}
+
+function PlayerFinancials({ earnings, currentSeason }: { earnings: CareerEarnings | null; currentSeason: PlayerSeasonWithRelations | null }) {
+  const salary = earnings?.years.find((year) => year.year === CURRENT_LEAGUE_SEASON)?.salary ?? null;
+  const expiry = currentSeason && !["BUYOUT", "RETENTION"].includes((currentSeason.position || "").toUpperCase()) ? currentSeason.term_end_year : null;
+  const remainingValue = earnings?.years.filter((year) => year.year >= CURRENT_LEAGUE_SEASON && (!expiry || year.year <= expiry)).reduce((total, year) => total + year.salary, 0) ?? 0;
+  return <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-300">GLDHL contract record</p><h2 className="mt-1 text-lg font-black text-gray-900 dark:text-white">Player Financials</h2><p className="mt-1 text-xs text-gray-500">League salary and contract seasons recorded in GLDHL history.</p></div>
+    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+      <InfoCard label={`${CURRENT_LEAGUE_SEASON} annual salary`} value={salary == null ? "No current salary recorded" : money.format(salary)} />
+      <InfoCard label="Contract expires" value={expiry || "No expiry recorded"} />
+      <InfoCard label="Remaining contract value" value={expiry && remainingValue ? <><span>{money.format(remainingValue)}</span><span className="mt-1 block text-[10px] text-gray-500">Includes {CURRENT_LEAGUE_SEASON} salary through {expiry}</span></> : "No remaining value recorded"} />
+      <InfoCard label="Current cap hit" value={salary == null ? "—" : `${money.format(salary)} · ${(salary / salaryCapForSeason(CURRENT_LEAGUE_SEASON) * 100).toFixed(1)}% of cap`} />
+    </div>
+    <div className="border-t border-gray-100 dark:border-gray-800"><div className="px-5 py-3"><h3 className="text-sm font-black text-gray-900 dark:text-white">Annual contract history</h3></div>{earnings?.years.length ? <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-500 dark:bg-gray-900"><tr><th className="px-4 py-3 text-center">Season</th><th className="px-4 py-3 text-center">Franchise</th><th className="px-4 py-3 text-center">Annual salary</th><th className="px-4 py-3 text-center">Status</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{earnings.years.map((year) => <tr key={year.year} className="text-center text-gray-700 dark:text-gray-300"><td className="px-4 py-3 font-bold">{year.year}</td><td className="px-4 py-3">{year.teamName}</td><td className="px-4 py-3 font-black tabular-nums">{money.format(year.salary)}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${year.year > CURRENT_LEAGUE_SEASON ? "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"}`}>{year.year > CURRENT_LEAGUE_SEASON ? "Future commitment" : "Recorded season"}</span></td></tr>)}</tbody></table></div> : <p className="px-5 pb-5 text-sm text-gray-500">No contract seasons have been recorded for this player.</p>}</div>
+  </section>;
 }
 
 function LeadershipSeasonBadge({ role }: { role?: "C" | "A" }) {
@@ -222,8 +240,12 @@ export default function PlayerProfile() {
   const [leadershipByPlayerSeason, setLeadershipByPlayerSeason] = useState<Map<number, "C" | "A">>(new Map());
   const [franchiseScoring, setFranchiseScoring] = useState<ScoringLeader[]>([]);
   const [playerRecords, setPlayerRecords] = useState<PlayerRecordPlacement[]>([]);
-  const [profileTab, setProfileTab] = useState<"resume" | "history" | "trophies" | "records" | "franchises" | "transactions">("history");
+  const [profileTab, setProfileTab] = useState<"resume" | "history" | "trophies" | "records" | "franchises" | "transactions" | "financials">("history");
   const [tabLoading, setTabLoading] = useState(false);
+  const [financialEarnings, setFinancialEarnings] = useState<CareerEarnings | null>(null);
+  const [financialError, setFinancialError] = useState("");
+  const [financialLoading, setFinancialLoading] = useState(false);
+  const [financialRetry, setFinancialRetry] = useState(0);
   const tradeInterest = usePlayerTradeInterest(CURRENT_LEAGUE_SEASON);
 
   useEffect(() => {
@@ -284,7 +306,23 @@ export default function PlayerProfile() {
     return () => { active = false; };
   }, [profileTab, playerApiId]);
 
+  useEffect(() => {
+    if (profileTab !== "financials" || !fantasyPlayer) return;
+    let active = true;
+    setFinancialLoading(true);
+    setFinancialError("");
+    fetchLeagueTransactions().then((rows) => {
+      if (!active) return;
+      const playerTransactions = rows.filter((transaction) => transaction.player_id === fantasyPlayer.id);
+      setFinancialEarnings(buildCareerEarnings(seasons, playerTransactions, true).find((row) => row.playerId === playerApiId) || null);
+    }).catch((reason: unknown) => {
+      if (active) setFinancialError(reason instanceof Error ? reason.message : "Unable to load player contract history.");
+    }).finally(() => { if (active) setFinancialLoading(false); });
+    return () => { active = false; };
+  }, [profileTab, fantasyPlayer, seasons, playerApiId, financialRetry]);
+
   const currentSeason = useMemo(() => seasons.find((season) => season.season_year === CURRENT_LEAGUE_SEASON) || seasons[0] || null, [seasons]);
+  const currentFinancialSeason = useMemo(() => seasons.find((season) => season.season_year === CURRENT_LEAGUE_SEASON) || null, [seasons]);
   const name = playerName(fantasyPlayer, landing);
   const position = displayPosition(currentSeason?.position === "RFA" || currentSeason?.position === "PROSPECT" ? landing?.position : currentSeason?.position || landing?.position);
   const draft = landing?.draftDetails;
@@ -312,6 +350,7 @@ export default function PlayerProfile() {
               ["trophies", "Trophy Case", awards.length],
               ["records", "Records", playerRecords.length],
               ["franchises", "Points by Franchise", franchiseScoring.length],
+              ["financials", "Financials", financialEarnings?.years.length || 0],
               ["transactions", "Transactions", transactions.length],
             ] as const).map(([key, label, count]) => <button key={key} type="button" onClick={() => setProfileTab(key)} aria-pressed={profileTab === key} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold transition ${profileTab === key ? "bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"}`}>{label}<span className={`ml-2 rounded-full px-1.5 py-0.5 text-[9px] ${profileTab === key ? "bg-white/20 dark:bg-gray-900/10" : "bg-white dark:bg-gray-900"}`}>{count}</span></button>)}
           </div>
@@ -320,6 +359,9 @@ export default function PlayerProfile() {
         {profileTab === "history" && historyLoading && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading previous league seasons…</div>}
         {profileTab === "history" && !historyLoading && <SeasonHistory rows={historicalStats} seasons={seasons} awards={awards} leadership={leadershipByPlayerSeason} />}
         {profileTab === "trophies" && <PlayerTrophyCase awards={awards} />}
+        {profileTab === "financials" && financialLoading && <div role="status" className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading contract history…</div>}
+        {profileTab === "financials" && financialError && <div role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700"><p>{financialError}</p><button type="button" onClick={() => setFinancialRetry((attempt) => attempt + 1)} className="mt-2 rounded-lg border border-error-300 px-3 py-1.5 text-xs font-bold hover:bg-error-100">Retry</button></div>}
+        {profileTab === "financials" && !financialLoading && !financialError && <PlayerFinancials earnings={financialEarnings} currentSeason={currentFinancialSeason} />}
         {tabLoading && (profileTab === "resume" || profileTab === "records" || profileTab === "franchises" || profileTab === "transactions") && <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03]">Loading {profileTab === "resume" ? "career résumé" : profileTab === "records" ? "record-book placements" : profileTab === "franchises" ? "franchise scoring" : "transactions"}…</div>}
         {!tabLoading && profileTab === "resume" && <PlayerResume records={playerRecords} awards={awards} franchises={franchiseScoring} seasons={seasons} leadership={leadershipByPlayerSeason} />}
         {!tabLoading && profileTab === "records" && <PlayerRecords records={playerRecords} />}
