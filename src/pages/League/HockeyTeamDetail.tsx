@@ -50,8 +50,9 @@ import { fetchTeamLeadership, type TeamLeadership } from "../../lib/teamLeadersh
 import PositionBadge from "../../components/hockey/PositionBadge";
 import InjuryDesignationBadge from "../../components/hockey/InjuryDesignationBadge";
 import CountryFlagBadge from "../../components/hockey/CountryFlagBadge";
+import { ACTIVE_ROSTER_POSITIONS, calculateTeamCap, EMPTY_CAP_ADJUSTMENTS, ROSTER_LIMIT, type CapAdjustments } from "../../lib/cap";
+import { fetchTeamCapAdjustmentTotals } from "../../lib/capAdjustments";
 
-const ROSTER_LIMIT = 23;
 const seasonOptions = playedAndCurrentSeasons;
 const activeSections = [
   { code: "C", label: "Centers", type: "skater" },
@@ -67,18 +68,13 @@ const nonRosterSections = [
   { code: "LTIR", label: "Long-Term Injured Reserve", cap: false },
   { code: "RETENTION", label: "Retention", cap: true },
 ] as const;
-const activePositions = new Set(activeSections.map((section) => section.code));
-const capPositions = new Set([...activePositions, "W", "IR", "RETENTION"]);
+const activePositions = ACTIVE_ROSTER_POSITIONS;
 const ageRosterPositions = new Set([...activePositions, "W", "IR", "LTIR"]);
 const prospectPositions = new Set(["PROSPECT", "AP"]);
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 
 function nhlSeasonId(year: number) {
   return (year - 1) * 10000 + year;
-}
-
-function salaryCapForSeason(year: number) {
-  return year <= 2026 ? 45_000_000 : 50_000_000;
 }
 
 function playerName(season: PlayerSeasonWithRelations) {
@@ -458,6 +454,7 @@ function EmptyRow({ columns }: { columns: number }) {
 function MultiYearView({
   years,
   rosters,
+  adjustments,
   skaters,
   goalies,
   awardsByPlayer,
@@ -466,6 +463,7 @@ function MultiYearView({
 }: {
   years: number[];
   rosters: Record<number, PlayerSeasonWithRelations[]>;
+  adjustments: Record<number, CapAdjustments>;
   skaters: Map<string, NhlSkaterRecord>;
   goalies: Map<string, NhlGoalieRecord>;
   awardsByPlayer: Map<number, PlayerAward[]>;
@@ -474,10 +472,8 @@ function MultiYearView({
 }) {
   const summaries = years.map((year) => {
     const rows = rosters[year] || [];
-    const salary = rows.filter((row) => capPositions.has(position(row) as never)).reduce((total, row) => total + (row.salary || 0), 0);
-    const rosterSize = rows.filter((row) => activePositions.has(position(row) as never)).length;
-    const cap = salaryCapForSeason(year);
-    return { year, salary, rosterSize, cap, space: cap - salary };
+    const summary = calculateTeamCap(rows, year, adjustments[year] || EMPTY_CAP_ADJUSTMENTS);
+    return { year, salary: summary.capSalary, rosterSize: summary.rosterCount, cap: summary.salaryCap, space: summary.capSpace };
   });
 
   const players = useMemo(() => {
@@ -564,9 +560,11 @@ export default function HockeyTeamDetail() {
   const [roster, setRoster] = useState<PlayerSeasonWithRelations[]>([]);
   const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
   const [retentionAdjustments, setRetentionAdjustments] = useState<RetentionAdjustment[]>([]);
+  const [capAdjustments, setCapAdjustments] = useState<CapAdjustments>(EMPTY_CAP_ADJUSTMENTS);
   const [tradeBlockIds, setTradeBlockIds] = useState<Set<number>>(new Set());
   const tradeInterest = usePlayerTradeInterest(selectedSeason);
   const [multiYearRosters, setMultiYearRosters] = useState<Record<number, PlayerSeasonWithRelations[]>>({});
+  const [multiYearAdjustments, setMultiYearAdjustments] = useState<Record<number, CapAdjustments>>({});
   const [multiYearLeadership, setMultiYearLeadership] = useState<Map<number, "C" | "A">>(new Map());
   const [skaters, setSkaters] = useState<Map<string, NhlSkaterRecord>>(new Map());
   const [goalies, setGoalies] = useState<Map<string, NhlGoalieRecord>>(new Map());
@@ -668,10 +666,16 @@ export default function HockeyTeamDetail() {
   useEffect(() => {
     if (!team) return;
     let active = true;
-    Promise.all([fetchPlayerSeasonsByTeamAndSeason(team.id, selectedSeason), fetchBuyoutPenalties(selectedSeason, team.id).catch(() => [] as BuyoutPenalty[]), fetchRetentionAdjustments(selectedSeason, team.id).catch(() => [] as RetentionAdjustment[])])
-      .then(([seasonRows, penaltyRows, adjustmentRows]) => {
+    Promise.all([
+      fetchPlayerSeasonsByTeamAndSeason(team.id, selectedSeason),
+      fetchTeamCapAdjustmentTotals({ teamId: team.id, seasonYear: selectedSeason }),
+      fetchBuyoutPenalties(selectedSeason, team.id).catch(() => [] as BuyoutPenalty[]),
+      fetchRetentionAdjustments(selectedSeason, team.id).catch(() => [] as RetentionAdjustment[]),
+    ])
+      .then(([seasonRows, totalRows, penaltyRows, adjustmentRows]) => {
         if (!active) return;
         setRoster(seasonRows);
+        setCapAdjustments(totalRows[0] || EMPTY_CAP_ADJUSTMENTS);
         setBuyoutPenalties(penaltyRows);
         setRetentionAdjustments(adjustmentRows);
         setError("");
@@ -748,13 +752,17 @@ export default function HockeyTeamDetail() {
   useEffect(() => {
     if (!team || viewMode !== "multi") return;
     let active = true;
-    Promise.all(multiYearSeasons.map(async (year) => {
-      const [players, leaders] = await Promise.all([fetchPlayerSeasonsByTeamAndSeason(team.id, year), fetchTeamLeadership(team.id, year)]);
-      return { year, players, leaders };
-    }))
-      .then((results) => {
+    Promise.all([
+      Promise.all(multiYearSeasons.map(async (year) => {
+        const [players, leaders] = await Promise.all([fetchPlayerSeasonsByTeamAndSeason(team.id, year), fetchTeamLeadership(team.id, year)]);
+        return { year, players, leaders };
+      })),
+      fetchTeamCapAdjustmentTotals({ teamId: team.id, seasonYears: multiYearSeasons }),
+    ])
+      .then(([results, totalRows]) => {
         if (!active) return;
         setMultiYearRosters(Object.fromEntries(results.map(({ year, players }) => [year, players])));
+        setMultiYearAdjustments(Object.fromEntries(totalRows.map((row) => [row.seasonYear, row])));
         setMultiYearLeadership(new Map(results.flatMap(({ leaders }) => leaders.map((entry) => [entry.player_season_id, entry.slot === "C" ? "C" as const : "A" as const] as const))));
         setError("");
       })
@@ -874,13 +882,8 @@ export default function HockeyTeamDetail() {
   const ageDate = selectedSeason === CURRENT_LEAGUE_SEASON ? new Date() : new Date(`${selectedSeason - 1}-10-01T12:00:00`);
   const rosterAges = ageRoster.map((season) => birthDatesByPlayer.get(playerApiId(season))).filter((date): date is string => Boolean(date)).map((date) => ageOnDate(date, ageDate)).filter((age): age is number => age !== null);
   const averageRosterAge = rosterAges.length ? rosterAges.reduce((sum, age) => sum + age, 0) / rosterAges.length : null;
-  const buyoutPenaltyTotal = buyoutPenalties.reduce((sum, penalty) => sum + penalty.amount, 0);
-  const retentionNet = retentionAdjustments.reduce((sum, adjustment) => sum + adjustment.amount, 0);
-  const buyoutSlotsUsed = new Set(buyoutPenalties.map((penalty) => penalty.buyout_id)).size;
-  const retentionSlotsUsed = new Set(retentionAdjustments.filter((adjustment) => adjustment.adjustment_type === "charge").map((adjustment) => adjustment.retention_id)).size;
-  const capSalary = roster.filter((season) => capPositions.has(position(season) as never)).reduce((sum, season) => sum + (season.salary || 0), 0) + buyoutPenaltyTotal + retentionNet;
-  const salaryCap = salaryCapForSeason(selectedSeason);
-  const capSpace = salaryCap - capSalary;
+  const capSummary = calculateTeamCap(roster, selectedSeason, capAdjustments);
+  const { buyoutPenaltyTotal, retentionNet, buyoutSlotsUsed, retentionSlotsUsed, capSalary, salaryCap, capSpace } = capSummary;
   const prospects = roster.filter((season) => prospectPositions.has(position(season)));
   const displayedSkaters = statsView === "season" ? skaters : dailySkaters;
   const displayedGoalies = statsView === "season" ? goalies : dailyGoalies;
@@ -912,11 +915,11 @@ export default function HockeyTeamDetail() {
           {error && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">{error}</div>}
           {statsView !== "season" && dailyStatsError && <p role="status" className="mt-3 text-sm text-gray-500 dark:text-gray-400">{dailyStatsError}</p>}
           {statsError && <div className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">Roster loaded, but NHL statistics could not be loaded: {statsError}</div>}
-          {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} skaters={skaters} goalies={goalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : viewMode === "lineup" ? <LineupPreview roster={roster} contractHistory={contractHistory} seasonYear={selectedSeason} skaters={skaters} goalies={goalies} headshots={lineupHeadshots} nhlTeams={nhlTeamsByPlayer} birthCountries={birthCountriesByPlayer} leadershipByPlayer={leadershipByPlayer} livePlayerIds={livePlayerIds} team={displayTeam || team} /> : <div className="mt-5 space-y-4">
+          {viewMode === "multi" ? <MultiYearView years={multiYearSeasons} rosters={multiYearRosters} adjustments={multiYearAdjustments} skaters={skaters} goalies={goalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} leadershipByPlayer={multiYearLeadership} /> : viewMode === "lineup" ? <LineupPreview roster={roster} contractHistory={contractHistory} seasonYear={selectedSeason} skaters={skaters} goalies={goalies} headshots={lineupHeadshots} nhlTeams={nhlTeamsByPlayer} birthCountries={birthCountriesByPlayer} leadershipByPlayer={leadershipByPlayer} livePlayerIds={livePlayerIds} team={displayTeam || team} /> : <div className="mt-5 space-y-4">
             {activeSections.map((section) => section.type === "goalie" ? <GoalieTable key={section.code} players={byPosition.G || []} stats={displayedGoalies} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} /> : <SkaterTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} stats={displayedSkaters} nhlTeams={nhlTeamsByPlayer} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} leadershipByPlayer={leadershipByPlayer} renderInterest={renderInterest} />)}
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Non-Rostered Players</h3><div className="space-y-4">{nonRosterSections.map((section) => <CompactTable key={section.code} code={section.code} label={section.label} players={byPosition[section.code] || []} skaters={displayedSkaters} goalies={displayedGoalies} nhlTeams={nhlTeamsByPlayer} note={section.cap ? "Counts toward cap only" : "Excluded from cap and roster"} awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} renderInterest={renderInterest} />)}</div></div>
-            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Buyout Penalties</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Dead cap charges</span><span className="text-xs text-gray-500">Counts toward cap · no roster spot</span></div>{buyoutPenalties.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{buyoutPenalties.map((penalty) => <tr key={penalty.id}><td className="px-3 py-3 font-semibold">{penalty.player?.full_name || "Player buyout"}</td><td className="px-3 py-3 text-center">{penalty.season_year}</td><td className="px-3 py-3 text-right font-black text-error-600">{money.format(penalty.amount)}</td></tr>)}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">No buyout penalties this season.</p>}</div></div>
-            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Salary Retention</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Retention charges and relief</span><span className="text-xs text-gray-500">Net adjustment: {money.format(retentionNet)}</span></div>{retentionAdjustments.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{retentionAdjustments.map((adjustment) => { const counterpart = adjustment.adjustment_type === "charge" ? adjustment.retention?.receiving_team : adjustment.retention?.retaining_team; return <tr key={adjustment.id}><td className="px-3 py-3 font-semibold">{adjustment.player?.full_name || "Retained contract"}</td><td className="px-3 py-3 text-center capitalize">{adjustment.adjustment_type}{counterpart ? ` · ${counterpart.abbreviation}` : ""}</td><td className={`px-3 py-3 text-right font-black ${adjustment.amount > 0 ? "text-error-600" : "text-success-600"}`}>{adjustment.amount > 0 ? "+" : "−"}{money.format(Math.abs(adjustment.amount))}</td></tr>; })}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">No retention adjustments this season.</p>}</div></div>
+            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Buyout Penalties</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Dead cap charges</span><span className="text-xs text-gray-500">Counts toward cap · no roster spot</span></div>{buyoutPenalties.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{buyoutPenalties.map((penalty) => <tr key={penalty.id}><td className="px-3 py-3 font-semibold">{penalty.player?.full_name || "Player buyout"}</td><td className="px-3 py-3 text-center">{penalty.season_year}</td><td className="px-3 py-3 text-right font-black text-error-600">{money.format(penalty.amount)}</td></tr>)}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">{buyoutPenaltyTotal ? `${money.format(buyoutPenaltyTotal)} is included in the public cap total. Sign in to view player-level details.` : "No buyout penalties this season."}</p>}</div></div>
+            <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Salary Retention</h3><div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800"><div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-white/[0.03]"><span className="text-sm font-semibold">Retention charges and relief</span><span className="text-xs text-gray-500">Net adjustment: {money.format(retentionNet)}</span></div>{retentionAdjustments.length ? <table className="min-w-full text-sm"><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{retentionAdjustments.map((adjustment) => { const counterpart = adjustment.adjustment_type === "charge" ? adjustment.retention?.receiving_team : adjustment.retention?.retaining_team; return <tr key={adjustment.id}><td className="px-3 py-3 font-semibold">{adjustment.player?.full_name || "Retained contract"}</td><td className="px-3 py-3 text-center capitalize">{adjustment.adjustment_type}{counterpart ? ` · ${counterpart.abbreviation}` : ""}</td><td className={`px-3 py-3 text-right font-black ${adjustment.amount > 0 ? "text-error-600" : "text-success-600"}`}>{adjustment.amount > 0 ? "+" : "−"}{money.format(Math.abs(adjustment.amount))}</td></tr>; })}</tbody></table> : <p className="px-3 py-5 text-center text-sm text-gray-500">{retentionNet ? `${money.format(Math.abs(retentionNet))} of ${retentionNet > 0 ? "retention charges" : "retention relief"} is included in the public cap total. Sign in to view player-level details.` : "No retention adjustments this season."}</p>}</div></div>
             <div className="pt-2"><h3 className="mb-3 font-semibold text-gray-800 dark:text-white/90">Acquired Prospects</h3><CompactTable code="AP" label="Acquired Prospects" players={prospects} skaters={displayedSkaters} goalies={displayedGoalies} nhlTeams={nhlTeamsByPlayer} note="Excluded from cap and roster" awardsByPlayer={awardsByPlayer} tradeBlockIds={tradeBlockIds} livePlayerIds={livePlayerIds} renderInterest={renderInterest} /></div>
           </div>}
         </div>

@@ -94,7 +94,7 @@ export default function Rulebook() {
       </RuleSection>
 
       <RuleSection id="scoring" number="5" title="League Scoring">
-        <div className="grid gap-4 lg:grid-cols-2"><div className="rounded-xl bg-slate-950 p-5 text-white"><p className="text-xs font-black uppercase tracking-wider text-blue-300">5.1 Skater Scoring Formula</p><p className="mt-3 font-mono text-sm leading-7">(G × 3) + (A × 2) + (+/− × 0.25) + (PIM × 0.2) + PPG + (SHG × 2) + GWG + PPA + (SHA × 2) + (SOG × 0.2) + (FOW × 0.025) + (B × 0.2) + (H × 0.2)</p></div><div className="rounded-xl bg-slate-950 p-5 text-white"><p className="text-xs font-black uppercase tracking-wider text-blue-300">5.2 Goaltender Scoring Formula</p><p className="mt-3 font-mono text-sm leading-7">(W × 3) + L + T/O + (GA × −0.5) + (S × 0.2) + (SO × 2) + P + (PIM × −1)</p></div></div>
+        <div className="grid gap-4 lg:grid-cols-2"><div className="rounded-xl bg-slate-950 p-5 text-white"><p className="text-xs font-black uppercase tracking-wider text-blue-300">5.1 Skater Scoring Formula</p><p className="mt-3 font-mono text-sm leading-7">(G × 3) + (A × 2) + (+/− × 0.25) + (PIM × 0.2) + PPG + (SHG × 2) + GWG + PPA + (SHA × 2) + (SOG × 0.2) + (FOW × 0.025) + (B × 0.2) + (H × 0.2)</p></div><div className="rounded-xl bg-slate-950 p-5 text-white"><p className="text-xs font-black uppercase tracking-wider text-blue-300">5.2 Goaltender Scoring Formula</p><p className="mt-3 font-mono text-sm leading-7">(W × 3) + T/O + (GA × −0.5) + (S × 0.2) + (SO × 2) + (G × 3) + (A × 2) + (PIM × 0.2)</p></div></div>
       </RuleSection>
 
       <RuleSection id="prospects" number="6" title="Prospects">

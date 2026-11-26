@@ -5,21 +5,16 @@ import PageMeta from "../../components/common/PageMeta";
 import { applyTeamBranding, fetchFantasyTeams, fetchTeamBrandingHistory, type FantasyTeam } from "../../lib/fantasyTeams";
 import { fetchPlayerSeasonsBySeason, type PlayerSeasonWithRelations } from "../../lib/fantasyPlayers";
 import { CURRENT_LEAGUE_SEASON, dashboardSeasons } from "../../lib/leagueSeasons";
-import { fetchBuyoutPenalties, type BuyoutPenalty } from "../../lib/buyouts";
-import { fetchRetentionAdjustments, type RetentionAdjustment } from "../../lib/retentions";
 import { fetchNhlGoalieStats, fetchNhlPlayerLanding, fetchNhlSkaterStats } from "../../lib/nhl";
+import { ACTIVE_ROSTER_POSITIONS, calculateTeamCap, EMPTY_CAP_ADJUSTMENTS, ROSTER_LIMIT } from "../../lib/cap";
+import { fetchTeamCapAdjustmentTotals, type TeamCapAdjustmentTotal } from "../../lib/capAdjustments";
 
 const seasonOptions = dashboardSeasons;
-const rosterLimit = 23;
+const rosterLimit = ROSTER_LIMIT;
 const positionMinimums = { C: 3, LW: 3, RW: 3, D: 6, G: 2 } as const;
-const activePositions = new Set(Object.keys(positionMinimums));
-const capPositions = new Set([...activePositions, "W", "IR", "RETENTION", "BUYOUT"]);
+const activePositions = ACTIVE_ROSTER_POSITIONS;
 const ageRosterPositions = new Set([...activePositions, "W", "IR", "LTIR"]);
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
-
-function salaryCapForSeason(year: number) {
-  return year <= 2026 ? 45_000_000 : 50_000_000;
-}
 
 function position(season: PlayerSeasonWithRelations) {
   return (season.position || "").toUpperCase();
@@ -51,25 +46,23 @@ export default function LeagueDashboard() {
   const [selectedSeason, setSelectedSeason] = useState(CURRENT_LEAGUE_SEASON);
   const [teams, setTeams] = useState<FantasyTeam[]>([]);
   const [seasons, setSeasons] = useState<PlayerSeasonWithRelations[]>([]);
-  const [buyoutPenalties, setBuyoutPenalties] = useState<BuyoutPenalty[]>([]);
-  const [retentionAdjustments, setRetentionAdjustments] = useState<RetentionAdjustment[]>([]);
+  const [capAdjustments, setCapAdjustments] = useState<TeamCapAdjustmentTotal[]>([]);
   const [birthDatesByPlayer, setBirthDatesByPlayer] = useState<Map<string, string>>(new Map());
   const [agesLoading, setAgesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const salaryCap = salaryCapForSeason(selectedSeason);
+  const salaryCap = calculateTeamCap([], selectedSeason).salaryCap;
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError("");
-    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason), fetchBuyoutPenalties(selectedSeason), fetchRetentionAdjustments(selectedSeason)])
-      .then(([teamRows, brandingRows, seasonRows, penaltyRows, adjustmentRows]) => {
+    Promise.all([fetchFantasyTeams(), fetchTeamBrandingHistory(), fetchPlayerSeasonsBySeason(selectedSeason), fetchTeamCapAdjustmentTotals({ seasonYear: selectedSeason })])
+      .then(([teamRows, brandingRows, seasonRows, adjustmentRows]) => {
         if (!active) return;
         setTeams(teamRows.map((team) => applyTeamBranding(team, brandingRows, selectedSeason)));
         setSeasons(seasonRows);
-        setBuyoutPenalties(penaltyRows);
-        setRetentionAdjustments(adjustmentRows);
+        setCapAdjustments(adjustmentRows);
       })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "Unable to load dashboard."); })
       .finally(() => { if (active) setLoading(false); });
@@ -98,11 +91,8 @@ export default function LeagueDashboard() {
   const rows = useMemo<DashboardRow[]>(() => teams
     .map((team) => {
       const roster = seasons.filter((season) => season.fantasy_team_id === team.id);
-      const salarySpent = roster
-        .filter((season) => capPositions.has(position(season)))
-        .reduce((total, season) => total + (season.salary || 0), 0)
-        + buyoutPenalties.filter((penalty) => penalty.fantasy_team_id === team.id).reduce((total, penalty) => total + penalty.amount, 0)
-        + retentionAdjustments.filter((adjustment) => adjustment.fantasy_team_id === team.id).reduce((total, adjustment) => total + adjustment.amount, 0);
+      const adjustment = capAdjustments.find((row) => row.fantasyTeamId === team.id) || EMPTY_CAP_ADJUSTMENTS;
+      const salarySpent = calculateTeamCap(roster, selectedSeason, adjustment).capSalary;
       const counts = Object.fromEntries(Object.keys(positionMinimums).map((code) => [
         code,
         roster.filter((season) => position(season) === code).length,
@@ -120,7 +110,7 @@ export default function LeagueDashboard() {
         counts,
       };
     })
-    .sort((a, b) => a.team.id - b.team.id), [teams, seasons, salaryCap, buyoutPenalties, retentionAdjustments, birthDatesByPlayer, selectedSeason]);
+    .sort((a, b) => a.team.id - b.team.id), [teams, seasons, salaryCap, capAdjustments, birthDatesByPlayer, selectedSeason]);
   const leaguePayroll = rows.reduce((total, row) => total + row.salarySpent, 0);
   const teamsOverCap = rows.filter((row) => row.capSpace < 0).length;
   const rosterSpotsUsed = rows.reduce((total, row) => total + row.rosterSize, 0);

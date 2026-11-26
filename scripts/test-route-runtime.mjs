@@ -29,7 +29,7 @@ const server=createServer(async (request,response)=>{
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 try {
-  for(const scenario of [{path:'/signin'},{path:'/record-book'},{path:'/admin/teams'},{path:'/signin',failedDownload:true}]) {
+  for(const scenario of [{path:'/signin'},{path:'/record-book'},{path:'/player-profile/8480069'},{path:'/admin/teams'},{path:'/signin',failedDownload:true}]) {
     const path=scenario.path; denySignIn=Boolean(scenario.failedDownload);
     const profile=await mkdtemp(join(tmpdir(),'gld-route-browser-'));
     requested=[];
@@ -43,7 +43,7 @@ try {
         continue;
       }
       assert.ok(stdout.includes('Sign In') && stdout.includes('type="email"'),`Sign-in form missing on ${path}`);
-      assert.ok(!requested.some(file=>/\/(?:TeamAdmin|RecordBook|Calendar|LineChart)-/.test(file)),`Unneeded page chunk loaded on ${path}`);
+      assert.ok(!requested.some(file=>/\/(?:TeamAdmin|RecordBook|PlayerProfile|Calendar|LineChart)-/.test(file)),`Unneeded page chunk loaded on ${path}`);
       console.log(`PASS: ${path} renders sign-in/keeps access protection without downloading protected pages or chart/calendar screens.`);
     } finally {await rm(profile,{recursive:true,force:true}).catch(()=>{});}
   }

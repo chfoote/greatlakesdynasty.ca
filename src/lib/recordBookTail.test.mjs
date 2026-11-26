@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {recordBookTail} from '../../shared/record-book-tail.ts';
+const skater={playerId:1,gamesPlayed:10,goals:10,assists:10,plusMinus:2,penaltyMinutes:10,ppGoals:1,ppPoints:2,shGoals:0,shPoints:0,gameWinningGoals:1,shots:20,blockedShots:10,hits:10,totalFaceoffWins:10};
+const goalie={playerId:2,gamesPlayed:10,gamesStarted:10,wins:5,losses:3,otLosses:2,goalsAgainst:20,saves:180,shutouts:1,penaltyMinutes:0,goals:0,assists:1,timeOnIce:36000,shotsAgainst:203};
+const full=()=>({skaters:[{...skater}],goalies:[{...goalie}]});
+const prefix=()=>({skaters:[{...skater,gamesPlayed:4,goals:3,plusMinus:4}],goalies:[{...goalie,gamesPlayed:4,gamesStarted:4,wins:2,losses:1,otLosses:1,goalsAgainst:5,saves:70,shotsAgainst:80,timeOnIce:12000}]});
+test('daily tails subtract closed intervals without mutating full season data',()=>{const source=full(),prior=prefix();const result=recordBookTail(source,[prior]);assert.equal(result.skaters[0].goals,7);assert.equal(result.skaters[0].plusMinus,-2);assert.equal(result.goalies[0].gamesPlayed,6);assert.equal(source.skaters[0].goals,10);assert.equal(prior.skaters[0].goals,3)});
+test('goalie tail rates use actual shots against and seconds played at NHL precision',()=>{const result=recordBookTail(full(),[prefix()]);assert.equal(result.goalies[0].savePct,Math.floor(110/123*100000)/100000);assert.equal(result.goalies[0].goalsAgainstAverage,2.25)});
+test('inconsistent corrections cannot publish a negative tail',()=>{const prior=prefix();prior.skaters[0].goals=11;assert.equal(recordBookTail(full(),[prior]),null)});
+test('a missing raw goalie time field requires the original report',()=>{const source=full();delete source.goalies[0].timeOnIce;assert.equal(recordBookTail(source,[prefix()]),null)});
+test('missing full-season player coverage prevents a partial derived tail',()=>{const prior=prefix();prior.skaters[0].playerId=99;assert.equal(recordBookTail(full(),[prior]),null)});

@@ -406,6 +406,13 @@ counts for planning, avoiding repeated full-season stat downloads by the job.
 The Worker checks one due span at minutes 1, 11, 21, 31, 41 and 51, building full
 seasons before ownership spans and rechecking completed inputs after seven days.
 New daily tails and new transaction boundaries take priority over old spans.
+Current full seasons can reuse the existing saved season baseline. A new daily
+ownership tail can subtract contiguous completed intervals from that baseline;
+raw shots-against and seconds-played fields preserve the NHL rate-stat precision.
+The initial real-data check matched every checked field for 658 skaters and 65
+goalies against the official dated tail report. Missing coverage or inconsistent
+subtractions require the original NHL report. A trade starting today uses the
+shared live box scores directly.
 Requests are paced and bounded; failed, partial, or stale provider reports never
 overwrite saved inputs. The first backfill uses complete, paginated official NHL
 reports from the local connection because the Cloudflare source was rate limited.
@@ -416,3 +423,111 @@ Checks: `node --test src/lib/*.test.mjs worker/*.test.mjs` and
 tabs, historical filtering, rapid tab changes, exact trade ownership credit,
 missing snapshots, and Contracts during an NHL outage. Shared fixtures render
 all tabs with zero league-wide NHL report requests.
+
+Initial verification found all 30 currently required spans populated (32 saved
+rows including superseded spans); a normal remote maintenance check required
+zero NHL reports. The final 222 unit checks and all-five-tab browser scenarios
+passed, as did the production build and Worker dry run.
+
+Record Book production version: `e0984e9f-16cb-43d3-af93-0b47ce96b4c7`.
+
+
+## Record Book sections and Career Earnings
+
+Record Book navigation now contains FPT Leaders, FPT Franchise Leaders,
+Franchise Records, League Records, Best/Worst, Contracts, and Career Earnings.
+Franchise Records always selects one franchise; League Records shows the league
+board without that filter, including when opened from a team Record Book.
+Section links use `/record-book?view=...`; Career Earnings is a dedicated
+protected `/career-earnings` page with a sidebar link and shared navigation.
+
+Career Earnings reuses the same in-memory league inputs and requests no NHL
+statistics. The default ranks recorded annual contract salaries through the
+current season, including its full annual salary. A separate total-contract-value column includes future commitments beside
+earnings so far, with sorting by either amount and split earned/total year
+counts. Search preserves global ranking numbers;
+expandable season lists show each salary and the number of contract years.
+One player-season counts once across trades and duplicate player records.
+Retention cap charges are not additional earnings. Signing history fills cleared
+salary rows through the buyout season; later terminated years are excluded.
+These are recorded annual contract values, not prorated cash payments.
+
+Checks: `node --test src/lib/careerEarnings.test.mjs`,
+`node scripts/test-recordbook-runtime.mjs`, and
+`node scripts/test-career-earnings-runtime.mjs`, plus the full suite and build.
+
+Reorganized Record Book / Career Earnings production version:
+`6605bc3e-d83d-40be-be8f-95a4d785999e`. Validation: 229 unit tests, renamed/split
+Record Book browser checks, Career Earnings browser checks, build and dry run.
+
+Side-by-side earned/total earnings version:
+`75a09ea4-ffaf-4269-a1ac-8de61c941d73`. The page displays both amounts and
+so-far/total year counts at once, ranked by earned so far by default. Ranking
+by total contract value is available without another data request. Salary unit
+checks, browser split/sorting/retry checks, and production build passed.
+
+
+## Separate statistics and money books
+
+The sidebar now separates Leaders & Record Books (`/record-book`) from Contracts &
+Earnings (`/contracts`). Leaders & Record Books contains only FPT Leaders, FPT
+Franchise Leaders, Franchise Records, League Records, and Best/Worst. Contracts &
+Earnings contains Contracts and Career Earnings (`/career-earnings`). The money
+sidebar item remains active on either money page. Existing
+`/record-book?view=contracts` links still open the contract book. The statistics
+capture controls remain in the statistics book. Both books retain the existing
+shared input caches, and the side-by-side earnings calculations are unchanged.
+
+Separate-books production version: `44e0bf16-8627-4026-8e6e-e1d0578251e5`.
+Statistics/money navigation separation, financial-outage behavior, earnings
+sorting/retry browser checks, and production build passed.
+
+Career Earnings profile links use the existing canonical
+`/player-profile?playerId=...` route. The protected legacy
+`/player-profile/:playerId` route redirects to that URL while preserving season
+parameters. Browser checks cover clicking Makar's ID 8480069 from earnings,
+canonical link generation, old-link redirection and authentication protection.
+
+Profile-link fix production version: `013f720c-361b-4173-8478-16d737a9f7e6`.
+
+
+## Sidebar organization
+
+Navigation is grouped by purpose, with My Front Office and Roster Lab first:
+My Team; League; Stats & Records; Trades & Contracts; and Community. Rankings,
+player stats, awards, and Leaders & Record Books live together. Trading,
+auctions, Contracts & Earnings, and the draft share the money/transactions group.
+Around the Horn and Transactions / News sit first in League for frequent access. League Chat lives in Community. Admin
+remains permission-controlled, and signed-out account navigation stays separate.
+All existing destinations and the earnings-page money-menu highlight remain.
+
+Sidebar organization / Leaders & Record Books rename version:
+`fc8be7d6-e5d7-4fd5-aac6-2dbe19cf04c5`. Production build and existing route/auth
+browser smoke checks passed.
+
+Frequent-news navigation version: `03226ce3-70db-4e0e-8d2f-c4de7cc63f48`.
+Around the Horn and Transactions / News now lead the League section; League
+Chat remains under Community. Production build and deployed bundle verification
+passed.
+
+
+## Cap totals and CBA scoring consistency
+
+Public team and league cap pages read team/season adjustment totals from
+`team_cap_adjustment_totals`. The aggregate exposes only buyout totals,
+retention net, and slot counts; player-level financial rows remain protected by
+their existing RLS policies. Database triggers keep the aggregate synchronized
+after adjustment inserts, updates, and deletes. The team page uses one shared
+cap calculator for both its current cards and five-year table, so every season
+includes recorded buyout and retention adjustments. The league cap overview
+uses that same calculation.
+
+The CBA goalie formula now matches the unchanged scoring engine: goalie penalty
+minutes have a positive `0.2` weight, and goalie goals and assists retain their
+existing `3` and `2` weights.
+
+Migrations: `20261126043651_publish_team_cap_adjustment_totals.sql` and
+`20261126044012_lock_down_cap_adjustment_trigger_functions.sql`.
+Production version: `d9f0178e-e9fc-4771-8a87-c431837a2e64`.
+Validation: production build, 231 tests, anonymous REST/RLS read, signed-out
+Hawksville cap rendering, security advisors, and deployed bundle verification.

@@ -4,12 +4,12 @@ import {refreshRecordBookSnapshot,selectRecordBookRange} from './recordBookSnaps
 import {recordBookRanges,recordRangeKey} from '../shared/record-book-ranges.ts';
 const now=Date.parse('2026-11-24T21:00:00Z');
 const skater={playerId:1,skaterFullName:'One',positionCode:'C',gamesPlayed:5,goals:2,assists:1,plusMinus:0,penaltyMinutes:0,ppGoals:0,ppPoints:0,shGoals:0,shPoints:0,gameWinningGoals:0,shots:0,blockedShots:0,hits:0,totalFaceoffWins:0};
-const goalie={playerId:2,goalieFullName:'Two',gamesPlayed:5,gamesStarted:5,wins:2,losses:1,otLosses:0,goalsAgainst:5,saves:50,shutouts:0,penaltyMinutes:0,goals:0,assists:0};
+const goalie={playerId:2,goalieFullName:'Two',gamesPlayed:5,gamesStarted:5,wins:2,losses:1,otLosses:0,goalsAgainst:5,saves:50,shutouts:0,penaltyMinutes:0,goals:0,assists:0,timeOnIce:5000,shotsAgainst:55};
 const full=recordBookRanges([],now).filter((r,i,all)=>all.findIndex(s=>s.season_year===r.season_year)===i);
 function fixture(){
  const state={posts:[],reports:[],boundaries:[{season_year:2027,transaction_date:'2026-11-01',transaction_type:'trade',action:'traded',player_id:1,trade_offer:{trade_offer_players:[{player_season:{player_id:1}}]}}],bases:full.map(r=>({...r,skaters:[skater],goalies:[goalie]})),saved:full.map(r=>({...r,schema_version:1,generated_at:new Date(now).toISOString()})),roster:[{season_year:2027,player_id:1,fantasy_team_id:1,position:'C',player:{player_api_id:'1'}}],fail:false,stale:false,partial:false};
  const options={url:'https://fixture.supabase.co',key:'server-only-test-key',now,
- fetcher:async(input,init)=>{const url=new URL(input);if(init?.method==='POST'){state.posts.push(JSON.parse(init.body));return new Response(null,{status:201})}const table=url.pathname.split('/').at(-1);let rows=table==='league_transactions'?state.boundaries:table==='player_seasons'?state.roster:table==='record_book_range_players'?state.bases.map(base=>({...base,players:[...base.skaters.map(p=>({playerId:p.playerId,positionCode:p.positionCode,gamesPlayed:p.gamesPlayed})),...base.goalies.map(p=>({playerId:p.playerId,positionCode:'G',gamesPlayed:p.gamesPlayed}))]})):state.saved;return Response.json(rows)},
+ fetcher:async(input,init)=>{const url=new URL(input);if(init?.method==='POST'){state.posts.push(JSON.parse(init.body));return new Response(null,{status:201})}const table=url.pathname.split('/').at(-1);let rows=table==='power_ranking_snapshots'?(state.power??[]):table==='league_transactions'?state.boundaries:table==='player_seasons'?state.roster:table==='record_book_range_players'?state.bases.map(base=>({...base,players:[...base.skaters.map(p=>({playerId:p.playerId,positionCode:p.positionCode,gamesPlayed:p.gamesPlayed})),...base.goalies.map(p=>({playerId:p.playerId,positionCode:'G',gamesPlayed:p.gamesPlayed}))]})):url.searchParams.get('select').includes('skaters')?(state.raw??[]):state.saved;return Response.json(rows)},
  getReport:async path=>{state.reports.push(path);if(state.fail)return new Response(null,{status:429});const data=path.includes('/goalie/')?[goalie]:[skater];return Response.json({data,total:state.partial?2:1},{headers:state.stale?{'X-NHL-Stale':'1'}:{}})}};
  return {state,options};
 }
@@ -27,4 +27,16 @@ test('producer plans only the earliest call-up boundary for repeated call-up rec
  state.boundaries=['2026-11-01','2026-11-10'].map(transaction_date=>({player_id:1,season_year:2027,action:'called_up',transaction_type:'signing',transaction_date,trade_offer:null}));
  const result=await refreshRecordBookSnapshot(options);
  assert.equal(result.total,recordBookRanges([state.boundaries[0]],now).length);
+});
+
+
+test('new current full seasons reuse the existing saved baseline without NHL reports',async()=>{
+ const {state,options}=fixture();state.bases=state.bases.filter(row=>row.season_year!==2027);state.saved=state.saved.filter(row=>row.season_year!==2027);
+ state.power=[{source_stats:{skaters:[skater],goalies:[goalie]},generated_at:new Date(now-1000).toISOString()}];
+ const result=await refreshRecordBookSnapshot(options);assert.equal(result.range.season_year,2027);assert.equal(state.reports.length,0);assert.equal(state.posts.length,1);
+});
+test('current tails derive from complete saved season and contiguous prefixes without NHL calls',async()=>{
+ const {state,options}=fixture();const prefix={season_year:2027,start_date:'2026-07-01',end_date:'2026-10-31',schema_version:1,generated_at:new Date(now).toISOString()};state.saved.push(prefix);
+ state.raw=[{...full.find(r=>r.season_year===2027),skaters:[skater],goalies:[goalie]},{...prefix,skaters:[{...skater,gamesPlayed:2,goals:1}],goalies:[{...goalie,gamesPlayed:2,gamesStarted:2,goalsAgainst:2,saves:20,timeOnIce:2000,shotsAgainst:24}]}];
+ const result=await refreshRecordBookSnapshot(options);assert.equal(result.range.start_date,'2026-11-01');assert.equal(state.reports.length,0);assert.equal(state.posts[0].skaters[0].goals,1);assert.equal(state.posts[0].goalies[0].gamesPlayed,3);
 });

@@ -36,111 +36,50 @@ type NavItem = {
   subItems?: { name: string; path: string; pro?: boolean; new?: boolean }[];
 };
 
+const myTeamItems: NavItem[] = [
+  { icon: <DashboardIcon />, name: "My Front Office", path: "/" },
+  { icon: <DashboardIcon />, name: "Roster Lab", path: "/roster-lab" },
+];
+
 const leagueItems: NavItem[] = [
-  {
-    icon: <StandingsIcon />,
-    name: "Standings",
-    path: "/standings",
-  },
-  {
-    icon: <TeamsIcon />,
-    name: "Teams",
-    path: "/teams",
-  },
+  { icon: <GoalHornIcon />, name: "Around the Horn", path: "/goal-horn" },
+  { icon: <TransactionsIcon />, name: "Transactions / News", path: "/transactions" },
+  { icon: <StandingsIcon />, name: "Standings", path: "/standings" },
+  { icon: <TeamsIcon />, name: "Teams", path: "/teams" },
   { icon: <DashboardIcon />, name: "Cap & Roster Overview", path: "/league-dashboard" },
-  {
-    icon: <SkaterIcon />,
-    name: "Skater Stats",
-    path: "/skater-stats",
-  },
-  {
-    icon: <GoalieIcon />,
-    name: "Goalie Stats",
-    path: "/goalie-stats",
-  },
+  { icon: <TeamsIcon />, name: "GM Records", path: "/gms" },
+  { icon: <ReportIcon />, name: "CBA & Rulebook", path: "/cba" },
 ];
 
-const leaguePulseItems: NavItem[] = [
-  {
-    icon: <GoalHornIcon />,
-    name: "Around the Horn",
-    path: "/goal-horn",
-  },
-  {
-    icon: <StandingsIcon />,
-    name: "Power Rankings",
-    path: "/power-rankings",
-  },
-  {
-    icon: <StandingsIcon />,
-    name: "Farm System Rankings",
-    path: "/farm-system-rankings",
-  },
-  {
-    icon: <AwardsIcon />,
-    name: "Awards & Honours",
-    path: "/awards",
-  },
-  {
-    icon: <ReportIcon />,
-    name: "League Record Book",
-    path: "/record-book",
-  },
-  {
-    icon: <TransactionsIcon />,
-    name: "Transactions / News",
-    path: "/transactions",
-  },
+const statsItems: NavItem[] = [
+  { icon: <SkaterIcon />, name: "Skater Stats", path: "/skater-stats" },
+  { icon: <GoalieIcon />, name: "Goalie Stats", path: "/goalie-stats" },
+  { icon: <StandingsIcon />, name: "Power Rankings", path: "/power-rankings" },
+  { icon: <StandingsIcon />, name: "Farm System Rankings", path: "/farm-system-rankings" },
+  { icon: <AwardsIcon />, name: "Awards & Honours", path: "/awards" },
+  { icon: <ReportIcon />, name: "Leaders & Record Books", path: "/record-book" },
 ];
 
-const gmToolItems: NavItem[] = [
-  {
-    icon: <DashboardIcon />,
-    name: "My Front Office",
-    path: "/",
-  },
-  {
-    icon: <TeamsIcon />,
-    name: "GM Records",
-    path: "/gms",
-  },
-  {
-    icon: <ReportIcon />,
-    name: "CBA & Rulebook",
-    path: "/cba",
-  },
-  {
-    icon: <AwardsIcon />,
-    name: "Competitive Balance Draft",
-    path: "/competitive-balance-draft",
-  },
-  {
-    icon: <AuctionIcon />,
-    name: "Auction House",
-    path: "/auction-house",
-  },
-  {
-    icon: <MarketIcon />,
-    name: "Trade Market",
-    path: "/trade-market",
-  },
-  {
-    icon: <TradeIcon />,
-    name: "Trade Manager",
-    path: "/trade-manager",
-  },
-  {
-    icon: <DashboardIcon />,
-    name: "Roster Lab",
-    path: "/roster-lab",
-  },
+const marketItems: NavItem[] = [
+  { icon: <MarketIcon />, name: "Trade Market", path: "/trade-market" },
+  { icon: <TradeIcon />, name: "Trade Manager", path: "/trade-manager" },
+  { icon: <AuctionIcon />, name: "Auction House", path: "/auction-house" },
+  { icon: <ReportIcon />, name: "Contracts & Earnings", path: "/contracts" },
+  { icon: <AwardsIcon />, name: "Competitive Balance Draft", path: "/competitive-balance-draft" },
 ];
 
-const communityItems: NavItem[] = [
+const hubItems: NavItem[] = [
   { icon: <ChatIcon />, name: "League Chat", path: "/league-chat" },
 ];
 
-type MenuType = "league" | "pulse" | "gmTools" | "community" | "admin" | "others";
+type MenuType = "myTeam" | "league" | "stats" | "market" | "hub" | "admin" | "others";
+const memberGroups: {type:MenuType; title:string; items:NavItem[]}[] = [
+  {type:"myTeam", title:"My Team", items:myTeamItems},
+  {type:"league", title:"League", items:leagueItems},
+  {type:"stats", title:"Stats & Records", items:statsItems},
+  {type:"market", title:"Trades & Contracts", items:marketItems},
+  {type:"hub", title:"Community", items:hubItems},
+];
 
 const adminItems: NavItem[] = [
   {
@@ -202,10 +141,11 @@ const othersItems: NavItem[] = [
 ];
 
 const menuItems: Record<MenuType, NavItem[]> = {
+  myTeam: myTeamItems,
   league: leagueItems,
-  pulse: leaguePulseItems,
-  gmTools: gmToolItems,
-  community: communityItems,
+  stats: statsItems,
+  market: marketItems,
+  hub: hubItems,
   admin: adminItems,
   others: othersItems,
 };
@@ -226,8 +166,13 @@ const AppSidebar: React.FC = () => {
 
   // const isActive = (path: string) => location.pathname === path;
   const isActive = useCallback(
-    (path: string) => location.pathname === path,
-    [location.pathname]
+    (path: string) => {
+      const legacyMoney=location.pathname==="/record-book"&&new URLSearchParams(location.search).get("view")==="contracts";
+      if(path==="/contracts")return location.pathname==="/contracts"||location.pathname==="/career-earnings"||legacyMoney;
+      if(path==="/record-book"&&legacyMoney)return false;
+      return location.pathname===path;
+    },
+    [location.pathname,location.search]
   );
 
   useEffect(() => {
@@ -446,50 +391,12 @@ const AppSidebar: React.FC = () => {
       <div className="no-scrollbar flex min-h-0 flex-1 touch-pan-y flex-col overflow-y-auto overscroll-contain pb-[calc(1.5rem+env(safe-area-inset-bottom))] duration-300 ease-linear [-webkit-overflow-scrolling:touch]">
         <nav className="mb-6">
           <div className="flex flex-col gap-4">
-            <div>
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !isExpanded && !isHovered
-                    ? "lg:justify-center"
-                    : "justify-start"
-                }`}
-              >
-                {isExpanded || isHovered || isMobileOpen ? (
-                  "League"
-                ) : (
-                  <HorizontaLDots className="size-6" />
-                )}
-              </h2>
-              {renderMenuItems(leagueItems, "league")}
-            </div>
-            <div>
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !isExpanded && !isHovered
-                    ? "lg:justify-center"
-                    : "justify-start"
-                }`}
-              >
-                {isExpanded || isHovered || isMobileOpen ? (
-                  "League Pulse"
-                ) : (
-                  <HorizontaLDots />
-                )}
-              </h2>
-              {renderMenuItems(leaguePulseItems, "pulse")}
-            </div>
-            <div>
+            {memberGroups.map(group=><div key={group.type}>
               <h2 className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${!isExpanded && !isHovered ? "lg:justify-center" : "justify-start"}`}>
-                {isExpanded || isHovered || isMobileOpen ? "GM Tools" : <HorizontaLDots />}
+                {isExpanded || isHovered || isMobileOpen ? group.title : <HorizontaLDots className="size-6" />}
               </h2>
-              {renderMenuItems(gmToolItems, "gmTools")}
-            </div>
-            <div>
-              <h2 className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${!isExpanded && !isHovered ? "lg:justify-center" : "justify-start"}`}>
-                {isExpanded || isHovered || isMobileOpen ? "Community" : <HorizontaLDots />}
-              </h2>
-              {renderMenuItems(communityItems, "community")}
-            </div>
+              {renderMenuItems(group.items,group.type)}
+            </div>)}
             {isAdmin && (
               <div>
                 <h2
@@ -517,7 +424,7 @@ const AppSidebar: React.FC = () => {
                 }`}
               >
                 {isExpanded || isHovered || isMobileOpen ? (
-                  "Others"
+                  "Account"
                 ) : (
                   <HorizontaLDots />
                 )}

@@ -1,8 +1,9 @@
+import RecordBookTabs, {recordBookTabs, type RecordBookTab} from "../../components/hockey/RecordBookTabs";
 import { useNhlDataRevision } from "../../lib/useNhlDataRevision";
 import NhlHeadshot from "../../components/hockey/NhlHeadshot";
 import type { RecordBookSection } from "../../lib/recordBook";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams, useLocation } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import { useAuth } from "../../context/AuthContext";
@@ -13,11 +14,10 @@ import PositionBadge from "../../components/hockey/PositionBadge";
 
 import { CURRENT_LEAGUE_SEASON, playedAndCurrentSeasons } from "../../lib/leagueSeasons";
 const seasons = playedAndCurrentSeasons;
-const categories = ["Leaders – Position", "Leaders – Positional by Franchise", "Franchise Records", "Seasonal – Positional Records", "Contracts"] as const;
-type Category = typeof categories[number];
+type Category = Exclude<RecordBookTab,"Career Earnings">;
 const sections: Record<Category, RecordBookSection> = {
-  "Leaders – Position": "leaders", "Leaders – Positional by Franchise": "franchise",
-  "Franchise Records": "franchise", "Seasonal – Positional Records": "season", "Contracts": "contracts",
+  "FPT Leaders":"leaders", "FPT Franchise Leaders":"franchise", "Franchise Records":"franchise",
+  "League Records":"franchise", "Best/Worst":"season", "Contracts":"contracts",
 };
 
 const playerPositionSections = [
@@ -117,18 +117,24 @@ function PlayerRecordCard({ entry, label, position }: { entry?: RecordBookEntry;
 }
 
 export default function RecordBook() {
+  const location=useLocation();
   const { abbreviation } = useParams();
   const { isAdmin } = useAuth();
   const [team, setTeam] = useState<FantasyTeam | null>(null);
   const [season, setSeason] = useState<number | null>(null);
-  const [category, setCategory] = useState<Category>("Leaders – Position");
+  const [params,setParams]=useSearchParams();
+  const moneyBook=location.pathname==="/contracts"||params.get("view")==="contracts";
+  const selectedTab=recordBookTabs.find(tab=>tab.view===params.get("view")&&tab.label!=="Career Earnings"&&(moneyBook?tab.label==="Contracts":tab.label!=="Contracts"));
+  const category=(selectedTab?.label||(moneyBook?"Contracts":"FPT Leaders")) as Category;
+  const setCategory=(label:Category)=>setParams(previous=>{const next=new URLSearchParams(previous);next.set("view",recordBookTabs.find(tab=>tab.label===label)!.view);return next;});
   const [entries, setEntries] = useState<RecordBookEntry[]>([]);
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
   const [positionLeaders, setPositionLeaders] = useState<ScoringLeader[]>([]);
   const [franchisePositionLeaders, setFranchisePositionLeaders] = useState<ScoringLeader[]>([]);
   const [franchiseStatLines, setFranchiseStatLines] = useState<FranchiseStatLine[]>([]);
   const [previousFranchiseStatLines, setPreviousFranchiseStatLines] = useState<FranchiseStatLine[] | null>(null);
-  const [recordScope, setRecordScope] = useState<"league" | "franchise">("league");
+  const recordScope=category==="Franchise Records"?"franchise":"league";
+  const scopeTeamId=category==="League Records"?null:team?.id||null;
   const [franchises, setFranchises] = useState<FantasyTeam[]>([]);
   const [selectedFranchiseId, setSelectedFranchiseId] = useState<number | null>(null);
   const [history, setHistory] = useState<RecordHistoryEvent[]>([]);
@@ -156,13 +162,13 @@ export default function RecordBook() {
   const revision = useNhlDataRevision(season ? [`league-season:${season}`, `skaters:${(season - 1) * 10000 + season}`, `goalies:${(season - 1) * 10000 + season}`] : []);
   const load = useCallback(async (background = false) => {
     const generation = ++loadGeneration.current;
-    const saved=readRecordBookData(team?.id||null,season,undefined,section);
+    const saved=readRecordBookData(scopeTeamId,season,undefined,section);
     if (!background) {
       setError(""); setWarnings(saved?.warnings||[]); setLoading(!saved);
       if(saved){setEntries(saved.entries);setContracts(saved.contracts);setPositionLeaders(saved.positionLeaders);setFranchisePositionLeaders(saved.franchisePositionLeaders);setFranchiseStatLines(saved.franchiseStatLines);setFranchises(saved.teams);setHistory(saved.history);}
     }
     try {
-      const result = await fetchRecordBookData(team?.id || null, season, undefined, section);
+      const result = await fetchRecordBookData(scopeTeamId, season, undefined, section);
       if (generation !== loadGeneration.current) return;
       setEntries(result.entries); setContracts(result.contracts); setPositionLeaders(result.positionLeaders);
       setFranchisePositionLeaders(result.franchisePositionLeaders); setFranchiseStatLines(result.franchiseStatLines);
@@ -174,7 +180,7 @@ export default function RecordBook() {
         else setError(message);
       }
     } finally { if (generation === loadGeneration.current) setLoading(false); }
-  }, [team?.id, season, section]);
+  }, [scopeTeamId, season, section]);
 
   useEffect(() => {
     if (abbreviation && (!team || team.abbreviation.toLowerCase() !== abbreviation.toLowerCase())) return;
@@ -190,23 +196,24 @@ export default function RecordBook() {
 
   useEffect(() => {
     setPreviousFranchiseStatLines(null);
-    if (category !== "Franchise Records" || (abbreviation && !team)) return;
+    if (!["Franchise Records","League Records"].includes(category) || (abbreviation && !team)) return;
     if (loading || error || !franchiseStatLines.length || (season !== null && season < CURRENT_LEAGUE_SEASON)) return;
     let active = true;
     // Compare the live standings with the end of the hockey day before last
     // night's games. Using -1 here includes those games on both sides once the
     // 6 a.m. rollover has passed, which makes genuine movement disappear.
-    void fetchRecordBookData(team?.id || null, season, getNhlStatsDate(-2), "franchise")
+    void fetchRecordBookData(scopeTeamId, season, getNhlStatsDate(-2), "franchise")
       .then((result) => { if (active) setPreviousFranchiseStatLines(result.franchiseStatLines); })
       .catch(() => { if (active) setPreviousFranchiseStatLines(null); });
     return () => { active = false; };
-  }, [category, season, team, abbreviation, loading, error, franchiseStatLines]);
+  }, [category, season, scopeTeamId, team, abbreviation, loading, error, franchiseStatLines]);
 
   const playerEntries = entries.filter(entry => entry.category === "Player Performance");
-  const title = team ? `${team.team_name} Record Book` : "League Record Book";
+  const bookTitle=moneyBook?"Contracts & Earnings":"Leaders & Record Books";
+  const title = team ? `${team.team_name} ${bookTitle}` : bookTitle;
 
   useEffect(() => {
-    if (team) { setSelectedFranchiseId(team.id); setRecordScope("franchise"); }
+    if (team) { setSelectedFranchiseId(team.id); }
     else if (!selectedFranchiseId && franchises.length) setSelectedFranchiseId(franchises[0].id);
   }, [team, franchises, selectedFranchiseId]);
 
@@ -222,21 +229,22 @@ export default function RecordBook() {
     <PageMeta title={`${title} | GLDHL`} description="Great Lakes Dynasty Hockey League records and milestones" />
     <PageBreadcrumb pageTitle={title} />
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4 lg:flex-row lg:items-end lg:justify-between"><div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 lg:flex-wrap lg:overflow-visible">{categories.map((item) => <button key={item} type="button" onClick={() => setCategory(item)} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold ${category === item ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>{item}</button>)}</div><label className="text-xs font-bold uppercase text-gray-500">Season<select value={season ?? "all"} onChange={(event) => setSeason(event.target.value === "all" ? null : Number(event.target.value))} className="mt-1 block h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white sm:w-auto sm:min-w-32"><option value="all">All Time</option>{seasons.map((year) => <option key={year}>{year}</option>)}</select></label></div>
+      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-white/[0.03] sm:p-4 lg:flex-row lg:items-end lg:justify-between"><RecordBookTabs active={category} onSelect={setCategory} /><label className="text-xs font-bold uppercase text-gray-500">Season<select value={season ?? "all"} onChange={(event) => setSeason(event.target.value === "all" ? null : Number(event.target.value))} className="mt-1 block h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white sm:w-auto sm:min-w-32"><option value="all">All Time</option>{seasons.map((year) => <option key={year}>{year}</option>)}</select></label></div>
 
-      {category === "Leaders – Positional by Franchise" && <section className="rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-500/30 dark:bg-brand-500/10"><label className="block text-xs font-black uppercase tracking-[0.16em] text-brand-700 dark:text-brand-300">Select Franchise<select value={selectedFranchiseId ?? ""} disabled={Boolean(team)} onChange={(event) => setSelectedFranchiseId(Number(event.target.value))} className="mt-2 block h-11 w-full rounded-lg border border-brand-200 bg-white px-3 text-sm font-bold text-gray-800 disabled:cursor-not-allowed disabled:opacity-70 dark:border-brand-500/30 dark:bg-gray-900 dark:text-white sm:max-w-sm">{franchises.map((franchise) => <option key={franchise.id} value={franchise.id}>{franchise.team_name}</option>)}</select></label><p className="mt-2 text-xs text-brand-700 dark:text-brand-300">Only points earned for the selected franchise are included. Historical points stay with the team that owned the player at season’s end.</p></section>}
+      {category === "FPT Franchise Leaders" && <section className="rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-500/30 dark:bg-brand-500/10"><label className="block text-xs font-black uppercase tracking-[0.16em] text-brand-700 dark:text-brand-300">Select Franchise<select value={selectedFranchiseId ?? ""} disabled={Boolean(team)} onChange={(event) => setSelectedFranchiseId(Number(event.target.value))} className="mt-2 block h-11 w-full rounded-lg border border-brand-200 bg-white px-3 text-sm font-bold text-gray-800 disabled:cursor-not-allowed disabled:opacity-70 dark:border-brand-500/30 dark:bg-gray-900 dark:text-white sm:max-w-sm">{franchises.map((franchise) => <option key={franchise.id} value={franchise.id}>{franchise.team_name}</option>)}</select></label><p className="mt-2 text-xs text-brand-700 dark:text-brand-300">Only points earned for the selected franchise are included. Points stay with the franchise that owned the player when they were earned.</p></section>}
 
-      {category === "Franchise Records" && <section className="rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-500/30 dark:bg-brand-500/10"><div className="flex flex-wrap gap-2"><button type="button" disabled={Boolean(team)} onClick={() => setRecordScope("league")} className={`rounded-lg px-4 py-2 text-sm font-black ${recordScope === "league" ? "bg-brand-600 text-white" : "bg-white text-gray-600 dark:bg-gray-900 dark:text-gray-300"}`}>League All-Time</button><button type="button" onClick={() => setRecordScope("franchise")} className={`rounded-lg px-4 py-2 text-sm font-black ${recordScope === "franchise" ? "bg-brand-600 text-white" : "bg-white text-gray-600 dark:bg-gray-900 dark:text-gray-300"}`}>By Franchise</button></div>{recordScope === "franchise" && <label className="mt-4 block text-xs font-black uppercase tracking-[0.16em] text-brand-700 dark:text-brand-300">Select Franchise<select value={selectedFranchiseId ?? ""} disabled={Boolean(team)} onChange={(event) => setSelectedFranchiseId(Number(event.target.value))} className="mt-2 block h-11 w-full rounded-lg border border-brand-200 bg-white px-3 text-sm font-bold text-gray-800 disabled:cursor-not-allowed disabled:opacity-70 dark:border-brand-500/30 dark:bg-gray-900 dark:text-white sm:max-w-sm">{franchises.map((franchise) => <option key={franchise.id} value={franchise.id}>{franchise.team_name}</option>)}</select></label>}<p className="mt-3 text-xs text-brand-700 dark:text-brand-300">Stats are credited to the franchise that owned the player when they were earned, including players traded during a season.</p></section>}
+      {category === "Franchise Records" && <section className="rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-500/30 dark:bg-brand-500/10"><label className="block text-xs font-black uppercase tracking-[0.16em] text-brand-700 dark:text-brand-300">Select Franchise<select value={selectedFranchiseId ?? ""} disabled={Boolean(team)} onChange={event=>setSelectedFranchiseId(Number(event.target.value))} className="mt-2 block h-11 w-full rounded-lg border border-brand-200 bg-white px-3 text-sm font-bold dark:border-brand-500/30 dark:bg-gray-900 dark:text-white sm:max-w-sm">{franchises.map(franchise=><option key={franchise.id} value={franchise.id}>{franchise.team_name}</option>)}</select></label><p className="mt-3 text-xs text-brand-700 dark:text-brand-300">Records for the selected franchise, credited when each player earned them.</p></section>}
 
-      {isAdmin && !team && <section className="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="font-bold text-blue-950 dark:text-blue-200">Daily Record Snapshot</h2><p className="mt-1 text-xs text-blue-700 dark:text-blue-300">Capture or safely re-run a completed hockey date. Dates roll over at 6:00 AM Eastern.</p></div><div className="flex gap-2"><input type="date" max={getNhlStatsDate(-1)} value={syncDate} onChange={(event) => setSyncDate(event.target.value)} className="h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm dark:border-blue-500/30 dark:bg-gray-900" /><button type="button" disabled={syncing || !syncDate} onClick={() => void syncDateSnapshot()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{syncing ? "Capturing…" : "Capture Date"}</button></div></div>{syncMessage && <p className="mt-3 text-sm font-semibold text-success-700 dark:text-success-300">{syncMessage}</p>}</section>}
+
+      {isAdmin && !team && !moneyBook && <section className="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="font-bold text-blue-950 dark:text-blue-200">Daily Record Snapshot</h2><p className="mt-1 text-xs text-blue-700 dark:text-blue-300">Capture or safely re-run a completed hockey date. Dates roll over at 6:00 AM Eastern.</p></div><div className="flex gap-2"><input type="date" max={getNhlStatsDate(-1)} value={syncDate} onChange={(event) => setSyncDate(event.target.value)} className="h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm dark:border-blue-500/30 dark:bg-gray-900" /><button type="button" disabled={syncing || !syncDate} onClick={() => void syncDateSnapshot()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{syncing ? "Capturing…" : "Capture Date"}</button></div></div>{syncMessage && <p className="mt-3 text-sm font-semibold text-success-700 dark:text-success-300">{syncMessage}</p>}</section>}
 
       {warnings.length > 0 && <p role="status" className="text-sm text-gray-500 dark:text-gray-400">{warnings.join(" ")}</p>}
       {error && <p role="alert" className="rounded-xl border border-error-200 bg-error-50 p-4 text-sm text-error-700">{error}</p>}
       {loading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="h-64 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-800" />)}</div>
-        : error ? null : category === "Seasonal – Positional Records" ? <div className="space-y-5 sm:space-y-6">{playerPositionSections.map((section) => <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Seasonal Records` : "Seasonal Positional Records"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view records →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">{section.labels.map((label) => { const entry = playerEntries.find((candidate) => candidate.label === label); return <PlayerRecordCard key={label} entry={entry} label={label} position={section.code} />; })}</div></section>)}</div>
+        : error ? null : category === "Best/Worst" ? <div className="space-y-5 sm:space-y-6">{playerPositionSections.map((section) => <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Seasonal Records` : "Best/Worst"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">{section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view records →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">{section.labels.map((label) => { const entry = playerEntries.find((candidate) => candidate.label === label); return <PlayerRecordCard key={label} entry={entry} label={label} position={section.code} />; })}</div></section>)}</div>
         : category === "Contracts" ? <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const positionContracts = contracts.filter((contract) => contract.position === section.code); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-300">{season ? `${season} Contract Book` : "All-Time Contract Book"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view contracts →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const contract = positionContracts[index]; return <ContractRecordCard key={contract?.key || `${section.code}-${index}`} contract={contract} rank={index + 1} position={section.code} />; })}</div></section>; })}</div>
-        : category === "Franchise Records" ? (() => { const scoped = recordScope === "franchise" ? franchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : franchiseStatLines; const previousScoped = previousFranchiseStatLines ? (recordScope === "franchise" ? previousFranchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : previousFranchiseStatLines) : null; const scopeName = recordScope === "franchise" ? franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise" : "League All-Time"; const limit = recordScope === "franchise" ? 10 as const : LEAGUE_RECORD_LIMIT; return <div className="space-y-5 sm:space-y-6"><FranchiseRecordsTable title={`${scopeName} · Skaters`} lines={scoped.filter((line) => line.skater)} previousLines={previousScoped?.filter((line) => line.skater) ?? null} kind="skater" limit={limit} /><FranchiseRecordsTable title={`${scopeName} · Goalies`} lines={scoped.filter((line) => line.goalie)} previousLines={previousScoped?.filter((line) => line.goalie) ?? null} kind="goalie" limit={limit} /></div>; })()
-        : <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const franchiseView = category === "Leaders – Positional by Franchise"; const source = franchiseView ? franchisePositionLeaders.filter((leader) => leader.team?.id === selectedFranchiseId) : positionLeaders; const positionRows = source.filter((leader) => leader.position === section.code).slice(0, 5); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Leaders` : "All-Time Leaders"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}{franchiseView ? ` · ${franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise"}` : ""}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view leaders →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const leader = positionRows[index]; return <LeaderCard key={leader?.key || `${section.code}-${index}`} leader={leader} rank={index + 1} position={section.code} franchiseView={franchiseView} />; })}</div></section>; })}</div>}
+        : (category === "Franchise Records" || category === "League Records") ? (() => { const scoped = recordScope === "franchise" ? franchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : franchiseStatLines; const previousScoped = previousFranchiseStatLines ? (recordScope === "franchise" ? previousFranchiseStatLines.filter((line) => line.team?.id === selectedFranchiseId) : previousFranchiseStatLines) : null; const scopeName = recordScope === "franchise" ? franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise" : "League Records"; const limit = recordScope === "franchise" ? 10 as const : LEAGUE_RECORD_LIMIT; return <div className="space-y-5 sm:space-y-6"><FranchiseRecordsTable title={`${scopeName} · Skaters`} lines={scoped.filter((line) => line.skater)} previousLines={previousScoped?.filter((line) => line.skater) ?? null} kind="skater" limit={limit} /><FranchiseRecordsTable title={`${scopeName} · Goalies`} lines={scoped.filter((line) => line.goalie)} previousLines={previousScoped?.filter((line) => line.goalie) ?? null} kind="goalie" limit={limit} /></div>; })()
+        : <div className="space-y-5 sm:space-y-6">{contractPositionSections.map((section) => { const franchiseView = category === "FPT Franchise Leaders"; const source = franchiseView ? franchisePositionLeaders.filter((leader) => leader.team?.id === selectedFranchiseId) : positionLeaders; const positionRows = source.filter((leader) => leader.position === section.code).slice(0, 5); return <section key={section.code} className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]"><div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800 sm:px-5 sm:py-4"><p className="text-[10px] font-black uppercase tracking-[0.2em] text-brand-500">{season ? `${season} Leaders` : "All-Time Leaders"}</p><h2 className="text-xl font-black text-gray-900 dark:text-white">Top 5 {section.title}{franchiseView ? ` · ${franchises.find((franchise) => franchise.id === selectedFranchiseId)?.team_name || "Franchise"}` : ""}</h2><p className="mt-1 text-[10px] font-semibold uppercase text-gray-400 sm:hidden">Swipe to view leaders →</p></div><div className="flex snap-x snap-mandatory gap-4 overflow-x-auto p-4 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-5">{Array.from({ length: 5 }, (_, index) => { const leader = positionRows[index]; return <LeaderCard key={leader?.key || `${section.code}-${index}`} leader={leader} rank={index + 1} position={section.code} franchiseView={franchiseView} />; })}</div></section>; })}</div>}
       {!loading && history.length > 0 && <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]"><div className="border-b border-gray-200 px-5 py-4 dark:border-gray-800"><p className="text-[10px] font-black uppercase tracking-[0.18em] text-brand-500">Record Progression</p><h2 className="text-xl font-black text-gray-900 dark:text-white">When history changed</h2></div><div className="divide-y divide-gray-100 dark:divide-gray-800">{history.map((event) => <article key={event.id} className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-bold text-gray-900 dark:text-white">{event.holder_name}</p><p className="text-xs text-gray-500">{event.record_key.replace(/-/g, " ")} · {event.period_start || new Date(event.achieved_at).toLocaleDateString("en-CA")}</p></div><div className="text-left sm:text-right"><p className="font-black text-brand-600 dark:text-brand-300">{event.record_value.toLocaleString("en-CA", { maximumFractionDigits: 2 })}</p><p className="text-[10px] uppercase text-gray-400">{event.previous_value == null ? "First recorded mark" : `Previous: ${event.previous_value.toLocaleString("en-CA", { maximumFractionDigits: 2 })}`}</p></div></article>)}</div></section>}
     </div>
   </div>;

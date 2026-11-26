@@ -16,10 +16,10 @@ export function recordBookTail(full:RecordStats,prefixes:RecordStats[]):RecordSt
     }).filter(row=>row.gamesPlayed>0);
   }
   const skaters=subtract(full.skaters,prefixes.flatMap(p=>p.skaters),skaterFields);
-  const goalies=subtract(full.goalies,prefixes.flatMap(p=>p.goalies),[...goalieFields,'timeOnIce']).map(row=>{
+  const goalies=subtract(full.goalies,prefixes.flatMap(p=>p.goalies),[...goalieFields,'timeOnIce','shotsAgainst']).map(row=>{
     if(row.timeOnIce<=0)invalid=true;
     return {...row,goalsAgainstAverage:Math.floor(row.goalsAgainst*3600/row.timeOnIce*100000)/100000,
-      savePct:row.saves+row.goalsAgainst?Math.floor(row.saves/(row.saves+row.goalsAgainst)*100000)/100000:null};
+      savePct:row.shotsAgainst?Math.floor(row.saves/row.shotsAgainst*100000)/100000:null};
   });
   return invalid?null:{skaters:skaters as NhlSkaterRecord[],goalies:goalies as NhlGoalieRecord[]};
 }

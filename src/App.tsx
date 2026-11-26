@@ -1,3 +1,4 @@
+import LegacyPlayerProfileRedirect from "./components/common/LegacyPlayerProfileRedirect";
 import { lazy, Suspense, type ComponentType } from "react";
 
 import { BrowserRouter as Router, Routes, Route } from "react-router";
@@ -58,6 +59,7 @@ const PowerRankings = lazyPage(() => import("./pages/League/PowerRankings"));
 const GmCentre = lazyPage(() => import("./pages/League/GmCentre"));
 const GmProfile = lazyPage(() => import("./pages/League/GmProfile"));
 const GmTradeNetwork = lazyPage(() => import("./pages/League/GmTradeNetwork"));
+const CareerEarnings = lazyPage(() => import("./pages/League/CareerEarnings"));
 const RecordBook = lazyPage(() => import("./pages/League/RecordBook"));
 const Rulebook = lazyPage(() => import("./pages/League/Rulebook"));
 const CompetitiveBalanceDraft = lazyPage(() => import("./pages/League/CompetitiveBalanceDraft"));
@@ -94,6 +96,7 @@ export default function App() {
               <Route path="/batter-stats" element={<SkaterStats />} />
               <Route path="/pitcher-stats" element={<GoalieStats />} />
               <Route path="/player-profile" element={<PlayerProfile />} />
+              <Route path="/player-profile/:playerId" element={<LegacyPlayerProfileRedirect />} />
               <Route path="/trade-manager" element={<TradeManager />} />
               <Route path="/roster-lab" element={<RosterLab />} />
               <Route path="/trade-market" element={<TradeMarket />} />
@@ -102,6 +105,8 @@ export default function App() {
               <Route path="/power-rankings" element={<PowerRankings />} />
               <Route path="/goal-horn" element={<GoalHorn />} />
               <Route path="/record-book" element={<RecordBook />} />
+              <Route path="/contracts" element={<RecordBook />} />
+              <Route path="/career-earnings" element={<CareerEarnings />} />
               <Route path="/cba" element={<Rulebook />} />
               <Route path="/competitive-balance-draft" element={<CompetitiveBalanceDraft />} />
               <Route path="/gms" element={<GmCentre />} />
